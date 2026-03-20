@@ -1,6 +1,6 @@
 use super::chat;
 use super::input;
-use super::message::{Message, Role};
+use gantry_types::Message;
 
 use ratatui::{
     layout::{Constraint, Direction, Layout},
@@ -18,17 +18,6 @@ impl App {
             messages: Vec::new(),
             input_buffer: String::new(),
         }
-    }
-
-    pub fn send_message(&mut self, content: String) {
-        if content.trim().is_empty() {
-            return;
-        }
-
-        self.messages
-            .push(Message::new(Role::User, content.clone()));
-        self.messages
-            .push(Message::new(Role::Assistant, format!("Echo: {}", content)));
     }
 
     pub fn render(&self, frame: &mut Frame) {

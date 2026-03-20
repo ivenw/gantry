@@ -1,0 +1,16 @@
+[package]
+name = "gantry"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "gantry"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+tokio.workspace = true
+gantry-types = { path = "../crates/gantry-types" }
+gantry-proto = { path = "../crates/gantry-proto" }

@@ -53,7 +53,7 @@ impl<'a> Widget for Chat<'a> {
             area.y
         };
 
-        let visible_messages: Vec<&Message> = self.messages.iter().collect();
+        let visible_messages: Vec<Message> = self.messages.to_vec();
         let mut y = start_y;
 
         for message in visible_messages {

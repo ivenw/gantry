@@ -1,0 +1,15 @@
+[package]
+name = "gantry-server"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "gantry-server"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+jsonrpsee.workspace = true
+gantry-types = { path = "../crates/gantry-types" }
+gantry-proto = { path = "../crates/gantry-proto" }

@@ -1,19 +1,13 @@
-use ratatui::style::Color;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Role {
     User,
     Assistant,
 }
 
 impl Role {
-    pub fn style(&self) -> Color {
-        match self {
-            Role::User => Color::LightGreen,
-            Role::Assistant => Color::LightBlue,
-        }
-    }
-
     pub fn label(&self) -> &'static str {
         match self {
             Role::User => "You",
@@ -22,7 +16,8 @@ impl Role {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Message {
     pub role: Role,
     pub content: String,
