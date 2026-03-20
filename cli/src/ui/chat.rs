@@ -70,11 +70,13 @@ impl<'a> Widget for Chat<'a> {
             let content = match message.role {
                 Role::User => format!("│ {}", message.content),
                 Role::Assistant => message.content.clone(),
+                Role::Error => message.content.clone(),
             };
 
             let style = match message.role {
                 Role::User => Style::default().fg(ratatui::style::Color::White),
                 Role::Assistant => Style::default(),
+                Role::Error => Style::default().fg(ratatui::style::Color::Red),
             };
 
             let paragraph = Paragraph::new(Text::raw(&content))
