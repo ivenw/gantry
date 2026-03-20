@@ -10,11 +10,15 @@ use crate::ui::{Message, Role};
 
 pub struct Chat<'a> {
     messages: &'a [Message],
+    streaming_content: Option<String>,
 }
 
 impl<'a> Chat<'a> {
-    pub fn new(messages: &'a [Message]) -> Self {
-        Self { messages }
+    pub fn new(messages: &'a [Message], streaming_content: Option<String>) -> Self {
+        Self {
+            messages,
+            streaming_content,
+        }
     }
 
     fn calc_msg_height(content: &str, width: u16) -> u16 {
@@ -24,6 +28,12 @@ impl<'a> Chat<'a> {
         let char_count = content.chars().count();
         let wrapped_lines = (char_count + width as usize - 1) / width as usize;
         wrapped_lines as u16
+    }
+
+    fn streaming_message_idx(&self) -> Option<usize> {
+        self.messages
+            .iter()
+            .rposition(|m| m.role == Role::Assistant)
     }
 }
 
@@ -67,11 +77,22 @@ impl<'a> Widget for Chat<'a> {
                 break;
             }
 
-            let content = match message.role {
+            let is_last_assistant = message.role == Role::Assistant
+                && self.streaming_content.is_some()
+                && self
+                    .streaming_message_idx()
+                    .map(|idx| message.content == self.messages[idx].content)
+                    .unwrap_or(false);
+
+            let mut content = match message.role {
                 Role::User => format!("│ {}", message.content),
                 Role::Assistant => message.content.clone(),
                 Role::Error => message.content.clone(),
             };
+
+            if is_last_assistant {
+                content.push('▍');
+            }
 
             let style = match message.role {
                 Role::User => Style::default().fg(ratatui::style::Color::White),
