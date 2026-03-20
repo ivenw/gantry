@@ -1,6 +1,6 @@
 use super::chat;
 use super::input;
-use gantry_types::Message;
+use gantry_contract::Message;
 
 use ratatui::{
     layout::{Constraint, Direction, Layout},
@@ -28,15 +28,15 @@ impl App {
     }
 
     pub fn add_user_message(&mut self, content: String) {
-        self.messages
-            .push(Message::new(gantry_types::Role::User, content));
+            self.messages
+            .push(Message::new(gantry_contract::Role::User, content));
     }
 
     pub fn start_streaming_message(&mut self) {
         self.streaming_content = Some(String::new());
         self.streaming_message_idx = Some(self.messages.len());
         self.messages
-            .push(Message::new(gantry_types::Role::Assistant, String::new()));
+            .push(Message::new(gantry_contract::Role::Assistant, String::new()));
     }
 
     pub fn append_to_streaming(&mut self, content: &str) {

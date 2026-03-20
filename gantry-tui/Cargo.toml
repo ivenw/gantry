@@ -1,0 +1,16 @@
+[package]
+name = "gantry-tui"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "gantry-tui"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+tokio.workspace = true
+gantry-client = { path = "../gantry-client" }
+gantry-contract = { path = "../gantry-contract" }
