@@ -1,4 +1,4 @@
-use gantry_contract::AppEvent;
+use crate::AppEvent;
 use tokio::sync::broadcast;
 
 #[derive(Clone)]

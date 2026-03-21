@@ -1,13 +1,14 @@
-pub mod app;
-pub mod transport;
-
 use anyhow::Result;
-use app::llm_port::OllamaLlmAdapter;
-use app::service::AppService;
-use std::sync::Arc;
+use gantry_core::{
+    AppService, ConfiguredModel, ModelId, OllamaProviderConfig, ProviderConfig,
+    ProviderConfigCatalog, ProviderId, RigAgentFactory,
+};
+use gantry_rpc::server::start_app_rpc_server;
 
 const DEFAULT_ADDR: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 3444;
+const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
+const DEFAULT_OLLAMA_MODEL: &str = "ministral-3:3b";
 
 pub async fn run_from_env() -> Result<()> {
     let addr = std::env::var("GANTRY_ADDR").unwrap_or_else(|_| DEFAULT_ADDR.to_string());
@@ -23,10 +24,27 @@ pub async fn run_server(addr: &str, port: u16) -> Result<()> {
     println!("Starting Gantry server...");
     println!("WS RPC Address: {}:{}", addr, port);
 
-    let llm = Arc::new(OllamaLlmAdapter::new().await?);
-    let app = AppService::new(llm);
+    let ollama_url =
+        std::env::var("GANTRY_OLLAMA_URL").unwrap_or_else(|_| DEFAULT_OLLAMA_URL.to_string());
+    let ollama_model =
+        std::env::var("GANTRY_OLLAMA_MODEL").unwrap_or_else(|_| DEFAULT_OLLAMA_MODEL.to_string());
+    let catalog = ProviderConfigCatalog {
+        providers: vec![ProviderConfig::Ollama(OllamaProviderConfig {
+            id: ProviderId::new("ollama"),
+            base_url: ollama_url,
+            models: vec![ConfiguredModel {
+                id: ModelId::new("default"),
+                provider_model_name: ollama_model,
+            }],
+            default_model: ModelId::new("default"),
+        })],
+        default_provider: ProviderId::new("ollama"),
+    };
 
-    let rpc_handle = transport::rpc::start_rpc_server(addr, port, app.clone()).await?;
+    let agent_factory = RigAgentFactory::new(catalog)?;
+    let app = AppService::new(agent_factory);
+
+    let rpc_handle = start_app_rpc_server(addr, port, app.clone()).await?;
 
     println!("Server ready. Press Ctrl+C to stop.");
     tokio::signal::ctrl_c().await?;

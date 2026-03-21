@@ -1,32 +1,37 @@
-use super::event_bus::EventBus;
-use super::llm_port::LlmPort;
-use super::state::ConversationState;
-use anyhow::Result;
-use gantry_contract::{
-    AppEvent, ErrorEvent, FormHiddenEvent, FormShownEvent, InitEvent, Message, MessageReceivedEvent,
-    PendingClearedEvent, PendingMessage, Role, SelectFormResponse, StreamEndEvent, StreamMessageRequest,
-    StreamStartEvent, TokenEvent,
+use crate::agent_factory::RigAgentFactory;
+use crate::event_bus::EventBus;
+use crate::state::ConversationState;
+use crate::{
+    AppEvent, ErrorEvent, FormHiddenEvent, FormShownEvent, InitEvent, Message,
+    MessageReceivedEvent, ModelId, ModelSelection, PendingClearedEvent, PendingMessage, ProviderId,
+    Role, SelectFormResponse, StreamEndEvent, StreamMessageRequest, StreamStartEvent, TokenEvent,
 };
+use anyhow::Result;
+use rig::message::Message as RigMessage;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::{Mutex, broadcast};
 use tokio::sync::mpsc;
+use tokio::sync::{Mutex, broadcast};
 use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct AppService {
     state: Arc<Mutex<ConversationState>>,
     event_bus: EventBus,
-    llm: Arc<dyn LlmPort>,
+    agent_factory: RigAgentFactory,
     is_streaming: Arc<AtomicBool>,
 }
 
 impl AppService {
-    pub fn new(llm: Arc<dyn LlmPort>) -> Self {
+    pub fn new(agent_factory: RigAgentFactory) -> Self {
+        let default_selection = agent_factory
+            .catalog()
+            .default_selection()
+            .expect("provider catalog should be valid when constructing AppService");
         Self {
-            state: Arc::new(Mutex::new(ConversationState::default())),
+            state: Arc::new(Mutex::new(ConversationState::new(default_selection))),
             event_bus: EventBus::new(1000),
-            llm,
+            agent_factory,
             is_streaming: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -39,10 +44,10 @@ impl AppService {
         self.is_streaming.load(Ordering::SeqCst)
     }
 
-    pub async fn init_event(&self, client_id: String) -> AppEvent {
+    pub async fn init_event(&self) -> AppEvent {
         let state = self.state.lock().await;
         AppEvent::Init(InitEvent {
-            client_id,
+            client_id: Uuid::new_v4().to_string(),
             messages: state.messages.clone(),
             pending_message: state.pending_message.clone(),
             form: state.active_form.clone(),
@@ -57,6 +62,38 @@ impl AppService {
         self.state.lock().await.messages.clear();
     }
 
+    pub async fn get_active_selection(&self) -> ModelSelection {
+        self.state.lock().await.active_selection.clone()
+    }
+
+    pub async fn set_active_provider(&self, provider_id: ProviderId) -> Result<()> {
+        let model_id = self
+            .agent_factory
+            .catalog()
+            .provider_default_model(&provider_id)?
+            .clone();
+        self.set_active_selection(ModelSelection {
+            provider_id,
+            model_id,
+        })
+        .await
+    }
+
+    pub async fn set_active_model(&self, model_id: ModelId) -> Result<()> {
+        let provider_id = self.get_active_selection().await.provider_id;
+        self.set_active_selection(ModelSelection {
+            provider_id,
+            model_id,
+        })
+        .await
+    }
+
+    pub async fn set_active_selection(&self, selection: ModelSelection) -> Result<()> {
+        self.agent_factory.catalog().selection(&selection)?;
+        self.state.lock().await.active_selection = selection;
+        Ok(())
+    }
+
     pub async fn send_message(&self, content: String) -> Vec<Message> {
         dbg!("app.send_message.request", &content);
         {
@@ -65,21 +102,38 @@ impl AppService {
         }
 
         let snapshot = self.get_messages().await;
-        dbg!("app.send_message.snapshot_len", snapshot.len());
-        let response = match self.llm.generate_response(snapshot).await {
-            Ok(content) => {
-                dbg!("app.send_message.llm_ok_len", content.len());
-                Message::new(Role::Assistant, content)
-            }
-            Err(err) => {
-                dbg!("app.send_message.llm_err", err.to_string());
-                Message::new(Role::Error, err.to_string())
-            }
+        let selection = self.get_active_selection().await;
+        let mut rig_messages = Self::to_rig_messages(snapshot);
+        dbg!("app.send_message.snapshot_len", rig_messages.len());
+        let response = match rig_messages.pop() {
+            Some(prompt) => match self.agent_factory.agent(&selection).await {
+                Ok(agent) => match agent.chat(prompt, rig_messages).await {
+                    Ok(content) => {
+                        dbg!("app.send_message.llm_ok_len", content.len());
+                        Message::new(Role::Assistant, content)
+                    }
+                    Err(err) => {
+                        dbg!("app.send_message.llm_err", err.to_string());
+                        Message::new(Role::Error, err.to_string())
+                    }
+                },
+                Err(err) => {
+                    dbg!("app.send_message.agent_err", err.to_string());
+                    Message::new(Role::Error, err.to_string())
+                }
+            },
+            None => Message::new(
+                Role::Error,
+                "cannot generate response with empty message history",
+            ),
         };
 
         let mut state = self.state.lock().await;
         state.messages.push(response);
-        dbg!("app.send_message.response_messages_len", state.messages.len());
+        dbg!(
+            "app.send_message.response_messages_len",
+            state.messages.len()
+        );
         state.messages.clone()
     }
 
@@ -112,7 +166,17 @@ impl AppService {
         dbg!("app.stream_message.pending_published", &pending.id);
 
         let snapshot = self.get_messages().await;
-        dbg!("app.stream_message.snapshot_len", snapshot.len());
+        let selection = self.get_active_selection().await;
+        let mut rig_messages = Self::to_rig_messages(snapshot);
+        let Some(prompt) = rig_messages.pop() else {
+            self.clear_pending(&pending.id).await;
+            self.event_bus.publish(AppEvent::Error(ErrorEvent {
+                message: "cannot generate tokens with empty message history".to_string(),
+            }));
+            return Ok(pending);
+        };
+
+        dbg!("app.stream_message.snapshot_len", rig_messages.len() + 1);
         let message_id = Uuid::new_v4().to_string();
         self.event_bus
             .publish(AppEvent::StreamStart(StreamStartEvent {
@@ -121,8 +185,11 @@ impl AppService {
             }));
 
         let (token_tx, mut token_rx) = mpsc::channel(128);
-        let llm = self.llm.clone();
-        let llm_task = tokio::spawn(async move { llm.generate_tokens(snapshot, token_tx).await });
+        let agent = self.agent_factory.agent(&selection).await;
+        let llm_task = tokio::spawn(async move {
+            let agent = agent?;
+            agent.stream_chat(prompt, rig_messages, token_tx).await
+        });
 
         let mut accumulated = String::new();
         let mut token_count = 0usize;
@@ -159,16 +226,17 @@ impl AppService {
         dbg!("app.stream_message.tokens_received", token_count);
         dbg!("app.stream_message.accumulated_len", accumulated.len());
 
-        self.event_bus
-            .publish(AppEvent::StreamEnd(StreamEndEvent {
-                message_id,
-                content: accumulated.clone(),
-            }));
+        self.event_bus.publish(AppEvent::StreamEnd(StreamEndEvent {
+            message_id,
+            content: accumulated.clone(),
+        }));
         dbg!("app.stream_message.end_published");
 
         {
             let mut state = self.state.lock().await;
-            state.messages.push(Message::new(Role::Assistant, accumulated));
+            state
+                .messages
+                .push(Message::new(Role::Assistant, accumulated));
         }
 
         self.clear_pending(&pending.id).await;
@@ -205,7 +273,7 @@ impl AppService {
     }
 
     pub async fn show_form(&self, options: Vec<String>) {
-        let form = gantry_contract::FormState::new(options);
+        let form = crate::FormState::new(options);
         {
             let mut state = self.state.lock().await;
             state.active_form = Some(form.clone());
@@ -241,6 +309,17 @@ impl AppService {
             .publish(AppEvent::PendingCleared(PendingClearedEvent {
                 pending_id: pending_id.to_string(),
             }));
+    }
+
+    fn to_rig_messages(messages: Vec<Message>) -> Vec<RigMessage> {
+        messages
+            .into_iter()
+            .map(|msg| match msg.role {
+                Role::User => RigMessage::user(msg.content),
+                Role::Assistant => RigMessage::assistant(msg.content),
+                Role::Error => RigMessage::user(format!("[Error]: {}", msg.content)),
+            })
+            .collect()
     }
 }
 

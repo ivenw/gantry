@@ -9,8 +9,8 @@ use crossterm::{
     },
     execute,
 };
-use gantry_client::{JsonRpcClient, WsConnectionEvent};
-use gantry_contract::{AppEvent, Message, Role};
+use gantry_core::{AppEvent, Message, Role};
+use gantry_rpc::{JsonRpcClient, WsConnectionEvent};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use std::sync::{Arc, Mutex, mpsc};

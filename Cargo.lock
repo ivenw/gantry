@@ -691,23 +691,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "gantry-client"
+name = "gantry-core"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "futures",
- "gantry-contract",
- "jsonrpsee",
+ "rig-core",
+ "serde",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
-name = "gantry-contract"
+name = "gantry-rpc"
 version = "0.1.0"
 dependencies = [
- "serde",
+ "anyhow",
+ "gantry-core",
+ "jsonrpsee",
  "serde_json",
- "uuid",
+ "tokio",
 ]
 
 [[package]]
@@ -715,13 +719,8 @@ name = "gantry-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-trait",
- "futures",
- "gantry-contract",
- "jsonrpsee",
- "rig-core",
- "serde",
- "serde_json",
+ "gantry-core",
+ "gantry-rpc",
  "tokio",
  "uuid",
 ]
@@ -732,8 +731,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "crossterm",
- "gantry-client",
- "gantry-contract",
+ "gantry-core",
+ "gantry-rpc",
  "ratatui",
  "tokio",
 ]
@@ -1231,11 +1230,13 @@ dependencies = [
  "jsonrpsee-client-transport",
  "jsonrpsee-core",
  "jsonrpsee-http-client",
+ "jsonrpsee-proc-macros",
  "jsonrpsee-server",
  "jsonrpsee-types",
  "jsonrpsee-wasm-client",
  "jsonrpsee-ws-client",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1312,6 +1313,19 @@ dependencies = [
  "tokio",
  "tower",
  "url",
+]
+
+[[package]]
+name = "jsonrpsee-proc-macros"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2da3f8ab5ce1bb124b6d082e62dffe997578ceaf0aeb9f3174a214589dc00f07"
+dependencies = [
+ "heck",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -1827,6 +1841,15 @@ checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
 dependencies = [
  "proc-macro2",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "proc-macro-crate"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f"
+dependencies = [
+ "toml_edit",
 ]
 
 [[package]]
@@ -2931,6 +2954,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "toml_datetime"
+version = "1.0.1+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b320e741db58cac564e26c607d3cc1fdc4a88fd36c879568c07856ed83ff3e9"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.25.5+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ca1a40644a28bce036923f6a431df0b34236949d111cc07cb6dca830c9ef2e1"
+dependencies = [
+ "indexmap",
+ "toml_datetime",
+ "toml_parser",
+ "winnow",
+]
+
+[[package]]
+name = "toml_parser"
+version = "1.0.10+spec-1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7df25b4befd31c4816df190124375d5a20c6b6921e2cad937316de3fccd63420"
+dependencies = [
+ "winnow",
+]
+
+[[package]]
 name = "tower"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3660,6 +3713,15 @@ name = "windows_x86_64_msvc"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
+
+[[package]]
+name = "winnow"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a90e88e4667264a994d34e6d1ab2d26d398dcdca8b7f52bec8668957517fc7d8"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "wit-bindgen"

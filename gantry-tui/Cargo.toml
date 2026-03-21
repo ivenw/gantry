@@ -12,5 +12,5 @@ anyhow.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
 tokio.workspace = true
-gantry-client = { path = "../gantry-client" }
-gantry-contract = { path = "../gantry-contract" }
+gantry-core = { path = "../gantry-core" }
+gantry-rpc = { path = "../gantry-rpc" }

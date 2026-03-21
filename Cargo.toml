@@ -4,8 +4,8 @@ members = [
   "gantry-cli",
   "gantry-tui",
   "gantry-server",
-  "gantry-contract",
-  "gantry-client",
+  "gantry-core",
+  "gantry-rpc",
 ]
 
 [workspace.package]
@@ -23,6 +23,7 @@ jsonrpsee = { version = "0.26", features = [
   "server-core",
   "ws-client",
   "client",
+  "macros",
 ] }
 serde = { version = "1.0", features = ["derive"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }

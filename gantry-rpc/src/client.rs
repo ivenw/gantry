@@ -1,11 +1,13 @@
 use anyhow::Result;
-use gantry_contract::{
-    AppEvent, Message, PendingMessage, SelectFormRequest, SelectFormResponse, StreamMessageRequest,
+use gantry_core::{
+    AppEvent, Message, PendingMessage, SelectFormRequest, SelectFormResponse,
+    StreamMessageRequest,
 };
-use jsonrpsee::core::client::{ClientT, Subscription, SubscriptionClientT};
-use jsonrpsee::rpc_params;
+use jsonrpsee::core::client::Subscription;
 use jsonrpsee::ws_client::{WsClient, WsClientBuilder};
 use tokio::{sync::mpsc, task::JoinHandle};
+
+use crate::GantryRpcClient;
 
 pub struct JsonRpcClient {
     inner: WsClient,
@@ -27,11 +29,10 @@ impl JsonRpcClient {
         Ok(Self { inner })
     }
 
-    pub async fn subscribe_events(&self) -> Result<(JoinHandle<()>, mpsc::Receiver<WsConnectionEvent>)> {
-        let mut sub: Subscription<AppEvent> = self
-            .inner
-            .subscribe("subscribe_events", rpc_params![], "unsubscribe_events")
-            .await?;
+    pub async fn subscribe_events(
+        &self,
+    ) -> Result<(JoinHandle<()>, mpsc::Receiver<WsConnectionEvent>)> {
+        let mut sub: Subscription<AppEvent> = self.inner.subscribe_events().await?;
 
         let (event_tx, event_rx) = mpsc::channel(100);
         let handle = tokio::spawn(async move {
@@ -58,24 +59,28 @@ impl JsonRpcClient {
     }
 
     pub async fn send_message(&self, content: String) -> Result<Vec<Message>> {
-        Ok(self.inner.request("send_message", rpc_params![content]).await?)
+        Ok(self.inner.send_message(content).await?)
     }
 
     pub async fn stream_message(&self, content: String) -> Result<PendingMessage> {
         let req = StreamMessageRequest { content };
-        Ok(self.inner.request("stream_message", rpc_params![req]).await?)
+        Ok(self.inner.stream_message(req).await?)
     }
 
     pub async fn get_messages(&self) -> Result<Vec<Message>> {
-        Ok(self.inner.request("get_messages", rpc_params![]).await?)
+        Ok(self.inner.get_messages().await?)
     }
 
     pub async fn clear_messages(&self) -> Result<()> {
-        Ok(self.inner.request("clear_messages", rpc_params![]).await?)
+        Ok(self.inner.clear_messages().await?)
     }
 
-    pub async fn select_form(&self, form_id: String, selection: String) -> Result<SelectFormResponse> {
+    pub async fn select_form(
+        &self,
+        form_id: String,
+        selection: String,
+    ) -> Result<SelectFormResponse> {
         let req = SelectFormRequest { form_id, selection };
-        Ok(self.inner.request("select_form", rpc_params![req]).await?)
+        Ok(self.inner.select_form(req).await?)
     }
 }
