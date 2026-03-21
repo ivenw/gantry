@@ -14,6 +14,9 @@ pub struct Chat<'a> {
 }
 
 impl<'a> Chat<'a> {
+    const USER_PREFIX: &'static str = "> ";
+    const ASSISTANT_PREFIX: &'static str = "< ";
+
     pub fn new(messages: &'a [Message], streaming_content: Option<String>) -> Self {
         Self {
             messages,
@@ -58,13 +61,23 @@ impl<'a> Widget for Chat<'a> {
             return;
         }
 
-        let text_width = area.width.saturating_sub(2);
         let gap = 1;
 
         let total_height: u16 = self
             .messages
             .iter()
-            .map(|m| Self::calc_msg_height(&m.content, text_width))
+            .map(|m| {
+                let text_width = match m.role {
+                    Role::User => area
+                        .width
+                        .saturating_sub(1 + Self::USER_PREFIX.len() as u16),
+                    Role::Assistant => area
+                        .width
+                        .saturating_sub(1 + Self::ASSISTANT_PREFIX.len() as u16),
+                    _ => area.width.saturating_sub(2),
+                };
+                Self::calc_msg_height(&m.content, text_width)
+            })
             .sum();
 
         let total_with_gaps = total_height + ((self.messages.len() as u16 - 1) * gap);
@@ -82,6 +95,16 @@ impl<'a> Widget for Chat<'a> {
                 break;
             }
 
+            let text_width = match message.role {
+                Role::User => area
+                    .width
+                    .saturating_sub(1 + Self::USER_PREFIX.len() as u16),
+                Role::Assistant => area
+                    .width
+                    .saturating_sub(1 + Self::ASSISTANT_PREFIX.len() as u16),
+                _ => area.width.saturating_sub(2),
+            };
+
             let msg_height = Self::calc_msg_height(&message.content, text_width);
 
             if y + msg_height > area.bottom() {
@@ -96,7 +119,7 @@ impl<'a> Widget for Chat<'a> {
                     .unwrap_or(false);
 
             let mut content = match message.role {
-                Role::User => format!("│ {}", message.content),
+                Role::User => message.content.clone(),
                 Role::Assistant => message.content.clone(),
                 Role::Error => message.content.clone(),
             };
@@ -111,17 +134,54 @@ impl<'a> Widget for Chat<'a> {
                 Role::Error => Style::default().fg(ratatui::style::Color::Red),
             };
 
-            let paragraph = Paragraph::new(Text::raw(&content))
-                .style(style)
-                .wrap(ratatui::widgets::Wrap { trim: false });
-
-            let msg_area = Rect::new(area.x + 1, y, area.width - 1, msg_height);
-            paragraph.render(msg_area, buf);
-
             if message.role == Role::User {
-                if let Some(cell) = buf.cell_mut((area.x + 1, y)) {
-                    cell.set_style(Style::default().fg(ratatui::style::Color::LightGreen));
-                }
+                let prefix_x = area.x + 1;
+                let text_x = prefix_x + Self::USER_PREFIX.len() as u16;
+                let text_area = Rect::new(
+                    text_x,
+                    y,
+                    area.width
+                        .saturating_sub(1 + Self::USER_PREFIX.len() as u16),
+                    msg_height,
+                );
+                buf.set_string(
+                    prefix_x,
+                    y,
+                    Self::USER_PREFIX,
+                    Style::default().fg(ratatui::style::Color::LightGreen),
+                );
+
+                let paragraph = Paragraph::new(Text::raw(&content))
+                    .style(style)
+                    .wrap(ratatui::widgets::Wrap { trim: false });
+                paragraph.render(text_area, buf);
+            } else if message.role == Role::Assistant {
+                let prefix_x = area.x + 1;
+                let text_x = prefix_x + Self::ASSISTANT_PREFIX.len() as u16;
+                let text_area = Rect::new(
+                    text_x,
+                    y,
+                    area.width
+                        .saturating_sub(1 + Self::ASSISTANT_PREFIX.len() as u16),
+                    msg_height,
+                );
+                buf.set_string(
+                    prefix_x,
+                    y,
+                    Self::ASSISTANT_PREFIX,
+                    Style::default().fg(ratatui::style::Color::DarkGray),
+                );
+
+                let paragraph = Paragraph::new(Text::raw(&content))
+                    .style(style)
+                    .wrap(ratatui::widgets::Wrap { trim: false });
+                paragraph.render(text_area, buf);
+            } else {
+                let paragraph = Paragraph::new(Text::raw(&content))
+                    .style(style)
+                    .wrap(ratatui::widgets::Wrap { trim: false });
+                let msg_area = Rect::new(area.x + 1, y, area.width.saturating_sub(1), msg_height);
+                paragraph.render(msg_area, buf);
             }
 
             y += msg_height + gap;

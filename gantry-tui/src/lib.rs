@@ -4,14 +4,15 @@ use anyhow::{Result, anyhow};
 use crossterm::{
     event::{
         self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind,
-        KeyModifiers,
+        KeyModifiers, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+        PushKeyboardEnhancementFlags,
     },
     execute,
 };
 use gantry_client::{JsonRpcClient, WsConnectionEvent};
 use gantry_contract::{AppEvent, Message, Role};
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::io::{self, Write};
+use std::io;
 use std::sync::{Arc, Mutex, mpsc};
 use ui::App;
 
@@ -49,7 +50,6 @@ pub fn run() -> Result<()> {
     terminal.draw(|frame| {
         app.render(frame);
     })?;
-    io::stdout().flush()?;
 
     loop {
         while let Ok(event) = event_rx.try_recv() {
@@ -66,7 +66,6 @@ pub fn run() -> Result<()> {
             terminal.draw(|frame| {
                 app.render(frame);
             })?;
-            io::stdout().flush()?;
         }
 
         while let Ok(result) = stream_result_rx.try_recv() {
@@ -78,7 +77,6 @@ pub fn run() -> Result<()> {
             terminal.draw(|frame| {
                 app.render(frame);
             })?;
-            io::stdout().flush()?;
         }
 
         if event::poll(std::time::Duration::from_millis(10))? {
@@ -92,32 +90,35 @@ pub fn run() -> Result<()> {
                         break;
                     }
                     KeyCode::Enter => {
-                        let input = app.input_buffer.clone();
-                        if input.trim().is_empty() || app.is_streaming() {
-                            continue;
+                        if key.modifiers.contains(KeyModifiers::SHIFT) {
+                            app.input_buffer.push('\n');
+                        } else {
+                            let input = app.input_buffer.clone();
+                            if input.trim().is_empty() || app.is_streaming() {
+                                continue;
+                            }
+                            app.input_buffer.clear();
+                            app.add_user_message(input.clone());
+                            app.start_streaming_message();
+
+                            terminal.draw(|frame| {
+                                app.render(frame);
+                            })?;
+
+                            let stream_result_tx = stream_result_tx.clone();
+                            let addr_for_request = addr.clone();
+                            rt.spawn(async move {
+                                let result = match JsonRpcClient::connect_ws(&addr_for_request, port).await {
+                                    Ok(client) => client
+                                        .stream_message(input)
+                                        .await
+                                        .map(|_| ())
+                                        .map_err(|e| e.to_string()),
+                                    Err(e) => Err(e.to_string()),
+                                };
+                                let _ = stream_result_tx.send(result);
+                            });
                         }
-                        app.input_buffer.clear();
-                        app.add_user_message(input.clone());
-                        app.start_streaming_message();
-
-                        terminal.draw(|frame| {
-                            app.render(frame);
-                        })?;
-                        io::stdout().flush()?;
-
-                        let stream_result_tx = stream_result_tx.clone();
-                        let addr_for_request = addr.clone();
-                        rt.spawn(async move {
-                            let result = match JsonRpcClient::connect_ws(&addr_for_request, port).await {
-                                Ok(client) => client
-                                    .stream_message(input)
-                                    .await
-                                    .map(|_| ())
-                                    .map_err(|e| e.to_string()),
-                                Err(e) => Err(e.to_string()),
-                            };
-                            let _ = stream_result_tx.send(result);
-                        });
                     }
                     KeyCode::Char(c) => {
                         app.input_buffer.push(c);
@@ -137,7 +138,6 @@ pub fn run() -> Result<()> {
                 terminal.draw(|frame| {
                     app.render(frame);
                 })?;
-                io::stdout().flush()?;
             }
         }
     }
@@ -189,24 +189,46 @@ fn process_app_event(
     }
 }
 
-struct TerminalGuard;
+struct TerminalGuard {
+    keyboard_enhancement_enabled: bool,
+}
 
 impl TerminalGuard {
     fn enter() -> Result<(Self, Terminal<CrosstermBackend<io::Stdout>>)> {
         execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
-        execute!(io::stdout(), EnableBracketedPaste)?;
         crossterm::terminal::enable_raw_mode()?;
+        execute!(io::stdout(), EnableBracketedPaste)?;
+
+        let keyboard_enhancement_enabled =
+            matches!(crossterm::terminal::supports_keyboard_enhancement(), Ok(true));
+        if keyboard_enhancement_enabled {
+            execute!(
+                io::stdout(),
+                PushKeyboardEnhancementFlags(
+                    KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                        | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                )
+            )?;
+        }
 
         let backend = CrosstermBackend::new(io::stdout());
         let mut terminal = Terminal::new(backend)?;
         terminal.clear()?;
 
-        Ok((Self, terminal))
+        Ok((
+            Self {
+                keyboard_enhancement_enabled,
+            },
+            terminal,
+        ))
     }
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
+        if self.keyboard_enhancement_enabled {
+            let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
+        }
         let _ = crossterm::terminal::disable_raw_mode();
         let _ = execute!(io::stdout(), DisableBracketedPaste);
         let _ = execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);

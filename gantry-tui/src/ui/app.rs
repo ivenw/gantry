@@ -84,11 +84,15 @@ impl App {
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(input_height)])
+            .constraints([
+                Constraint::Min(1),
+                Constraint::Length(1),
+                Constraint::Length(input_height),
+            ])
             .split(area);
 
         let chat_area = chunks[0];
-        let input_area = chunks[1];
+        let input_area = chunks[2];
 
         frame.render_widget(
             chat::Chat::new(&self.messages, self.streaming_content.clone()),
