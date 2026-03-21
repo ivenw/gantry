@@ -79,7 +79,7 @@ impl App {
     }
 
     pub fn render(&self, frame: &mut Frame) {
-        let area = frame.size();
+        let area = frame.area();
         let input_height = input::Input::calc_height(&self.input_buffer, area.width);
 
         let chunks = Layout::default()

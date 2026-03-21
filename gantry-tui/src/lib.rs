@@ -12,7 +12,7 @@ use gantry_client::{JsonRpcClient, WsConnectionEvent};
 use gantry_contract::{AppEvent, Message, Role};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io::{self, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use ui::App;
 
 const DEFAULT_ADDR: &str = "127.0.0.1";
@@ -39,6 +39,7 @@ pub fn run() -> Result<()> {
         })?;
 
     let (event_handle, mut event_rx) = rt.block_on(client.subscribe_events())?;
+    let (stream_result_tx, stream_result_rx) = mpsc::channel::<Result<(), String>>();
 
     let (_terminal_guard, mut terminal) = TerminalGuard::enter()?;
 
@@ -68,6 +69,18 @@ pub fn run() -> Result<()> {
             io::stdout().flush()?;
         }
 
+        while let Ok(result) = stream_result_rx.try_recv() {
+            if let Err(err) = result {
+                app.messages.push(Message::new(Role::Error, err));
+                app.finish_streaming();
+            }
+
+            terminal.draw(|frame| {
+                app.render(frame);
+            })?;
+            io::stdout().flush()?;
+        }
+
         if event::poll(std::time::Duration::from_millis(10))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind != KeyEventKind::Press {
@@ -80,7 +93,7 @@ pub fn run() -> Result<()> {
                     }
                     KeyCode::Enter => {
                         let input = app.input_buffer.clone();
-                        if input.trim().is_empty() {
+                        if input.trim().is_empty() || app.is_streaming() {
                             continue;
                         }
                         app.input_buffer.clear();
@@ -92,15 +105,19 @@ pub fn run() -> Result<()> {
                         })?;
                         io::stdout().flush()?;
 
-                        match rt.block_on(client.stream_message(input)) {
-                            Ok(pending) => {
-                                *pending_id.lock().unwrap() = Some(pending.id);
-                            }
-                            Err(e) => {
-                                app.messages.push(Message::new(Role::Error, e.to_string()));
-                                app.finish_streaming();
-                            }
-                        }
+                        let stream_result_tx = stream_result_tx.clone();
+                        let addr_for_request = addr.clone();
+                        rt.spawn(async move {
+                            let result = match JsonRpcClient::connect_ws(&addr_for_request, port).await {
+                                Ok(client) => client
+                                    .stream_message(input)
+                                    .await
+                                    .map(|_| ())
+                                    .map_err(|e| e.to_string()),
+                                Err(e) => Err(e.to_string()),
+                            };
+                            let _ = stream_result_tx.send(result);
+                        });
                     }
                     KeyCode::Char(c) => {
                         app.input_buffer.push(c);

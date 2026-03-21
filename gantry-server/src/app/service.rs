@@ -10,6 +10,7 @@ use gantry_contract::{
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{Mutex, broadcast};
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -57,23 +58,33 @@ impl AppService {
     }
 
     pub async fn send_message(&self, content: String) -> Vec<Message> {
+        dbg!("app.send_message.request", &content);
         {
             let mut state = self.state.lock().await;
             state.messages.push(Message::new(Role::User, content));
         }
 
         let snapshot = self.get_messages().await;
+        dbg!("app.send_message.snapshot_len", snapshot.len());
         let response = match self.llm.generate_response(snapshot).await {
-            Ok(content) => Message::new(Role::Assistant, content),
-            Err(err) => Message::new(Role::Error, err.to_string()),
+            Ok(content) => {
+                dbg!("app.send_message.llm_ok_len", content.len());
+                Message::new(Role::Assistant, content)
+            }
+            Err(err) => {
+                dbg!("app.send_message.llm_err", err.to_string());
+                Message::new(Role::Error, err.to_string())
+            }
         };
 
         let mut state = self.state.lock().await;
         state.messages.push(response);
+        dbg!("app.send_message.response_messages_len", state.messages.len());
         state.messages.clone()
     }
 
     pub async fn stream_message(&self, req: StreamMessageRequest) -> Result<PendingMessage> {
+        dbg!("app.stream_message.request", &req.content);
         if self
             .is_streaming
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -98,19 +109,10 @@ impl AppService {
                 id: pending.id.clone(),
                 content: pending.content.clone(),
             }));
+        dbg!("app.stream_message.pending_published", &pending.id);
 
         let snapshot = self.get_messages().await;
-        let tokens = match self.llm.generate_tokens(snapshot).await {
-            Ok(tokens) => tokens,
-            Err(err) => {
-                self.clear_pending(&pending.id).await;
-                self.event_bus.publish(AppEvent::Error(ErrorEvent {
-                    message: err.to_string(),
-                }));
-                return Ok(pending);
-            }
-        };
-
+        dbg!("app.stream_message.snapshot_len", snapshot.len());
         let message_id = Uuid::new_v4().to_string();
         self.event_bus
             .publish(AppEvent::StreamStart(StreamStartEvent {
@@ -118,20 +120,51 @@ impl AppService {
                 pending_of: pending.id.clone(),
             }));
 
+        let (token_tx, mut token_rx) = mpsc::channel(128);
+        let llm = self.llm.clone();
+        let llm_task = tokio::spawn(async move { llm.generate_tokens(snapshot, token_tx).await });
+
         let mut accumulated = String::new();
-        for token in tokens {
+        let mut token_count = 0usize;
+        while let Some(token) = token_rx.recv().await {
             accumulated.push_str(&token);
+            token_count += 1;
+            dbg!("app.stream_message.publish_token", &token);
             self.event_bus.publish(AppEvent::Token(TokenEvent {
                 message_id: message_id.clone(),
                 delta: token,
             }));
         }
 
+        match llm_task.await {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                dbg!("app.stream_message.llm_err", err.to_string());
+                self.clear_pending(&pending.id).await;
+                self.event_bus.publish(AppEvent::Error(ErrorEvent {
+                    message: err.to_string(),
+                }));
+                return Ok(pending);
+            }
+            Err(err) => {
+                dbg!("app.stream_message.llm_join_err", err.to_string());
+                self.clear_pending(&pending.id).await;
+                self.event_bus.publish(AppEvent::Error(ErrorEvent {
+                    message: format!("llm task failed: {}", err),
+                }));
+                return Ok(pending);
+            }
+        }
+
+        dbg!("app.stream_message.tokens_received", token_count);
+        dbg!("app.stream_message.accumulated_len", accumulated.len());
+
         self.event_bus
             .publish(AppEvent::StreamEnd(StreamEndEvent {
                 message_id,
                 content: accumulated.clone(),
             }));
+        dbg!("app.stream_message.end_published");
 
         {
             let mut state = self.state.lock().await;
@@ -139,6 +172,7 @@ impl AppService {
         }
 
         self.clear_pending(&pending.id).await;
+        dbg!("app.stream_message.done", &pending.id);
         Ok(pending)
     }
 
@@ -197,6 +231,7 @@ impl AppService {
     }
 
     async fn clear_pending(&self, pending_id: &str) {
+        dbg!("app.clear_pending", pending_id);
         {
             let mut state = self.state.lock().await;
             state.pending_message = None;

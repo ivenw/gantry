@@ -25,9 +25,20 @@ impl<'a> Chat<'a> {
         if width == 0 {
             return 1;
         }
-        let char_count = content.chars().count();
-        let wrapped_lines = (char_count + width as usize - 1) / width as usize;
-        wrapped_lines as u16
+        let width = width as usize;
+        let mut line_count = 0usize;
+
+        for line in content.split('\n') {
+            let char_count = line.chars().count();
+            // Keep explicit blank lines and account for soft wrapping.
+            line_count += if char_count == 0 {
+                1
+            } else {
+                char_count.div_ceil(width)
+            };
+        }
+
+        line_count.max(1) as u16
     }
 
     fn streaming_message_idx(&self) -> Option<usize> {
@@ -108,8 +119,9 @@ impl<'a> Widget for Chat<'a> {
             paragraph.render(msg_area, buf);
 
             if message.role == Role::User {
-                buf.get_mut(area.x + 1, y)
-                    .set_style(Style::default().fg(ratatui::style::Color::LightGreen));
+                if let Some(cell) = buf.cell_mut((area.x + 1, y)) {
+                    cell.set_style(Style::default().fg(ratatui::style::Color::LightGreen));
+                }
             }
 
             y += msg_height + gap;

@@ -70,9 +70,10 @@ impl<'a> Widget for Input<'a> {
         let cursor_y = inner_area.y + row;
 
         if cursor_x < inner_area.right() && cursor_y < inner_area.bottom() {
-            buf.get_mut(cursor_x, cursor_y)
-                .set_char('█')
-                .set_style(ratatui::style::Style::default().fg(ratatui::style::Color::White));
+            if let Some(cell) = buf.cell_mut((cursor_x, cursor_y)) {
+                cell.set_char('█')
+                    .set_style(ratatui::style::Style::default().fg(ratatui::style::Color::White));
+            }
         }
     }
 }
