@@ -1,4 +1,3 @@
-mod boundary;
 mod messages;
 
 pub mod edit;

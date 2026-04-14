@@ -6,7 +6,6 @@ use rig::tool::Tool;
 use serde::Deserialize;
 use thiserror::Error;
 
-use super::boundary::BoundaryError;
 use super::messages;
 
 pub struct GrepTool;
@@ -25,8 +24,6 @@ pub struct GrepArgs {
 pub enum GrepToolError {
     #[error("{}", render_grep(.0))]
     Grep(#[from] GrepError),
-    #[error(transparent)]
-    Boundary(#[from] BoundaryError),
 }
 
 fn render_grep(err: &GrepError) -> String {
@@ -95,6 +92,6 @@ impl Tool for GrepTool {
             )
         })
         .await
-        .map_err(BoundaryError::from)??)
+        .expect("grep_files task panicked")?)
     }
 }

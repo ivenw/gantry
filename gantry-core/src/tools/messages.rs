@@ -92,8 +92,3 @@ pub fn tree_list_failed(path: &Path, err: &std::io::Error) -> String {
     format!("failed to list directory {}: {err}", path.display())
 }
 
-// ── boundary ─────────────────────────────────────────────────────────────────
-
-pub fn join_error(err: &tokio::task::JoinError) -> String {
-    format!("tool task panicked: {err}")
-}

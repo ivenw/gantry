@@ -6,7 +6,6 @@ use rig::tool::Tool;
 use serde::Deserialize;
 use thiserror::Error;
 
-use super::boundary::BoundaryError;
 use super::messages;
 
 pub struct WriteTool;
@@ -21,8 +20,6 @@ pub struct WriteArgs {
 pub enum WriteToolError {
     #[error("{}", render_write(.0))]
     Write(#[from] WriteError),
-    #[error(transparent)]
-    Boundary(#[from] BoundaryError),
 }
 
 fn render_write(err: &WriteError) -> String {
@@ -69,7 +66,8 @@ impl Tool for WriteTool {
         let content = args.content.clone();
         tokio::task::spawn_blocking(move || gantry_tools::write_file(&path, &content))
             .await
-            .map_err(BoundaryError::from)??;
+            .expect("write_file task panicked")
+            .map_err(WriteToolError::Write)?;
         Ok(messages::write_success(&args.path, byte_count))
     }
 }

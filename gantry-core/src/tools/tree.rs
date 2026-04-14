@@ -6,7 +6,6 @@ use rig::tool::Tool;
 use serde::Deserialize;
 use thiserror::Error;
 
-use super::boundary::BoundaryError;
 use super::messages;
 
 pub struct TreeTool;
@@ -21,8 +20,6 @@ pub struct TreeArgs {
 pub enum TreeToolError {
     #[error("{}", render_tree(.0))]
     Tree(#[from] TreeError),
-    #[error(transparent)]
-    Boundary(#[from] BoundaryError),
 }
 
 fn render_tree(err: &TreeError) -> String {
@@ -66,7 +63,7 @@ impl Tool for TreeTool {
         Ok(
             tokio::task::spawn_blocking(move || gantry_tools::tree(&path, args.depth))
                 .await
-                .map_err(BoundaryError::from)??,
+                .expect("tree task panicked")?,
         )
     }
 }

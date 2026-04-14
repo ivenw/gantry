@@ -7,7 +7,6 @@ use rig::tool::Tool;
 use serde::Deserialize;
 use thiserror::Error;
 
-use super::boundary::BoundaryError;
 use super::messages;
 
 pub struct EditTool;
@@ -31,8 +30,6 @@ pub struct EditArgsDto {
 pub enum EditToolError {
     #[error("{}", render_edit(.0))]
     Edit(#[from] EditError),
-    #[error(transparent)]
-    Boundary(#[from] BoundaryError),
 }
 
 fn render_edit(err: &EditError) -> String {
@@ -114,7 +111,8 @@ impl Tool for EditTool {
         let path_clone = path.clone();
         tokio::task::spawn_blocking(move || gantry_tools::edit_file(&path_clone, ops))
             .await
-            .map_err(BoundaryError::from)??;
+            .expect("edit_file task panicked")
+            .map_err(EditToolError::Edit)?;
         Ok(messages::edit_success(&path, op_count))
     }
 }

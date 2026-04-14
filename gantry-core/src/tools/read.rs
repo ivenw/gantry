@@ -6,7 +6,6 @@ use rig::tool::Tool;
 use serde::Deserialize;
 use thiserror::Error;
 
-use super::boundary::BoundaryError;
 use super::messages;
 
 pub struct ReadTool;
@@ -22,8 +21,6 @@ pub struct ReadArgs {
 pub enum ReadToolError {
     #[error("{}", render_read(.0))]
     Read(#[from] ReadError),
-    #[error(transparent)]
-    Boundary(#[from] BoundaryError),
 }
 
 fn render_read(err: &ReadError) -> String {
@@ -74,7 +71,7 @@ impl Tool for ReadTool {
                 gantry_tools::read_file(&path, args.offset, args.limit)
             })
             .await
-            .map_err(BoundaryError::from)??,
+            .expect("read_file task panicked")?,
         )
     }
 }
