@@ -115,6 +115,13 @@ impl GantryRpcServer for RpcApp {
         dbg!("rpc.clear_messages.done");
         Ok(())
     }
+
+    async fn interrupt_stream(&self, message_id: String) -> RpcResult<bool> {
+        dbg!("rpc.interrupt_stream.request", &message_id);
+        let result = self.inner.interrupt_stream(message_id).await;
+        dbg!("rpc.interrupt_stream.response", result);
+        Ok(result)
+    }
 }
 
 pub async fn start_rpc_server<Context>(

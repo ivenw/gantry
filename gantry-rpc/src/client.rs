@@ -81,6 +81,10 @@ impl JsonRpcClient {
         Ok(self.inner.clear_messages().await?)
     }
 
+    pub async fn interrupt_stream(&self, message_id: String) -> Result<bool> {
+        Ok(self.inner.interrupt_stream(message_id).await?)
+    }
+
     pub async fn select_form(
         &self,
         form_id: String,

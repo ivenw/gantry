@@ -11,7 +11,7 @@ use rig::message::Message as RigMessage;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::mpsc;
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, broadcast, oneshot};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -20,6 +20,7 @@ pub struct AppService {
     event_bus: EventBus,
     agent_factory: RigAgentFactory,
     is_streaming: Arc<AtomicBool>,
+    cancel_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
 }
 
 impl AppService {
@@ -33,6 +34,7 @@ impl AppService {
             event_bus: EventBus::new(1000),
             agent_factory,
             is_streaming: Arc::new(AtomicBool::new(false)),
+            cancel_tx: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -185,6 +187,9 @@ impl AppService {
             }));
 
         let (token_tx, mut token_rx) = mpsc::channel(128);
+        let (cancel_tx, mut cancel_rx) = oneshot::channel();
+        *self.cancel_tx.lock().await = Some(cancel_tx);
+
         let agent = self.agent_factory.agent(&selection).await;
         let llm_task = tokio::spawn(async move {
             let agent = agent?;
@@ -193,14 +198,35 @@ impl AppService {
 
         let mut accumulated = String::new();
         let mut token_count = 0usize;
-        while let Some(token) = token_rx.recv().await {
-            accumulated.push_str(&token);
-            token_count += 1;
-            dbg!("app.stream_message.publish_token", &token);
-            self.event_bus.publish(AppEvent::Token(TokenEvent {
-                message_id: message_id.clone(),
-                delta: token,
-            }));
+        let mut cancelled = false;
+        loop {
+            tokio::select! {
+                _ = &mut cancel_rx => {
+                    dbg!("app.stream_message.cancelled");
+                    cancelled = true;
+                    break;
+                }
+                token_opt = token_rx.recv() => {
+                    match token_opt {
+                        Some(token) => {
+                            accumulated.push_str(&token);
+                            token_count += 1;
+                            dbg!("app.stream_message.publish_token", &token);
+                            self.event_bus.publish(AppEvent::Token(TokenEvent {
+                                message_id: message_id.clone(),
+                                delta: token,
+                            }));
+                        }
+                        None => break,
+                    }
+                }
+            }
+        }
+
+        if cancelled {
+            dbg!("app.stream_message.was_cancelled");
+            self.is_streaming.store(false, Ordering::SeqCst);
+            return Ok(pending);
         }
 
         match llm_task.await {
@@ -270,6 +296,42 @@ impl AppService {
             selected_by: None,
             message: Some("No active form".to_string()),
         }
+    }
+
+    pub async fn interrupt_stream(&self, message_id: String) -> bool {
+        dbg!("app.interrupt_stream", &message_id);
+
+        if let Some(cancel_tx) = self.cancel_tx.lock().await.take() {
+            let _ = cancel_tx.send(());
+            dbg!("app.interrupt_stream.sent_cancel");
+        }
+
+        let state = self.state.lock().await;
+        let pending = state.pending_message.clone();
+        let accumulated = state
+            .messages
+            .last()
+            .filter(|m| m.role == Role::Assistant)
+            .map(|m| m.content.clone())
+            .unwrap_or_default();
+
+        if let Some(pending) = pending {
+            drop(state);
+            dbg!("app.interrupt_stream.accumulated_len", accumulated.len());
+
+            if !accumulated.is_empty() {
+                self.event_bus.publish(AppEvent::StreamEnd(StreamEndEvent {
+                    message_id: message_id.clone(),
+                    content: accumulated.clone(),
+                }));
+            }
+
+            self.clear_pending(&pending.id).await;
+        }
+
+        self.is_streaming.store(false, Ordering::SeqCst);
+        dbg!("app.interrupt_stream.done");
+        true
     }
 
     pub async fn show_form(&self, options: Vec<String>) {

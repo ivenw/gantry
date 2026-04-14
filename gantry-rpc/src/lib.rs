@@ -32,6 +32,9 @@ pub trait GantryRpc {
 
     #[method(name = "clear_messages")]
     async fn clear_messages(&self) -> RpcResult<()>;
+
+    #[method(name = "interrupt_stream")]
+    async fn interrupt_stream(&self, message_id: String) -> RpcResult<bool>;
 }
 pub use gantry_core::{
     ErrorEvent, FormHiddenEvent, FormShownEvent, FormState, InitEvent, MessageReceivedEvent,

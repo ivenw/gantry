@@ -46,6 +46,7 @@ pub fn run() -> Result<()> {
 
     let mut app = App::new();
     let pending_id = Arc::new(Mutex::new(Option::<String>::None));
+    let stream_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>> = Arc::new(Mutex::new(None));
 
     terminal.draw(|frame| {
         app.render(frame);
@@ -90,6 +91,25 @@ pub fn run() -> Result<()> {
                 KeyCode::Char('q') => {
                     break;
                 }
+                KeyCode::Esc => {
+                    let pending = pending_id.lock().unwrap().clone();
+                    if pending.is_some() {
+                        if let Some(task) = stream_task.lock().unwrap().take() {
+                            task.abort();
+                        }
+                        let pending_id_clone = pending.clone();
+                        let addr_clone = addr.clone();
+                        rt.spawn(async move {
+                            if let Ok(client) = JsonRpcClient::connect_ws(&addr_clone, port).await {
+                                let _ = client.interrupt_stream(pending_id_clone.unwrap()).await;
+                            }
+                        });
+                        app.finish_streaming();
+                        terminal.draw(|frame| {
+                            app.render(frame);
+                        })?;
+                    }
+                }
                 KeyCode::Enter => {
                     if key.modifiers.contains(KeyModifiers::SHIFT) {
                         app.input_buffer.push('\n');
@@ -108,7 +128,8 @@ pub fn run() -> Result<()> {
 
                         let stream_result_tx = stream_result_tx.clone();
                         let addr_for_request = addr.clone();
-                        rt.spawn(async move {
+                        let stream_task = stream_task.clone();
+                        let task = rt.spawn(async move {
                             let result =
                                 match JsonRpcClient::connect_ws(&addr_for_request, port).await {
                                     Ok(client) => client
@@ -120,6 +141,7 @@ pub fn run() -> Result<()> {
                                 };
                             let _ = stream_result_tx.send(result);
                         });
+                        *stream_task.lock().unwrap() = Some(task);
                     }
                 }
                 KeyCode::Char(c) => {
