@@ -28,16 +28,17 @@ pub fn run() -> Result<()> {
 
     let rt = tokio::runtime::Runtime::new()?;
 
-    let client = rt
-        .block_on(async { JsonRpcClient::connect_ws(&addr, port).await })
-        .map_err(|e| {
-            anyhow!(
-                "failed to connect to gantry daemon at {}:{} ({})\nRun `gantry setup`, then start daemon with `gantry server`.",
-                addr,
-                port,
-                e
-            )
-        })?;
+    let client = Arc::new(
+        rt.block_on(async { JsonRpcClient::connect_ws(&addr, port).await })
+            .map_err(|e| {
+                anyhow!(
+                    "failed to connect to gantry daemon at {}:{} ({})\nRun `gantry setup`, then start daemon with `gantry server`.",
+                    addr,
+                    port,
+                    e
+                )
+            })?,
+    );
 
     let (event_handle, mut event_rx) = rt.block_on(client.subscribe_events())?;
     let (stream_result_tx, stream_result_rx) = mpsc::channel::<Result<(), String>>();
@@ -134,7 +135,7 @@ pub fn run() -> Result<()> {
                     } else if app.is_command_picker_active() {
                         if let Some(cmd) = app.selected_command() {
                             let cmd_name = cmd.name.clone();
-                            execute_command(&cmd_name, &addr, port, &rt, command_result_tx.clone());
+                            execute_command(&cmd_name, &client, command_result_tx.clone());
                         }
                         app.input_buffer.clear();
                         app.deactivate_command_picker();
@@ -341,24 +342,18 @@ impl Drop for TerminalGuard {
     }
 }
 
-fn execute_command(
-    name: &str,
-    addr: &str,
-    port: u16,
-    rt: &tokio::runtime::Runtime,
-    command_result_tx: mpsc::Sender<String>,
-) {
+fn execute_command(name: &str, client: &JsonRpcClient, command_result_tx: mpsc::Sender<String>) {
     if name == "health" {
-        let addr_clone = addr.to_string();
-        rt.spawn(async move {
+        let client = client.clone();
+        tokio::spawn(async move {
             let start = std::time::Instant::now();
-            match JsonRpcClient::connect_ws(&addr_clone, port).await {
-                Ok(_client) => {
+            match client.ping().await {
+                Ok(_) => {
                     let latency = start.elapsed().as_millis();
                     let _ = command_result_tx.send(format!("Connected: {}ms", latency));
                 }
                 Err(e) => {
-                    let _ = command_result_tx.send(format!("Connection failed: {}", e));
+                    let _ = command_result_tx.send(format!("Ping failed: {}", e));
                 }
             }
         });

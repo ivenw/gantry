@@ -10,13 +10,7 @@ use tokio::{sync::mpsc, task::JoinHandle};
 use crate::GantryRpcClient;
 
 pub struct JsonRpcClient {
-    inner: WsClient,
-}
-
-pub enum WsConnectionEvent {
-    Event(AppEvent),
-    Disconnected,
-    Error(String),
+    inner: std::sync::Arc<WsClient>,
 }
 
 impl JsonRpcClient {
@@ -26,7 +20,7 @@ impl JsonRpcClient {
             .build(&url)
             .await
             .map_err(|e| anyhow::anyhow!("failed to create ws client: {}", e))?;
-        Ok(Self { inner })
+        Ok(Self { inner: std::sync::Arc::new(inner) })
     }
 
     pub async fn subscribe_events(
@@ -102,4 +96,18 @@ impl JsonRpcClient {
     pub async fn get_commands(&self) -> Result<Vec<Command>> {
         Ok(self.inner.get_commands().await?)
     }
+}
+
+impl Clone for JsonRpcClient {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+pub enum WsConnectionEvent {
+    Event(AppEvent),
+    Disconnected,
+    Error(String),
 }
