@@ -1,12 +1,10 @@
+use std::fmt;
 use std::path::PathBuf;
 
 use gantry_tools::read::ReadError;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde::Deserialize;
-use thiserror::Error;
-
-use super::messages;
 
 pub struct ReadTool;
 
@@ -17,15 +15,31 @@ pub struct ReadArgs {
     pub limit: Option<usize>,
 }
 
-#[derive(Debug, Error)]
-pub enum ReadToolError {
-    #[error("{}", render_read(.0))]
-    Read(#[from] ReadError),
+pub struct ReadToolError(pub ReadError);
+
+impl std::error::Error for ReadToolError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.0)
+    }
 }
 
-fn render_read(err: &ReadError) -> String {
-    match err {
-        ReadError::Io(e) => messages::read_io(e),
+impl From<ReadError> for ReadToolError {
+    fn from(e: ReadError) -> Self {
+        Self(e)
+    }
+}
+
+impl fmt::Debug for ReadToolError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.0, f)
+    }
+}
+
+impl fmt::Display for ReadToolError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            ReadError::Io(e) => write!(f, "failed to read file: {e}"),
+        }
     }
 }
 

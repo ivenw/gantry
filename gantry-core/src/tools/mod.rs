@@ -1,4 +1,3 @@
-mod messages;
 
 pub mod edit;
 pub mod grep;

@@ -6,6 +6,7 @@ members = [
   "gantry-server",
   "gantry-core",
   "gantry-rpc",
+  "gantry-tools",
 ]
 
 [workspace.package]
@@ -15,6 +16,7 @@ authors = ["ivenw"]
 
 [workspace.dependencies]
 anyhow = "1.0"
+thiserror = "2.0"
 ratatui = "0.30"
 crossterm = "0.29"
 tokio = { version = "1", features = ["full"] }

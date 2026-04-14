@@ -1,12 +1,10 @@
+use std::fmt;
 use std::path::PathBuf;
 
 use gantry_tools::write::WriteError;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde::Deserialize;
-use thiserror::Error;
-
-use super::messages;
 
 pub struct WriteTool;
 
@@ -16,16 +14,36 @@ pub struct WriteArgs {
     pub content: String,
 }
 
-#[derive(Debug, Error)]
-pub enum WriteToolError {
-    #[error("{}", render_write(.0))]
-    Write(#[from] WriteError),
+pub struct WriteToolError(pub WriteError);
+
+impl std::error::Error for WriteToolError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.0)
+    }
 }
 
-fn render_write(err: &WriteError) -> String {
-    match err {
-        WriteError::FileExists(path) => messages::write_file_exists(path),
-        WriteError::Io(e) => messages::write_io(e),
+impl From<WriteError> for WriteToolError {
+    fn from(e: WriteError) -> Self {
+        Self(e)
+    }
+}
+
+impl fmt::Debug for WriteToolError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.0, f)
+    }
+}
+
+impl fmt::Display for WriteToolError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            WriteError::FileExists(path) => write!(
+                f,
+                "file already exists: {}; use the edit tool to modify existing files",
+                path.display()
+            ),
+            WriteError::Io(e) => write!(f, "I/O error while writing file: {e}"),
+        }
     }
 }
 
@@ -67,7 +85,7 @@ impl Tool for WriteTool {
         tokio::task::spawn_blocking(move || gantry_tools::write_file(&path, &content))
             .await
             .expect("write_file task panicked")
-            .map_err(WriteToolError::Write)?;
-        Ok(messages::write_success(&args.path, byte_count))
+            .map_err(WriteToolError::from)?;
+        Ok(format!("wrote {byte_count} bytes to {}", args.path.display()))
     }
 }

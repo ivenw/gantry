@@ -1,12 +1,10 @@
+use std::fmt;
 use std::path::PathBuf;
 
 use gantry_tools::grep::GrepError;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde::Deserialize;
-use thiserror::Error;
-
-use super::messages;
 
 pub struct GrepTool;
 
@@ -20,17 +18,33 @@ pub struct GrepArgs {
     pub max_results: Option<usize>,
 }
 
-#[derive(Debug, Error)]
-pub enum GrepToolError {
-    #[error("{}", render_grep(.0))]
-    Grep(#[from] GrepError),
+pub struct GrepToolError(pub GrepError);
+
+impl std::error::Error for GrepToolError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.0)
+    }
 }
 
-fn render_grep(err: &GrepError) -> String {
-    match err {
-        GrepError::InvalidPattern(msg) => messages::grep_invalid_pattern(msg),
-        GrepError::InvalidGlob(msg) => messages::grep_invalid_glob(msg),
-        GrepError::BuildGlob(msg) => messages::grep_build_glob(msg),
+impl From<GrepError> for GrepToolError {
+    fn from(e: GrepError) -> Self {
+        Self(e)
+    }
+}
+
+impl fmt::Debug for GrepToolError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.0, f)
+    }
+}
+
+impl fmt::Display for GrepToolError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            GrepError::InvalidPattern(msg) => write!(f, "invalid regex pattern: {msg}"),
+            GrepError::InvalidGlob(msg) => write!(f, "invalid glob filter: {msg}"),
+            GrepError::BuildGlob(msg) => write!(f, "failed to build glob filter: {msg}"),
+        }
     }
 }
 

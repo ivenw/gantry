@@ -1,12 +1,10 @@
+use std::fmt;
 use std::path::PathBuf;
 
 use gantry_tools::tree::TreeError;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use serde::Deserialize;
-use thiserror::Error;
-
-use super::messages;
 
 pub struct TreeTool;
 
@@ -16,17 +14,39 @@ pub struct TreeArgs {
     pub depth: Option<u32>,
 }
 
-#[derive(Debug, Error)]
-pub enum TreeToolError {
-    #[error("{}", render_tree(.0))]
-    Tree(#[from] TreeError),
+pub struct TreeToolError(pub TreeError);
+
+impl std::error::Error for TreeToolError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.0)
+    }
 }
 
-fn render_tree(err: &TreeError) -> String {
-    match err {
-        TreeError::PathNotFound(path) => messages::tree_path_not_found(path),
-        TreeError::NotADirectory(path) => messages::tree_not_a_directory(path),
-        TreeError::ListFailed { path, source } => messages::tree_list_failed(path, source),
+impl From<TreeError> for TreeToolError {
+    fn from(e: TreeError) -> Self {
+        Self(e)
+    }
+}
+
+impl fmt::Debug for TreeToolError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.0, f)
+    }
+}
+
+impl fmt::Display for TreeToolError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            TreeError::PathNotFound(path) => {
+                write!(f, "path does not exist: {}", path.display())
+            }
+            TreeError::NotADirectory(path) => {
+                write!(f, "path is not a directory: {}", path.display())
+            }
+            TreeError::ListFailed { path, source } => {
+                write!(f, "failed to list directory {}: {source}", path.display())
+            }
+        }
     }
 }
 
