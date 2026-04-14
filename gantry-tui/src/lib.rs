@@ -9,7 +9,7 @@ use crossterm::{
     },
     execute,
 };
-use gantry_core::{AppEvent, Command, Message, Role};
+use gantry_core::{AppEvent, Message, Role};
 use gantry_rpc::{JsonRpcClient, WsConnectionEvent};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
@@ -41,7 +41,7 @@ pub fn run() -> Result<()> {
 
     let (event_handle, mut event_rx) = rt.block_on(client.subscribe_events())?;
     let (stream_result_tx, stream_result_rx) = mpsc::channel::<Result<(), String>>();
-    let (command_result_tx, mut command_result_rx) = mpsc::channel::<String>();
+    let (command_result_tx, command_result_rx) = mpsc::channel::<String>();
 
     let (_terminal_guard, mut terminal) = TerminalGuard::enter()?;
 
@@ -104,6 +104,7 @@ pub fn run() -> Result<()> {
                         app.clear_status();
                     } else if app.is_command_picker_active() {
                         app.input_buffer.clear();
+                        app.deactivate_command_picker();
                     } else {
                         let pending = pending_id.lock().unwrap().clone();
                         if pending.is_some() {
@@ -113,8 +114,11 @@ pub fn run() -> Result<()> {
                             let pending_id_clone = pending.clone();
                             let addr_clone = addr.clone();
                             rt.spawn(async move {
-                                if let Ok(client) = JsonRpcClient::connect_ws(&addr_clone, port).await {
-                                    let _ = client.interrupt_stream(pending_id_clone.unwrap()).await;
+                                if let Ok(client) =
+                                    JsonRpcClient::connect_ws(&addr_clone, port).await
+                                {
+                                    let _ =
+                                        client.interrupt_stream(pending_id_clone.unwrap()).await;
                                 }
                             });
                             app.finish_streaming();
@@ -128,21 +132,12 @@ pub fn run() -> Result<()> {
                     if app.status_message.is_some() {
                         app.clear_status();
                     } else if app.is_command_picker_active() {
-                        let filter = if app.input_buffer.len() > 1 {
-                            app.input_buffer[1..].to_string()
-                        } else {
-                            String::new()
-                        };
-                        let filtered: Vec<&Command> = app
-                            .commands
-                            .iter()
-                            .filter(|c| filter.is_empty() || c.name.starts_with(&filter))
-                            .collect();
-                        if let Some(cmd) = filtered.first() {
+                        if let Some(cmd) = app.selected_command() {
                             let cmd_name = cmd.name.clone();
                             execute_command(&cmd_name, &addr, port, &rt, command_result_tx.clone());
                         }
                         app.input_buffer.clear();
+                        app.deactivate_command_picker();
                     } else if key.modifiers.contains(KeyModifiers::SHIFT) {
                         app.input_buffer.push('\n');
                     } else {
@@ -151,7 +146,7 @@ pub fn run() -> Result<()> {
                             continue;
                         }
                         if input.starts_with('/') {
-                            let filter = if input.len() > 1 { &input[1..] } else { "" };
+                            let filter = input.strip_prefix('/').unwrap_or("");
                             let has_match = app.commands.iter().any(|c| c.name.starts_with(filter));
                             if !has_match {
                                 app.input_buffer.clear();
@@ -189,10 +184,17 @@ pub fn run() -> Result<()> {
                     if app.status_message.is_some() {
                         app.clear_status();
                     }
-                    if app.is_command_picker_active() {
+                    if c == '/' && !app.commands.is_empty() {
                         app.input_buffer.push(c);
-                    } else if c == '/' && !app.commands.is_empty() {
+                        app.activate_command_picker();
+                    } else if app.is_command_picker_active() {
                         app.input_buffer.push(c);
+                        let filter = if app.input_buffer.len() > 1 {
+                            app.input_buffer[1..].to_string()
+                        } else {
+                            String::new()
+                        };
+                        app.update_command_filter(&filter);
                     } else {
                         app.input_buffer.push(c);
                     }
@@ -200,61 +202,35 @@ pub fn run() -> Result<()> {
                 KeyCode::Backspace => {
                     if app.status_message.is_some() {
                         app.clear_status();
+                    } else if app.is_command_picker_active() {
+                        app.input_buffer.pop();
+                        let filter = if app.input_buffer.len() > 1 {
+                            app.input_buffer[1..].to_string()
+                        } else {
+                            String::new()
+                        };
+                        if filter.is_empty() {
+                            app.deactivate_command_picker();
+                        } else {
+                            app.update_command_filter(&filter);
+                        }
                     } else {
                         app.input_buffer.pop();
                     }
                 }
                 KeyCode::Up => {
                     if app.is_command_picker_active() {
-                        let filter = if app.input_buffer.len() > 1 {
-                            app.input_buffer[1..].to_string()
-                        } else {
-                            String::new()
-                        };
-                        let filtered: Vec<&Command> = app
-                            .commands
-                            .iter()
-                            .filter(|c| filter.is_empty() || c.name.starts_with(&filter))
-                            .collect();
-                        if let Some(current_idx) = filtered.iter().position(|c| {
-                            c.name.starts_with(&filter)
-                                && app.input_buffer.len() > 1
-                                && c.name.starts_with(&app.input_buffer[1..])
-                        }) {
-                            let new_idx = if current_idx == 0 {
-                                filtered.len().saturating_sub(1)
-                            } else {
-                                current_idx - 1
-                            };
-                            if let Some(new_cmd) = filtered.get(new_idx) {
-                                app.input_buffer = format!("/{}{}", filter, new_cmd.name[filter.len()..].to_string());
-                            }
+                        app.move_command_selection_up();
+                        if let Some(cmd) = app.selected_command() {
+                            app.input_buffer = format!("/{}", cmd.name);
                         }
                     }
                 }
                 KeyCode::Down => {
                     if app.is_command_picker_active() {
-                        let filter = if app.input_buffer.len() > 1 {
-                            app.input_buffer[1..].to_string()
-                        } else {
-                            String::new()
-                        };
-                        let filtered: Vec<&Command> = app
-                            .commands
-                            .iter()
-                            .filter(|c| filter.is_empty() || c.name.starts_with(&filter))
-                            .collect();
-                        if let Some(current_idx) = filtered.iter().position(|c| {
-                            c.name.starts_with(&filter)
-                                && app.input_buffer.len() > 1
-                                && c.name.starts_with(&app.input_buffer[1..])
-                        }) {
-                            let new_idx = (current_idx + 1) % filtered.len();
-                            if let Some(new_cmd) = filtered.get(new_idx) {
-                                app.input_buffer = format!("/{}{}", filter, new_cmd.name[filter.len()..].to_string());
-                            }
-                        } else if let Some(first) = filtered.first() {
-                            app.input_buffer = format!("/{}", first.name);
+                        app.move_command_selection_down();
+                        if let Some(cmd) = app.selected_command() {
+                            app.input_buffer = format!("/{}", cmd.name);
                         }
                     }
                 }
@@ -372,22 +348,19 @@ fn execute_command(
     rt: &tokio::runtime::Runtime,
     command_result_tx: mpsc::Sender<String>,
 ) {
-    match name {
-        "health" => {
-            let addr_clone = addr.to_string();
-            rt.spawn(async move {
-                let start = std::time::Instant::now();
-                match JsonRpcClient::connect_ws(&addr_clone, port).await {
-                    Ok(_client) => {
-                        let latency = start.elapsed().as_millis();
-                        let _ = command_result_tx.send(format!("Connected: {}ms", latency));
-                    }
-                    Err(e) => {
-                        let _ = command_result_tx.send(format!("Connection failed: {}", e));
-                    }
+    if name == "health" {
+        let addr_clone = addr.to_string();
+        rt.spawn(async move {
+            let start = std::time::Instant::now();
+            match JsonRpcClient::connect_ws(&addr_clone, port).await {
+                Ok(_client) => {
+                    let latency = start.elapsed().as_millis();
+                    let _ = command_result_tx.send(format!("Connected: {}ms", latency));
                 }
-            });
-        }
-        _ => {}
+                Err(e) => {
+                    let _ = command_result_tx.send(format!("Connection failed: {}", e));
+                }
+            }
+        });
     }
 }

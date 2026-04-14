@@ -17,7 +17,7 @@ pub struct App {
     pub streaming_buffer: String,
     pub show_form: bool,
     pub commands: Vec<Command>,
-    pub command_picker_filter: String,
+    pub command_picker: Option<command_picker::CommandPicker>,
     pub status_message: Option<String>,
 }
 
@@ -31,7 +31,7 @@ impl App {
             streaming_buffer: String::new(),
             show_form: false,
             commands: Vec::new(),
-            command_picker_filter: String::new(),
+            command_picker: None,
             status_message: None,
         }
     }
@@ -105,16 +105,38 @@ impl App {
         self.show_form = false;
     }
 
-    pub fn show_command_picker(&mut self) {
-        self.command_picker_filter.clear();
-    }
-
-    pub fn hide_command_picker(&mut self) {
-        self.command_picker_filter.clear();
-    }
-
     pub fn is_command_picker_active(&self) -> bool {
         self.input_buffer.starts_with('/') && !self.commands.is_empty()
+    }
+
+    pub fn activate_command_picker(&mut self) {
+        self.command_picker = Some(command_picker::CommandPicker::new(self.commands.clone()));
+    }
+
+    pub fn deactivate_command_picker(&mut self) {
+        self.command_picker = None;
+    }
+
+    pub fn update_command_filter(&mut self, filter: &str) {
+        if let Some(ref mut picker) = self.command_picker {
+            picker.set_filter(filter);
+        }
+    }
+
+    pub fn move_command_selection_up(&mut self) {
+        if let Some(ref mut picker) = self.command_picker {
+            picker.move_selection_up();
+        }
+    }
+
+    pub fn move_command_selection_down(&mut self) {
+        if let Some(ref mut picker) = self.command_picker {
+            picker.move_selection_down();
+        }
+    }
+
+    pub fn selected_command(&self) -> Option<&Command> {
+        self.command_picker.as_ref().and_then(|p| p.selected_command())
     }
 
     pub fn set_status(&mut self, message: String) {
@@ -129,21 +151,8 @@ impl App {
         let area = frame.area();
         let input_height = if self.status_message.is_some() {
             3
-        } else if self.is_command_picker_active() && !self.commands.is_empty() {
-            let filter = if self.input_buffer.len() > 1 {
-                &self.input_buffer[1..]
-            } else {
-                ""
-            };
-            let filtered: Vec<&Command> = self
-                .commands
-                .iter()
-                .filter(|c| filter.is_empty() || c.name.starts_with(filter))
-                .collect();
-            command_picker::CommandPicker::calc_height(
-                &filtered.iter().map(|c| (*c).clone()).collect::<Vec<_>>(),
-                area.width,
-            )
+        } else if self.is_command_picker_active() {
+            self.command_picker.as_ref().map(|p| p.calc_height(area.width)).unwrap_or(3)
         } else {
             input::Input::calc_height(&self.input_buffer, area.width)
         };
@@ -167,24 +176,10 @@ impl App {
 
         if let Some(ref status) = self.status_message {
             frame.render_widget(input::Input::new(status), input_area);
-        } else if self.is_command_picker_active() && !self.commands.is_empty() {
-            let filter = if self.input_buffer.len() > 1 {
-                self.input_buffer[1..].to_string()
-            } else {
-                String::new()
-            };
-            let filtered: Vec<&Command> = self
-                .commands
-                .iter()
-                .filter(|c| filter.is_empty() || c.name.starts_with(&filter))
-                .collect();
-            frame.render_widget(
-                command_picker::CommandPicker::new(
-                    &filtered.iter().map(|c| (*c).clone()).collect::<Vec<_>>(),
-                    &filter,
-                ),
-                input_area,
-            );
+        } else if self.is_command_picker_active() {
+            if let Some(ref picker) = self.command_picker {
+                frame.render_widget(picker.clone(), input_area);
+            }
         } else {
             frame.render_widget(input::Input::new(&self.input_buffer), input_area);
         }

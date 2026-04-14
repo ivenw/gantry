@@ -5,47 +5,47 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Widget},
 };
 
-pub struct CommandPicker<'a> {
-    commands: &'a [Command],
+#[derive(Clone)]
+pub struct CommandPicker {
+    commands: Vec<Command>,
     filter: String,
     selected_index: usize,
 }
 
-impl<'a> CommandPicker<'a> {
-    pub fn new(commands: &'a [Command], filter: &str) -> Self {
-        let selected_index = 0;
+impl CommandPicker {
+    pub fn new(commands: Vec<Command>) -> Self {
         Self {
             commands,
-            filter: filter.to_string(),
-            selected_index,
+            filter: String::new(),
+            selected_index: 0,
         }
     }
 
-    pub fn filter(&self) -> &str {
-        &self.filter
+    pub fn set_filter(&mut self, filter: &str) {
+        self.filter = filter.to_string();
+        self.selected_index = 0;
     }
 
-    pub fn selected_command(&self) -> Option<&'a Command> {
-        self.commands.get(self.selected_index)
+    pub fn selected_command(&self) -> Option<&Command> {
+        let filtered = self.filtered_commands();
+        filtered.get(self.selected_index).copied()
     }
 
     pub fn move_selection_up(&mut self) {
-        if !self.commands.is_empty() {
-            self.selected_index = if self.selected_index == 0 {
-                self.commands.len() - 1
-            } else {
-                self.selected_index - 1
-            };
+        let filtered = self.filtered_commands();
+        if !filtered.is_empty() {
+            self.selected_index = self.selected_index.saturating_sub(1);
         }
     }
 
     pub fn move_selection_down(&mut self) {
-        if !self.commands.is_empty() {
-            self.selected_index = (self.selected_index + 1) % self.commands.len();
+        let filtered = self.filtered_commands();
+        if !filtered.is_empty() {
+            self.selected_index = (self.selected_index + 1) % filtered.len();
         }
     }
 
-    fn filtered_commands(&self) -> Vec<&'a Command> {
+    fn filtered_commands(&self) -> Vec<&Command> {
         if self.filter.is_empty() {
             return self.commands.iter().collect();
         }
@@ -55,12 +55,8 @@ impl<'a> CommandPicker<'a> {
             .collect()
     }
 
-    pub fn calc_height(commands: &[Command], width: u16) -> u16 {
-        let filtered: Vec<&Command> = if commands.is_empty() {
-            vec![]
-        } else {
-            commands.iter().collect()
-        };
+    pub fn calc_height(&self, width: u16) -> u16 {
+        let filtered = self.filtered_commands();
 
         if filtered.is_empty() {
             return 3;
@@ -83,7 +79,7 @@ impl<'a> CommandPicker<'a> {
     }
 }
 
-impl<'a> Widget for CommandPicker<'a> {
+impl Widget for CommandPicker {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let filtered = self.filtered_commands();
 
