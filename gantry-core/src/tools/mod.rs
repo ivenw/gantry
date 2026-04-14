@@ -1,6 +1,8 @@
 pub mod bash;
 pub mod edit;
+pub mod grep;
 pub mod read;
+pub mod tree;
 pub mod write;
 
 use std::hash::{DefaultHasher, Hasher as _};
