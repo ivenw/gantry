@@ -1,11 +1,17 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+use crate::types::SessionHeader;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionInfo {
     pub id: String,
+    pub created_at_ms: u64,
 }
 
 pub struct SessionStore;
@@ -23,14 +29,27 @@ impl SessionStore {
         })?;
 
         let id = Uuid::new_v4().to_string();
-        let file = sessions_dir.join(format!("{}.jsonl", id));
-        std::fs::File::create(&file)
-            .with_context(|| format!("failed to create session file {}", file.display()))?;
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .context("system time before UNIX_EPOCH")?
+            .as_millis() as u64;
+        let filename = format!("{}_{}.jsonl", now_ms, id);
+        let file_path = sessions_dir.join(&filename);
+
+        let header = SessionHeader::new(id.clone());
+        let mut file = File::create(&file_path)
+            .with_context(|| format!("failed to create session file {}", file_path.display()))?;
+        writeln!(
+            file,
+            "{}",
+            serde_json::to_string(&header).context("failed to serialize session header")?
+        )
+        .with_context(|| format!("failed to write header to {}", file_path.display()))?;
 
         Ok(id)
     }
 
-    /// List all sessions for `project_path`.
+    /// List all sessions for `project_path`, sorted by creation time (oldest first).
     pub fn list(project_path: &Path) -> Result<Vec<SessionInfo>> {
         let sessions_dir = Self::sessions_dir(project_path);
         if !sessions_dir.exists() {
@@ -43,21 +62,31 @@ impl SessionStore {
         {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("jsonl")
-                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-            {
-                sessions.push(SessionInfo {
-                    id: stem.to_string(),
-                });
+            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
             }
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let Some((ms_str, id)) = stem.split_once('_') else {
+                continue;
+            };
+            let Ok(created_at_ms) = ms_str.parse::<u64>() else {
+                continue;
+            };
+            sessions.push(SessionInfo {
+                id: id.to_string(),
+                created_at_ms,
+            });
         }
 
+        sessions.sort_by_key(|s| s.created_at_ms);
         Ok(sessions)
     }
 
     /// Check whether a session file exists under `project_path`.
     pub fn exists(project_path: &Path, session_id: &str) -> bool {
-        Self::session_path(project_path, session_id).exists()
+        Self::find_session_path(project_path, session_id).is_some()
     }
 
     /// Append a message to a session's `.jsonl` file.
@@ -66,28 +95,29 @@ impl SessionStore {
         session_id: &str,
         message: &crate::Message,
     ) -> Result<()> {
-        let path = Self::session_path(project_path, session_id);
+        let path = Self::find_session_path(project_path, session_id)
+            .with_context(|| format!("session not found: {}", session_id))?;
         let line = serde_json::to_string(message).context("failed to serialize message")?;
         let mut file = std::fs::OpenOptions::new()
             .append(true)
             .open(&path)
             .with_context(|| format!("failed to open session file {}", path.display()))?;
-        use std::io::Write;
         writeln!(file, "{}", line)
             .with_context(|| format!("failed to write to session file {}", path.display()))?;
         Ok(())
     }
 
-    /// Load all messages from a session's `.jsonl` file.
+    /// Load all messages from a session's `.jsonl` file (skips the header line).
     pub fn load_messages(project_path: &Path, session_id: &str) -> Result<Vec<crate::Message>> {
-        let path = Self::session_path(project_path, session_id);
-        if !path.exists() {
-            return Ok(vec![]);
-        }
+        let path = Self::find_session_path(project_path, session_id)
+            .with_context(|| format!("session not found: {}", session_id))?;
         let contents = std::fs::read_to_string(&path)
             .with_context(|| format!("failed to read session file {}", path.display()))?;
         let mut messages = vec![];
-        for line in contents.lines() {
+        for line in contents.lines().skip(1) {
+            if line.trim().is_empty() {
+                continue;
+            }
             let msg: crate::Message = serde_json::from_str(line)
                 .with_context(|| format!("invalid JSON line in {}", path.display()))?;
             messages.push(msg);
@@ -95,12 +125,37 @@ impl SessionStore {
         Ok(messages)
     }
 
+    /// Load the session header (first line of the file).
+    pub fn load_header(project_path: &Path, session_id: &str) -> Result<SessionHeader> {
+        let path = Self::find_session_path(project_path, session_id)
+            .with_context(|| format!("session not found: {}", session_id))?;
+        let contents = std::fs::read_to_string(&path)
+            .with_context(|| format!("failed to read session file {}", path.display()))?;
+        let first_line = contents
+            .lines()
+            .next()
+            .with_context(|| format!("session file is empty: {}", path.display()))?;
+        serde_json::from_str(first_line)
+            .with_context(|| format!("invalid header in {}", path.display()))
+    }
+
     fn sessions_dir(project_path: &Path) -> PathBuf {
         project_path.join(".gantry").join("sessions")
     }
 
-    fn session_path(project_path: &Path, session_id: &str) -> PathBuf {
-        Self::sessions_dir(project_path).join(format!("{}.jsonl", session_id))
+    /// Find the path of a session file by scanning for `*_{session_id}.jsonl`.
+    fn find_session_path(project_path: &Path, session_id: &str) -> Option<PathBuf> {
+        let sessions_dir = Self::sessions_dir(project_path);
+        let suffix = format!("_{}.jsonl", session_id);
+        std::fs::read_dir(&sessions_dir).ok()?.find_map(|entry| {
+            let path = entry.ok()?.path();
+            let name = path.file_name()?.to_str()?;
+            if name.ends_with(&suffix) {
+                Some(path)
+            } else {
+                None
+            }
+        })
     }
 }
 
@@ -112,7 +167,6 @@ mod tests {
 
     fn project_dir() -> TempDir {
         let tmp = TempDir::new().unwrap();
-        // Pre-create the sessions dir as register_project would
         std::fs::create_dir_all(tmp.path().join(".gantry").join("sessions")).unwrap();
         tmp
     }
@@ -130,13 +184,17 @@ mod tests {
         let id = SessionStore::create(tmp.path()).unwrap();
 
         assert!(!id.is_empty());
-        assert!(
-            tmp.path()
-                .join(".gantry")
-                .join("sessions")
-                .join(format!("{}.jsonl", id))
-                .exists()
-        );
+        assert!(SessionStore::exists(tmp.path(), &id));
+    }
+
+    #[test]
+    fn create_writes_header_as_first_line() {
+        let tmp = project_dir();
+        let id = SessionStore::create(tmp.path()).unwrap();
+        let header = SessionStore::load_header(tmp.path(), &id).unwrap();
+        assert_eq!(header.id, id);
+        assert_eq!(header.kind, "header");
+        assert!(!header.created_at.is_empty());
     }
 
     #[test]
@@ -147,6 +205,19 @@ mod tests {
         let sessions = SessionStore::list(tmp.path()).unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].id, id);
+    }
+
+    #[test]
+    fn list_sorts_by_creation_time() {
+        let tmp = project_dir();
+        let id1 = SessionStore::create(tmp.path()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let id2 = SessionStore::create(tmp.path()).unwrap();
+
+        let sessions = SessionStore::list(tmp.path()).unwrap();
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[0].id, id1);
+        assert_eq!(sessions[1].id, id2);
     }
 
     #[test]
@@ -187,6 +258,9 @@ mod tests {
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded[0].content, "hello");
         assert_eq!(loaded[1].content, "hi there");
+        assert!(!loaded[0].id.is_empty());
+        assert!(!loaded[0].created_at.is_empty());
+        assert!(loaded[0].parent_id.is_none());
     }
 
     #[test]

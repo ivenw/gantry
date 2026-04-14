@@ -1,5 +1,10 @@
+use chrono::SecondsFormat;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+fn now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -21,17 +26,47 @@ impl Role {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SessionHeader {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub id: String,
+    pub created_at: String,
+}
+
+impl SessionHeader {
+    pub fn new(id: String) -> Self {
+        Self {
+            kind: "header".to_string(),
+            id,
+            created_at: now_rfc3339(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Message {
+    pub id: String,
+    pub parent_id: Option<String>,
     pub role: Role,
     pub content: String,
+    pub created_at: String,
 }
 
 impl Message {
     pub fn new(role: Role, content: impl Into<String>) -> Self {
         Self {
+            id: Uuid::new_v4().to_string(),
+            parent_id: None,
             role,
             content: content.into(),
+            created_at: now_rfc3339(),
         }
+    }
+
+    pub fn with_parent(mut self, parent_id: String) -> Self {
+        self.parent_id = Some(parent_id);
+        self
     }
 }
 

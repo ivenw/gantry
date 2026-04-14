@@ -1,7 +1,8 @@
 use crate::agent_factory::RigAgentFactory;
 use crate::event_bus::EventBus;
 use crate::project_registry::ProjectRegistry;
-use crate::session_store::SessionStore;
+use crate::session::manager::SessionManager;
+use crate::session::store::SessionStore;
 use crate::state::ConversationState;
 use crate::{
     AppEvent, ErrorEvent, FormHiddenEvent, FormShownEvent, InitEvent, Message,
@@ -26,6 +27,7 @@ use uuid::Uuid;
 pub struct ActiveSession {
     pub project_path: PathBuf,
     pub session_id: String,
+    session_manager: Arc<Mutex<SessionManager>>,
     state: Arc<Mutex<ConversationState>>,
     event_bus: EventBus,
     agent_factory: RigAgentFactory,
@@ -36,16 +38,18 @@ pub struct ActiveSession {
 impl ActiveSession {
     fn new(
         project_path: PathBuf,
-        session_id: String,
+        session_manager: SessionManager,
         initial_messages: Vec<Message>,
         agent_factory: RigAgentFactory,
         default_selection: ModelSelection,
     ) -> Self {
+        let session_id = session_manager.session_id.clone();
         let mut state = ConversationState::new(default_selection);
         state.messages = initial_messages;
         Self {
             project_path,
             session_id,
+            session_manager: Arc::new(Mutex::new(session_manager)),
             state: Arc::new(Mutex::new(state)),
             event_bus: EventBus::new(1000),
             agent_factory,
@@ -115,15 +119,24 @@ impl ActiveSession {
     pub async fn send_message(&self, content: String) -> Vec<Message> {
         dbg!("session.send_message.request", &content);
         {
+            let mut mgr = self.session_manager.lock().await;
+            let msg = mgr
+                .append(Role::User, content)
+                .cloned()
+                .unwrap_or_else(|_| Message::new(Role::Error, "failed to persist message"));
             let mut state = self.state.lock().await;
-            let msg = Message::new(Role::User, content);
-            state.messages.push(msg.clone());
-            let _ = SessionStore::append_message(&self.project_path, &self.session_id, &msg);
+            state.messages.push(msg);
         }
 
-        let snapshot = self.get_messages().await;
+        let context = {
+            let mgr = self.session_manager.lock().await;
+            mgr.context_messages()
+                .into_iter()
+                .cloned()
+                .collect::<Vec<_>>()
+        };
         let selection = self.get_active_selection().await;
-        let mut rig_messages = Self::to_rig_messages(snapshot);
+        let mut rig_messages = Self::to_rig_messages(context);
         dbg!("session.send_message.snapshot_len", rig_messages.len());
         let response = match rig_messages.pop() {
             Some(prompt) => match self.agent_factory.agent(&selection).await {
@@ -148,9 +161,12 @@ impl ActiveSession {
             ),
         };
 
+        {
+            let mut mgr = self.session_manager.lock().await;
+            let _ = mgr.append(response.role, response.content.clone());
+        }
         let mut state = self.state.lock().await;
-        state.messages.push(response.clone());
-        let _ = SessionStore::append_message(&self.project_path, &self.session_id, &response);
+        state.messages.push(response);
         dbg!(
             "session.send_message.response_messages_len",
             state.messages.len()
@@ -174,10 +190,13 @@ impl ActiveSession {
         let pending = PendingMessage::new(req.content.clone());
 
         {
+            let mut mgr = self.session_manager.lock().await;
+            let msg = mgr
+                .append(Role::User, req.content)
+                .cloned()
+                .unwrap_or_else(|_| Message::new(Role::Error, "failed to persist message"));
             let mut state = self.state.lock().await;
-            let msg = Message::new(Role::User, req.content);
-            state.messages.push(msg.clone());
-            let _ = SessionStore::append_message(&self.project_path, &self.session_id, &msg);
+            state.messages.push(msg);
             state.pending_message = Some(pending.clone());
         }
 
@@ -295,10 +314,13 @@ impl ActiveSession {
         dbg!("session.stream_message.end_published");
 
         {
+            let mut mgr = self.session_manager.lock().await;
+            let msg = mgr
+                .append(Role::Assistant, accumulated)
+                .cloned()
+                .unwrap_or_else(|_| Message::new(Role::Error, "failed to persist message"));
             let mut state = self.state.lock().await;
-            let msg = Message::new(Role::Assistant, accumulated);
-            state.messages.push(msg.clone());
-            let _ = SessionStore::append_message(&self.project_path, &self.session_id, &msg);
+            state.messages.push(msg);
         }
 
         self.clear_pending(&pending.id).await;
@@ -510,7 +532,12 @@ impl AppService {
             return Ok(session.clone());
         }
 
-        let messages = SessionStore::load_messages(&abs, session_id)?;
+        let session_manager = SessionManager::load(&abs, session_id)?;
+        let messages = session_manager
+            .context_messages()
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
         let default_selection = self
             .agent_factory
             .catalog()
@@ -519,7 +546,7 @@ impl AppService {
 
         let session = Arc::new(ActiveSession::new(
             abs,
-            session_id.to_string(),
+            session_manager,
             messages,
             self.agent_factory.clone(),
             default_selection,

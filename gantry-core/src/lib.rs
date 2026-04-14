@@ -3,7 +3,7 @@ pub mod event_bus;
 pub mod project_registry;
 pub mod provider_config;
 pub mod service;
-pub mod session_store;
+pub mod session;
 pub mod state;
 pub mod tools;
 pub mod types;
@@ -14,9 +14,11 @@ pub use provider_config::{
     ProviderConfigCatalog, ProviderId,
 };
 pub use service::AppService;
-pub use session_store::SessionInfo;
+pub use session::manager::SessionManager;
+pub use session::store::SessionInfo;
 pub use types::{
     AppEvent, ErrorEvent, FormHiddenEvent, FormShownEvent, FormState, InitEvent, Message,
     MessageReceivedEvent, PendingClearedEvent, PendingMessage, Role, SelectFormRequest,
-    SelectFormResponse, StreamEndEvent, StreamMessageRequest, StreamStartEvent, TokenEvent,
+    SelectFormResponse, SessionHeader, StreamEndEvent, StreamMessageRequest, StreamStartEvent,
+    TokenEvent,
 };
