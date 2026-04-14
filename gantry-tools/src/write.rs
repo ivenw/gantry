@@ -1,18 +1,23 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use anyhow::{Result, bail};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum WriteError {
+    #[error("file already exists: {0}")]
+    FileExists(PathBuf),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
 
 /// Creates a new file at `path` with the given `content`.
 ///
-/// Returns an error if the file already exists — use `edit_file` to modify existing files.
+/// Returns an error if the file already exists.
 /// Intermediate directories are created automatically.
 /// An empty `content` string produces a 0-byte file.
-pub fn write_file(path: &Path, content: &str) -> Result<()> {
+pub fn write_file(path: &Path, content: &str) -> Result<(), WriteError> {
     if path.exists() {
-        bail!(
-            "file already exists: {}; use edit_file to modify existing files",
-            path.display()
-        );
+        return Err(WriteError::FileExists(path.to_path_buf()));
     }
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
@@ -51,9 +56,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("existing.txt");
         fs::write(&path, "original").unwrap();
-        let err = write_file(&path, "new content").unwrap_err();
-        assert!(err.to_string().contains("already exists"));
-        assert!(err.to_string().contains("edit_file"));
+        assert!(matches!(
+            write_file(&path, "new content").unwrap_err(),
+            WriteError::FileExists(_)
+        ));
         assert_eq!(fs::read_to_string(&path).unwrap(), "original");
     }
 

@@ -1,13 +1,23 @@
 use std::path::Path;
 
-use anyhow::{Result, anyhow};
 use grep::{
     regex::RegexMatcherBuilder,
     searcher::{BinaryDetection, SearcherBuilder, Sink, SinkMatch},
 };
 use ignore::{WalkBuilder, overrides::OverrideBuilder};
+use thiserror::Error;
 
 const DEFAULT_MAX_RESULTS: usize = 100;
+
+#[derive(Debug, Error)]
+pub enum GrepError {
+    #[error("invalid pattern: {0}")]
+    InvalidPattern(String),
+    #[error("invalid glob filter: {0}")]
+    InvalidGlob(String),
+    #[error("failed to build glob filter: {0}")]
+    BuildGlob(String),
+}
 
 /// Searches for `pattern` (a regex) in `path`, recursing into directories.
 ///
@@ -23,14 +33,14 @@ pub fn grep_files(
     case_insensitive: bool,
     glob_filter: Option<&str>,
     max_results: Option<usize>,
-) -> Result<String> {
+) -> Result<String, GrepError> {
     let cap = max_results.unwrap_or(DEFAULT_MAX_RESULTS);
 
     let matcher = RegexMatcherBuilder::new()
         .case_insensitive(case_insensitive)
         .multi_line(false)
         .build(pattern)
-        .map_err(|e| anyhow!("invalid pattern: {e}"))?;
+        .map_err(|e| GrepError::InvalidPattern(e.to_string()))?;
 
     let mut searcher = SearcherBuilder::new()
         .binary_detection(BinaryDetection::quit(b'\x00'))
@@ -42,10 +52,10 @@ pub fn grep_files(
         let mut overrides = OverrideBuilder::new(path);
         overrides
             .add(glob)
-            .map_err(|e| anyhow!("invalid glob filter: {e}"))?;
+            .map_err(|e| GrepError::InvalidGlob(e.to_string()))?;
         let built = overrides
             .build()
-            .map_err(|e| anyhow!("failed to build glob filter: {e}"))?;
+            .map_err(|e| GrepError::BuildGlob(e.to_string()))?;
         walk_builder.overrides(built);
     }
 
@@ -59,7 +69,7 @@ pub fn grep_files(
             Ok(e) => e,
             Err(_) => continue,
         };
-        if !entry.file_type().map_or(false, |ft| ft.is_file()) {
+        if !entry.file_type().is_some_and(|ft| ft.is_file()) {
             continue;
         }
 
@@ -86,7 +96,7 @@ pub fn grep_files(
         }
     }
 
-    Ok(format_results(&grouped, truncated, total, cap))
+    Ok(format_results(&grouped, truncated, cap))
 }
 
 /// A `Sink` implementation that collects `(line_number, line_content)` pairs
@@ -115,12 +125,7 @@ impl Sink for MatchCollector {
 }
 
 /// Formats collected match groups into the final output string.
-fn format_results(
-    grouped: &[(String, Vec<(u64, String)>)],
-    truncated: bool,
-    total: usize,
-    cap: usize,
-) -> String {
+fn format_results(grouped: &[(String, Vec<(u64, String)>)], truncated: bool, cap: usize) -> String {
     if grouped.is_empty() {
         return String::new();
     }
@@ -145,10 +150,6 @@ fn format_results(
     }
 
     if truncated {
-        // Count how many matches were not shown.
-        // `total` is capped at `cap`; the actual overflow is unknown, so we
-        // just note the cap was hit.
-        let _ = total; // used via `cap` message below
         out.push_str(&format!("\n... results truncated at {cap} matches\n"));
     }
 
@@ -183,10 +184,7 @@ mod tests {
 
     #[test]
     fn recurses_into_subdirectory() {
-        let dir = setup(&[
-            ("a/foo.rs", "fn foo() {}\n"),
-            ("b/bar.rs", "fn bar() {}\n"),
-        ]);
+        let dir = setup(&[("a/foo.rs", "fn foo() {}\n"), ("b/bar.rs", "fn bar() {}\n")]);
         let result = grep_files("fn", dir.path(), false, None, None).unwrap();
         assert!(result.contains("fn foo()"));
         assert!(result.contains("fn bar()"));
@@ -197,9 +195,7 @@ mod tests {
         let dir = setup(&[("f.txt", "Hello World\nhello world\n")]);
         let sensitive = grep_files("Hello", dir.path(), false, None, None).unwrap();
         let insensitive = grep_files("Hello", dir.path(), true, None, None).unwrap();
-        // sensitive: only 1 match
         assert_eq!(sensitive.lines().filter(|l| l.contains("Hello")).count(), 1);
-        // insensitive: both lines
         assert_eq!(insensitive.lines().filter(|l| l.contains("ello")).count(), 2);
     }
 
@@ -234,21 +230,18 @@ mod tests {
     #[test]
     fn invalid_pattern_returns_error() {
         let dir = setup(&[("f.txt", "content\n")]);
-        let err = grep_files("(unclosed", dir.path(), false, None, None);
-        assert!(err.is_err());
-        assert!(err.unwrap_err().to_string().contains("invalid pattern"));
+        assert!(matches!(
+            grep_files("(unclosed", dir.path(), false, None, None).unwrap_err(),
+            GrepError::InvalidPattern(_)
+        ));
     }
 
     #[test]
     fn output_grouped_by_file() {
-        let dir = setup(&[
-            ("a.rs", "fn alpha() {}\n"),
-            ("b.rs", "fn beta() {}\n"),
-        ]);
+        let dir = setup(&[("a.rs", "fn alpha() {}\n"), ("b.rs", "fn beta() {}\n")]);
         let result = grep_files("fn", dir.path(), false, None, None).unwrap();
         let a_pos = result.find("a.rs").unwrap_or(usize::MAX);
         let b_pos = result.find("b.rs").unwrap_or(usize::MAX);
-        // Both files present; order may vary but each appears once
         assert_ne!(a_pos, usize::MAX);
         assert_ne!(b_pos, usize::MAX);
     }

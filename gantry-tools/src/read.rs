@@ -1,8 +1,14 @@
 use std::path::Path;
 
-use anyhow::Result;
+use thiserror::Error;
 
-use super::hash_line;
+use crate::hash_line;
+
+#[derive(Debug, Error)]
+pub enum ReadError {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
 
 /// Reads a file from disk and returns its contents formatted with line numbers and hashes.
 ///
@@ -11,7 +17,7 @@ use super::hash_line;
 ///
 /// `offset` is 1-indexed; if provided, reading starts at that line number.
 /// `limit` caps the number of lines returned.
-pub fn read_file(path: &Path, offset: Option<usize>, limit: Option<usize>) -> Result<String> {
+pub fn read_file(path: &Path, offset: Option<usize>, limit: Option<usize>) -> Result<String, ReadError> {
     let content = std::fs::read_to_string(path)?;
     Ok(format_hashlines(&content, offset, limit))
 }
@@ -48,7 +54,7 @@ fn format_hashlines(content: &str, offset: Option<usize>, limit: Option<usize>) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::hash_line;
+    use crate::hash_line;
 
     const SAMPLE: &str = "fn main() {\n    println!(\"hello\");\n}";
 
@@ -94,7 +100,6 @@ mod tests {
             .join("\n");
         let out = format_hashlines(&content, None, None);
         let first_line = out.lines().next().unwrap();
-        // line 1 should be padded to width 2: " 1#..."
         assert!(
             first_line.starts_with(" 1#"),
             "expected ' 1#...', got: {first_line}"
@@ -123,9 +128,6 @@ mod tests {
     fn trailing_newline_not_extra_line() {
         let with_newline = format_hashlines("a\nb\n", None, None);
         let without_newline = format_hashlines("a\nb", None, None);
-        assert_eq!(
-            with_newline.lines().count(),
-            without_newline.lines().count()
-        );
+        assert_eq!(with_newline.lines().count(), without_newline.lines().count());
     }
 }

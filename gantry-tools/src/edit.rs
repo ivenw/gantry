@@ -1,9 +1,9 @@
 use std::path::Path;
 use std::str::FromStr;
 
-use anyhow::{Result, anyhow, bail};
+use thiserror::Error;
 
-use super::hash_line;
+use crate::hash_line;
 
 #[derive(Debug, Clone)]
 pub struct EditOp {
@@ -18,28 +18,76 @@ pub struct LineRef {
     pub hash: String,
 }
 
+#[derive(Debug, Error)]
+pub enum InvalidLineRefReason {
+    #[error("expected 'N#XX' format")]
+    MissingHash,
+    #[error("invalid line number")]
+    InvalidLineNumber,
+    #[error("line numbers are 1-indexed, got 0")]
+    ZeroLineNumber,
+    #[error("hash must be exactly 2 characters")]
+    BadHashLength,
+}
+
+#[derive(Debug, Clone)]
+pub struct StaleLine {
+    pub line: usize,
+    pub kind: StaleLineKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum StaleLineKind {
+    OutOfRange { file_len: usize },
+    HashMismatch { expected: String, actual: String },
+}
+
+#[derive(Debug, Error)]
+pub enum EditError {
+    #[error("invalid line ref {raw:?}: {reason}")]
+    InvalidLineRef { raw: String, reason: InvalidLineRefReason },
+    #[error("stale line references")]
+    StaleReferences(Vec<StaleLine>),
+    #[error("overlapping edits: [{a_start}-{a_end}] and [{b_start}-{b_end}]")]
+    OverlappingEdits {
+        a_start: usize,
+        a_end: usize,
+        b_start: usize,
+        b_end: usize,
+    },
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
+
 impl FromStr for LineRef {
-    type Err = anyhow::Error;
+    type Err = EditError;
 
     /// Parses a line reference of the form `"N#XX"` where `N` is a 1-indexed line number
     /// and `XX` is a 2-character content hash.
-    fn from_str(s: &str) -> Result<Self> {
-        let (line_part, hash) = s
-            .split_once('#')
-            .ok_or_else(|| anyhow!("invalid line ref {s:?}: expected 'N#XX' format"))?;
-        let line = line_part
-            .parse::<usize>()
-            .map_err(|_| anyhow!("invalid line number in ref {s:?}"))?;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let (line_part, hash) =
+            s.split_once('#')
+                .ok_or_else(|| EditError::InvalidLineRef {
+                    raw: s.to_string(),
+                    reason: InvalidLineRefReason::MissingHash,
+                })?;
+        let line = line_part.parse::<usize>().map_err(|_| EditError::InvalidLineRef {
+            raw: s.to_string(),
+            reason: InvalidLineRefReason::InvalidLineNumber,
+        })?;
         if line == 0 {
-            bail!("line numbers are 1-indexed, got 0 in ref {s:?}");
+            return Err(EditError::InvalidLineRef {
+                raw: s.to_string(),
+                reason: InvalidLineRefReason::ZeroLineNumber,
+            });
         }
         if hash.len() != 2 {
-            bail!("hash in ref {s:?} must be exactly 2 characters");
+            return Err(EditError::InvalidLineRef {
+                raw: s.to_string(),
+                reason: InvalidLineRefReason::BadHashLength,
+            });
         }
-        Ok(Self {
-            line,
-            hash: hash.to_string(),
-        })
+        Ok(Self { line, hash: hash.to_string() })
     }
 }
 
@@ -48,7 +96,7 @@ impl FromStr for LineRef {
 /// All line references are validated against their hashes before any edits are applied.
 /// If any reference is stale, the entire batch is rejected. Overlapping ranges are also rejected.
 /// Operations are applied bottom-up so earlier line numbers remain valid throughout.
-pub fn edit_file(path: &Path, ops: Vec<EditOp>) -> Result<()> {
+pub fn edit_file(path: &Path, ops: Vec<EditOp>) -> Result<(), EditError> {
     let content = std::fs::read_to_string(path)?;
     let lines: Vec<&str> = content.lines().collect();
     let result = apply_edits(&lines, &ops)?;
@@ -57,7 +105,7 @@ pub fn edit_file(path: &Path, ops: Vec<EditOp>) -> Result<()> {
 }
 
 /// Validates and applies edit operations to a slice of lines, returning the modified lines.
-fn apply_edits(lines: &[&str], ops: &[EditOp]) -> Result<Vec<String>> {
+fn apply_edits(lines: &[&str], ops: &[EditOp]) -> Result<Vec<String>, EditError> {
     validate_hashes(lines, ops)?;
 
     let mut sorted_ops = ops.to_vec();
@@ -96,27 +144,29 @@ fn apply_edits(lines: &[&str], ops: &[EditOp]) -> Result<Vec<String>> {
 
 /// Checks that every line reference in `ops` matches the actual content hash at that line.
 /// Collects all mismatches and returns them together rather than failing on the first.
-fn validate_hashes(lines: &[&str], ops: &[EditOp]) -> Result<()> {
-    let mut stale: Vec<String> = vec![];
+fn validate_hashes(lines: &[&str], ops: &[EditOp]) -> Result<(), EditError> {
+    let mut stale: Vec<StaleLine> = vec![];
 
     for op in ops {
         let refs = std::iter::once(&op.start).chain(op.end.as_ref());
         for lref in refs {
             let idx = lref.line - 1;
             if idx >= lines.len() {
-                stale.push(format!(
-                    "line {} does not exist (file has {} lines)",
-                    lref.line,
-                    lines.len()
-                ));
+                stale.push(StaleLine {
+                    line: lref.line,
+                    kind: StaleLineKind::OutOfRange { file_len: lines.len() },
+                });
                 continue;
             }
             let actual = hash_line(lines[idx]);
             if actual != lref.hash {
-                stale.push(format!(
-                    "line {} is stale: expected hash '{}', got '{}'",
-                    lref.line, lref.hash, actual
-                ));
+                stale.push(StaleLine {
+                    line: lref.line,
+                    kind: StaleLineKind::HashMismatch {
+                        expected: lref.hash.clone(),
+                        actual,
+                    },
+                });
             }
         }
     }
@@ -124,12 +174,12 @@ fn validate_hashes(lines: &[&str], ops: &[EditOp]) -> Result<()> {
     if stale.is_empty() {
         Ok(())
     } else {
-        Err(anyhow!("stale line references:\n{}", stale.join("\n")))
+        Err(EditError::StaleReferences(stale))
     }
 }
 
 /// Verifies that no two operations in the (descending) sorted list touch overlapping line ranges.
-fn check_overlaps(sorted_ops: &[EditOp]) -> Result<()> {
+fn check_overlaps(sorted_ops: &[EditOp]) -> Result<(), EditError> {
     // ops are sorted descending by start line
     for i in 0..sorted_ops.len().saturating_sub(1) {
         let a = &sorted_ops[i];
@@ -138,13 +188,12 @@ fn check_overlaps(sorted_ops: &[EditOp]) -> Result<()> {
         let b_end = b.end.as_ref().map(|e| e.line).unwrap_or(b.start.line);
         // a starts higher, b starts lower; overlap if b's end >= a's start
         if b_end >= a.start.line {
-            bail!(
-                "overlapping edits: [{}-{}] and [{}-{}]",
-                b.start.line,
+            return Err(EditError::OverlappingEdits {
+                a_start: a.start.line,
+                a_end,
+                b_start: b.start.line,
                 b_end,
-                a.start.line,
-                a_end
-            );
+            });
         }
     }
     Ok(())
@@ -163,10 +212,7 @@ mod tests {
     }
 
     fn ref_of(line: usize, content: &str) -> LineRef {
-        LineRef {
-            line,
-            hash: hash(content),
-        }
+        LineRef { line, hash: hash(content) }
     }
 
     #[test]
@@ -220,7 +266,6 @@ mod tests {
     #[test]
     fn batch_top_to_bottom_order_applied_correctly() {
         let src = lines("a\nb\nc\nd\ne");
-        // both ops specified top-to-bottom; tool must reorder
         let ops = vec![
             EditOp {
                 start: ref_of(2, "b"),
@@ -241,14 +286,14 @@ mod tests {
     fn staleness_rejection() {
         let src = lines("a\nb\nc");
         let ops = vec![EditOp {
-            start: LineRef {
-                line: 2,
-                hash: "xx".into(),
-            }, // wrong hash
+            start: LineRef { line: 2, hash: "xx".into() },
             end: Some(ref_of(2, "b")),
             content: Some("Z".into()),
         }];
-        assert!(apply_edits(&src, &ops).is_err());
+        assert!(matches!(
+            apply_edits(&src, &ops).unwrap_err(),
+            EditError::StaleReferences(_)
+        ));
     }
 
     #[test]
@@ -261,15 +306,15 @@ mod tests {
                 content: Some("A".into()),
             },
             EditOp {
-                start: LineRef {
-                    line: 2,
-                    hash: "xx".into(),
-                }, // stale
+                start: LineRef { line: 2, hash: "xx".into() },
                 end: Some(ref_of(2, "b")),
                 content: Some("B".into()),
             },
         ];
-        assert!(apply_edits(&src, &ops).is_err());
+        assert!(matches!(
+            apply_edits(&src, &ops).unwrap_err(),
+            EditError::StaleReferences(_)
+        ));
     }
 
     #[test]
@@ -287,7 +332,10 @@ mod tests {
                 content: Some("Y".into()),
             },
         ];
-        assert!(apply_edits(&src, &ops).is_err());
+        assert!(matches!(
+            apply_edits(&src, &ops).unwrap_err(),
+            EditError::OverlappingEdits { .. }
+        ));
     }
 
     #[test]
@@ -299,9 +347,21 @@ mod tests {
 
     #[test]
     fn line_ref_parse_invalid() {
-        assert!("abc".parse::<LineRef>().is_err());
-        assert!("0#ab".parse::<LineRef>().is_err());
-        assert!("5#a".parse::<LineRef>().is_err()); // hash too short
-        assert!("5#abc".parse::<LineRef>().is_err()); // hash too long
+        assert!(matches!(
+            "abc".parse::<LineRef>().unwrap_err(),
+            EditError::InvalidLineRef { reason: InvalidLineRefReason::MissingHash, .. }
+        ));
+        assert!(matches!(
+            "0#ab".parse::<LineRef>().unwrap_err(),
+            EditError::InvalidLineRef { reason: InvalidLineRefReason::ZeroLineNumber, .. }
+        ));
+        assert!(matches!(
+            "5#a".parse::<LineRef>().unwrap_err(),
+            EditError::InvalidLineRef { reason: InvalidLineRefReason::BadHashLength, .. }
+        ));
+        assert!(matches!(
+            "5#abc".parse::<LineRef>().unwrap_err(),
+            EditError::InvalidLineRef { reason: InvalidLineRefReason::BadHashLength, .. }
+        ));
     }
 }

@@ -1,17 +1,31 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
 use rust_tree::rust_tree::{options::TreeOptions, traversal::list_directory_as_string};
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum TreeError {
+    #[error("path does not exist: {0}")]
+    PathNotFound(PathBuf),
+    #[error("path is not a directory: {0}")]
+    NotADirectory(PathBuf),
+    #[error("failed to list directory {path}: {source}")]
+    ListFailed {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+}
 
 /// Lists a directory tree as a string.
 ///
 /// `depth` limits how many levels deep to recurse (`None` = unlimited).
-pub fn tree(path: &Path, depth: Option<u32>) -> Result<String> {
+pub fn tree(path: &Path, depth: Option<u32>) -> Result<String, TreeError> {
     if !path.exists() {
-        bail!("path does not exist: {}", path.display());
+        return Err(TreeError::PathNotFound(path.to_path_buf()));
     }
     if !path.is_dir() {
-        bail!("path is not a directory: {}", path.display());
+        return Err(TreeError::NotADirectory(path.to_path_buf()));
     }
 
     let options = TreeOptions {
@@ -42,8 +56,10 @@ pub fn tree(path: &Path, depth: Option<u32>) -> Result<String> {
         prune: false,
     };
 
-    list_directory_as_string(path, &options)
-        .context(format!("failed to list directory: {}", path.display()))
+    list_directory_as_string(path, &options).map_err(|source| TreeError::ListFailed {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 #[cfg(test)]
@@ -77,8 +93,10 @@ mod tests {
 
     #[test]
     fn nonexistent_path() {
-        let err = tree(Path::new("/nonexistent/path/xyz"), None).unwrap_err();
-        assert!(err.to_string().contains("does not exist"));
+        assert!(matches!(
+            tree(Path::new("/nonexistent/path/xyz"), None).unwrap_err(),
+            TreeError::PathNotFound(_)
+        ));
     }
 
     #[test]
@@ -87,7 +105,9 @@ mod tests {
         let file = dir.path().join("a.txt");
         fs::write(&file, "").unwrap();
 
-        let err = tree(&file, None).unwrap_err();
-        assert!(err.to_string().contains("not a directory"));
+        assert!(matches!(
+            tree(&file, None).unwrap_err(),
+            TreeError::NotADirectory(_)
+        ));
     }
 }
