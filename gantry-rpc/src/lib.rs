@@ -2,7 +2,8 @@ mod client;
 pub mod server;
 
 pub use gantry_core::{
-    AppEvent, Message, PendingMessage, SelectFormRequest, SelectFormResponse, StreamMessageRequest,
+    AppEvent, Command, Message, PendingMessage, SelectFormRequest, SelectFormResponse,
+    StreamMessageRequest,
 };
 use jsonrpsee::core::{RpcResult, SubscriptionResult};
 use jsonrpsee::proc_macros::rpc;
@@ -35,8 +36,10 @@ pub trait GantryRpc {
 
     #[method(name = "interrupt_stream")]
     async fn interrupt_stream(&self, message_id: String) -> RpcResult<bool>;
+
+    #[method(name = "ping")]
+    async fn ping(&self) -> RpcResult<()>;
+
+    #[method(name = "get_commands")]
+    async fn get_commands(&self) -> RpcResult<Vec<Command>>;
 }
-pub use gantry_core::{
-    ErrorEvent, FormHiddenEvent, FormShownEvent, FormState, InitEvent, MessageReceivedEvent,
-    PendingClearedEvent, Role, StreamEndEvent, StreamStartEvent, TokenEvent,
-};

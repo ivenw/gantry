@@ -1,6 +1,7 @@
 use anyhow::Result;
 use gantry_core::{
-    AppEvent, Message, PendingMessage, SelectFormRequest, SelectFormResponse, StreamMessageRequest,
+    AppEvent, Command, Message, PendingMessage, SelectFormRequest, SelectFormResponse,
+    StreamMessageRequest,
 };
 use jsonrpsee::core::client::Subscription;
 use jsonrpsee::ws_client::{WsClient, WsClientBuilder};
@@ -92,5 +93,13 @@ impl JsonRpcClient {
     ) -> Result<SelectFormResponse> {
         let req = SelectFormRequest { form_id, selection };
         Ok(self.inner.select_form(req).await?)
+    }
+
+    pub async fn ping(&self) -> Result<()> {
+        Ok(self.inner.ping().await?)
+    }
+
+    pub async fn get_commands(&self) -> Result<Vec<Command>> {
+        Ok(self.inner.get_commands().await?)
     }
 }

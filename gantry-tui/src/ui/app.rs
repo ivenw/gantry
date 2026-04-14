@@ -1,6 +1,7 @@
 use super::chat;
+use super::command_picker;
 use super::input;
-use gantry_core::{Message, Role};
+use gantry_core::{Command, Message, Role};
 
 use ratatui::{
     Frame,
@@ -15,6 +16,9 @@ pub struct App {
     pub streaming_message_idx: Option<usize>,
     pub streaming_buffer: String,
     pub show_form: bool,
+    pub commands: Vec<Command>,
+    pub command_picker_filter: String,
+    pub status_message: Option<String>,
 }
 
 impl App {
@@ -26,6 +30,9 @@ impl App {
             streaming_message_idx: None,
             streaming_buffer: String::new(),
             show_form: false,
+            commands: Vec::new(),
+            command_picker_filter: String::new(),
+            status_message: None,
         }
     }
 
@@ -98,9 +105,48 @@ impl App {
         self.show_form = false;
     }
 
+    pub fn show_command_picker(&mut self) {
+        self.command_picker_filter.clear();
+    }
+
+    pub fn hide_command_picker(&mut self) {
+        self.command_picker_filter.clear();
+    }
+
+    pub fn is_command_picker_active(&self) -> bool {
+        self.input_buffer.starts_with('/') && !self.commands.is_empty()
+    }
+
+    pub fn set_status(&mut self, message: String) {
+        self.status_message = Some(message);
+    }
+
+    pub fn clear_status(&mut self) {
+        self.status_message = None;
+    }
+
     pub fn render(&self, frame: &mut Frame) {
         let area = frame.area();
-        let input_height = input::Input::calc_height(&self.input_buffer, area.width);
+        let input_height = if self.status_message.is_some() {
+            3
+        } else if self.is_command_picker_active() && !self.commands.is_empty() {
+            let filter = if self.input_buffer.len() > 1 {
+                &self.input_buffer[1..]
+            } else {
+                ""
+            };
+            let filtered: Vec<&Command> = self
+                .commands
+                .iter()
+                .filter(|c| filter.is_empty() || c.name.starts_with(filter))
+                .collect();
+            command_picker::CommandPicker::calc_height(
+                &filtered.iter().map(|c| (*c).clone()).collect::<Vec<_>>(),
+                area.width,
+            )
+        } else {
+            input::Input::calc_height(&self.input_buffer, area.width)
+        };
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -118,7 +164,30 @@ impl App {
             chat::Chat::new(&self.messages, self.streaming_content.clone()),
             chat_area,
         );
-        frame.render_widget(input::Input::new(&self.input_buffer), input_area);
+
+        if let Some(ref status) = self.status_message {
+            frame.render_widget(input::Input::new(status), input_area);
+        } else if self.is_command_picker_active() && !self.commands.is_empty() {
+            let filter = if self.input_buffer.len() > 1 {
+                self.input_buffer[1..].to_string()
+            } else {
+                String::new()
+            };
+            let filtered: Vec<&Command> = self
+                .commands
+                .iter()
+                .filter(|c| filter.is_empty() || c.name.starts_with(&filter))
+                .collect();
+            frame.render_widget(
+                command_picker::CommandPicker::new(
+                    &filtered.iter().map(|c| (*c).clone()).collect::<Vec<_>>(),
+                    &filter,
+                ),
+                input_area,
+            );
+        } else {
+            frame.render_widget(input::Input::new(&self.input_buffer), input_area);
+        }
     }
 }
 

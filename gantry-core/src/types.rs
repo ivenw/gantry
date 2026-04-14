@@ -74,6 +74,7 @@ pub struct InitEvent {
     pub messages: Vec<Message>,
     pub pending_message: Option<PendingMessage>,
     pub form: Option<FormState>,
+    pub commands: Vec<Command>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -188,4 +189,11 @@ fn parse_id(s: &str) -> u64 {
         .collect::<String>()
         .parse()
         .unwrap_or(0)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Command {
+    pub name: String,
+    pub description: String,
 }

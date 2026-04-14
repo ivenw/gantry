@@ -9,7 +9,7 @@ use crossterm::{
     },
     execute,
 };
-use gantry_core::{AppEvent, Message, Role};
+use gantry_core::{AppEvent, Command, Message, Role};
 use gantry_rpc::{JsonRpcClient, WsConnectionEvent};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
@@ -41,6 +41,7 @@ pub fn run() -> Result<()> {
 
     let (event_handle, mut event_rx) = rt.block_on(client.subscribe_events())?;
     let (stream_result_tx, stream_result_rx) = mpsc::channel::<Result<(), String>>();
+    let (command_result_tx, mut command_result_rx) = mpsc::channel::<String>();
 
     let (_terminal_guard, mut terminal) = TerminalGuard::enter()?;
 
@@ -80,6 +81,13 @@ pub fn run() -> Result<()> {
             })?;
         }
 
+        while let Ok(status) = command_result_rx.try_recv() {
+            app.set_status(status);
+            terminal.draw(|frame| {
+                app.render(frame);
+            })?;
+        }
+
         if event::poll(std::time::Duration::from_millis(10))?
             && let Event::Key(key) = event::read()?
         {
@@ -92,31 +100,64 @@ pub fn run() -> Result<()> {
                     break;
                 }
                 KeyCode::Esc => {
-                    let pending = pending_id.lock().unwrap().clone();
-                    if pending.is_some() {
-                        if let Some(task) = stream_task.lock().unwrap().take() {
-                            task.abort();
-                        }
-                        let pending_id_clone = pending.clone();
-                        let addr_clone = addr.clone();
-                        rt.spawn(async move {
-                            if let Ok(client) = JsonRpcClient::connect_ws(&addr_clone, port).await {
-                                let _ = client.interrupt_stream(pending_id_clone.unwrap()).await;
+                    if app.status_message.is_some() {
+                        app.clear_status();
+                    } else if app.is_command_picker_active() {
+                        app.input_buffer.clear();
+                    } else {
+                        let pending = pending_id.lock().unwrap().clone();
+                        if pending.is_some() {
+                            if let Some(task) = stream_task.lock().unwrap().take() {
+                                task.abort();
                             }
-                        });
-                        app.finish_streaming();
-                        terminal.draw(|frame| {
-                            app.render(frame);
-                        })?;
+                            let pending_id_clone = pending.clone();
+                            let addr_clone = addr.clone();
+                            rt.spawn(async move {
+                                if let Ok(client) = JsonRpcClient::connect_ws(&addr_clone, port).await {
+                                    let _ = client.interrupt_stream(pending_id_clone.unwrap()).await;
+                                }
+                            });
+                            app.finish_streaming();
+                            terminal.draw(|frame| {
+                                app.render(frame);
+                            })?;
+                        }
                     }
                 }
                 KeyCode::Enter => {
-                    if key.modifiers.contains(KeyModifiers::SHIFT) {
+                    if app.status_message.is_some() {
+                        app.clear_status();
+                    } else if app.is_command_picker_active() {
+                        let filter = if app.input_buffer.len() > 1 {
+                            app.input_buffer[1..].to_string()
+                        } else {
+                            String::new()
+                        };
+                        let filtered: Vec<&Command> = app
+                            .commands
+                            .iter()
+                            .filter(|c| filter.is_empty() || c.name.starts_with(&filter))
+                            .collect();
+                        if let Some(cmd) = filtered.first() {
+                            let cmd_name = cmd.name.clone();
+                            execute_command(&cmd_name, &addr, port, &rt, command_result_tx.clone());
+                        }
+                        app.input_buffer.clear();
+                    } else if key.modifiers.contains(KeyModifiers::SHIFT) {
                         app.input_buffer.push('\n');
                     } else {
                         let input = app.input_buffer.clone();
                         if input.trim().is_empty() || app.is_streaming() {
                             continue;
+                        }
+                        if input.starts_with('/') {
+                            let filter = if input.len() > 1 { &input[1..] } else { "" };
+                            let has_match = app.commands.iter().any(|c| c.name.starts_with(filter));
+                            if !has_match {
+                                app.input_buffer.clear();
+                                terminal.draw(|frame| app.render(frame))?;
+                                continue;
+                            }
                         }
                         app.input_buffer.clear();
                         app.add_user_message(input.clone());
@@ -145,10 +186,77 @@ pub fn run() -> Result<()> {
                     }
                 }
                 KeyCode::Char(c) => {
-                    app.input_buffer.push(c);
+                    if app.status_message.is_some() {
+                        app.clear_status();
+                    }
+                    if app.is_command_picker_active() {
+                        app.input_buffer.push(c);
+                    } else if c == '/' && !app.commands.is_empty() {
+                        app.input_buffer.push(c);
+                    } else {
+                        app.input_buffer.push(c);
+                    }
                 }
                 KeyCode::Backspace => {
-                    app.input_buffer.pop();
+                    if app.status_message.is_some() {
+                        app.clear_status();
+                    } else {
+                        app.input_buffer.pop();
+                    }
+                }
+                KeyCode::Up => {
+                    if app.is_command_picker_active() {
+                        let filter = if app.input_buffer.len() > 1 {
+                            app.input_buffer[1..].to_string()
+                        } else {
+                            String::new()
+                        };
+                        let filtered: Vec<&Command> = app
+                            .commands
+                            .iter()
+                            .filter(|c| filter.is_empty() || c.name.starts_with(&filter))
+                            .collect();
+                        if let Some(current_idx) = filtered.iter().position(|c| {
+                            c.name.starts_with(&filter)
+                                && app.input_buffer.len() > 1
+                                && c.name.starts_with(&app.input_buffer[1..])
+                        }) {
+                            let new_idx = if current_idx == 0 {
+                                filtered.len().saturating_sub(1)
+                            } else {
+                                current_idx - 1
+                            };
+                            if let Some(new_cmd) = filtered.get(new_idx) {
+                                app.input_buffer = format!("/{}{}", filter, new_cmd.name[filter.len()..].to_string());
+                            }
+                        }
+                    }
+                }
+                KeyCode::Down => {
+                    if app.is_command_picker_active() {
+                        let filter = if app.input_buffer.len() > 1 {
+                            app.input_buffer[1..].to_string()
+                        } else {
+                            String::new()
+                        };
+                        let filtered: Vec<&Command> = app
+                            .commands
+                            .iter()
+                            .filter(|c| filter.is_empty() || c.name.starts_with(&filter))
+                            .collect();
+                        if let Some(current_idx) = filtered.iter().position(|c| {
+                            c.name.starts_with(&filter)
+                                && app.input_buffer.len() > 1
+                                && c.name.starts_with(&app.input_buffer[1..])
+                        }) {
+                            let new_idx = (current_idx + 1) % filtered.len();
+                            if let Some(new_cmd) = filtered.get(new_idx) {
+                                app.input_buffer = format!("/{}{}", filter, new_cmd.name[filter.len()..].to_string());
+                            }
+                        } else if let Some(first) = filtered.first() {
+                            app.input_buffer = format!("/{}", first.name);
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -173,6 +281,7 @@ fn process_app_event(event: AppEvent, app: &mut App, pending_id: &Arc<Mutex<Opti
     match event {
         AppEvent::Init(ev) => {
             app.messages = ev.messages;
+            app.commands = ev.commands;
             if let Some(pending) = ev.pending_message {
                 app.add_user_message(pending.content.clone());
                 app.start_streaming_message();
@@ -253,5 +362,32 @@ impl Drop for TerminalGuard {
         let _ = crossterm::terminal::disable_raw_mode();
         let _ = execute!(io::stdout(), DisableBracketedPaste);
         let _ = execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
+    }
+}
+
+fn execute_command(
+    name: &str,
+    addr: &str,
+    port: u16,
+    rt: &tokio::runtime::Runtime,
+    command_result_tx: mpsc::Sender<String>,
+) {
+    match name {
+        "health" => {
+            let addr_clone = addr.to_string();
+            rt.spawn(async move {
+                let start = std::time::Instant::now();
+                match JsonRpcClient::connect_ws(&addr_clone, port).await {
+                    Ok(_client) => {
+                        let latency = start.elapsed().as_millis();
+                        let _ = command_result_tx.send(format!("Connected: {}ms", latency));
+                    }
+                    Err(e) => {
+                        let _ = command_result_tx.send(format!("Connection failed: {}", e));
+                    }
+                }
+            });
+        }
+        _ => {}
     }
 }

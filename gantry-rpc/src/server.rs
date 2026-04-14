@@ -1,6 +1,6 @@
 use anyhow::Result;
 use gantry_core::{
-    AppEvent, AppService, Message, PendingMessage, SelectFormRequest, SelectFormResponse,
+    AppEvent, AppService, Command, Message, PendingMessage, SelectFormRequest, SelectFormResponse,
     StreamMessageRequest,
 };
 use jsonrpsee::RpcModule;
@@ -121,6 +121,19 @@ impl GantryRpcServer for RpcApp {
         let result = self.inner.interrupt_stream(message_id).await;
         dbg!("rpc.interrupt_stream.response", result);
         Ok(result)
+    }
+
+    async fn ping(&self) -> RpcResult<()> {
+        dbg!("rpc.ping.request");
+        Ok(())
+    }
+
+    async fn get_commands(&self) -> RpcResult<Vec<Command>> {
+        dbg!("rpc.get_commands.request");
+        Ok(vec![Command {
+            name: "health".to_string(),
+            description: "Check connection to server".to_string(),
+        }])
     }
 }
 

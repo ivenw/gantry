@@ -13,7 +13,7 @@ pub use provider_config::{
 };
 pub use service::AppService;
 pub use types::{
-    AppEvent, ErrorEvent, FormHiddenEvent, FormShownEvent, FormState, InitEvent, Message,
+    AppEvent, Command, ErrorEvent, FormHiddenEvent, FormShownEvent, FormState, InitEvent, Message,
     MessageReceivedEvent, PendingClearedEvent, PendingMessage, Role, SelectFormRequest,
     SelectFormResponse, StreamEndEvent, StreamMessageRequest, StreamStartEvent, TokenEvent,
 };
