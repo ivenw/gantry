@@ -2,14 +2,9 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProjectInfo {
-    pub path: String,
-}
-
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct RegistryFile {
-    projects: Vec<ProjectInfo>,
+    projects: Vec<PathBuf>,
 }
 
 pub struct ProjectRegistry {
@@ -27,20 +22,33 @@ impl ProjectRegistry {
             .with_context(|| format!("path does not exist: {}", path.display()))?;
 
         let gantry_dir = abs_path.join(".gantry").join("sessions");
-        std::fs::create_dir_all(&gantry_dir)
-            .with_context(|| format!("failed to create .gantry/sessions in {}", abs_path.display()))?;
+        std::fs::create_dir_all(&gantry_dir).with_context(|| {
+            format!(
+                "failed to create .gantry/sessions in {}",
+                abs_path.display()
+            )
+        })?;
 
         let mut registry = self.load()?;
-        let abs_str = abs_path.to_string_lossy().to_string();
-        if !registry.projects.iter().any(|p| p.path == abs_str) {
-            registry.projects.push(ProjectInfo { path: abs_str });
+        if !registry.projects.contains(&abs_path) {
+            registry.projects.push(abs_path);
             self.save(&registry)?;
         }
 
         Ok(())
     }
 
-    pub fn list(&self) -> Result<Vec<ProjectInfo>> {
+    pub fn unregister(&self, path: &Path) -> Result<()> {
+        let mut registry = self.load()?;
+        let before = registry.projects.len();
+        registry.projects.retain(|p| p != path);
+        if registry.projects.len() == before {
+            anyhow::bail!("project not found in registry: {}", path.display());
+        }
+        self.save(&registry)
+    }
+
+    pub fn list(&self) -> Result<Vec<PathBuf>> {
         Ok(self.load()?.projects)
     }
 
@@ -48,8 +56,12 @@ impl ProjectRegistry {
         if !self.registry_path.exists() {
             return Ok(RegistryFile::default());
         }
-        let contents = std::fs::read_to_string(&self.registry_path)
-            .with_context(|| format!("failed to read registry at {}", self.registry_path.display()))?;
+        let contents = std::fs::read_to_string(&self.registry_path).with_context(|| {
+            format!(
+                "failed to read registry at {}",
+                self.registry_path.display()
+            )
+        })?;
         serde_json::from_str(&contents).with_context(|| "failed to parse registry JSON")
     }
 
@@ -59,8 +71,12 @@ impl ProjectRegistry {
                 .with_context(|| format!("failed to create registry dir {}", parent.display()))?;
         }
         let json = serde_json::to_string_pretty(registry)?;
-        std::fs::write(&self.registry_path, json)
-            .with_context(|| format!("failed to write registry at {}", self.registry_path.display()))?;
+        std::fs::write(&self.registry_path, json).with_context(|| {
+            format!(
+                "failed to write registry at {}",
+                self.registry_path.display()
+            )
+        })?;
         Ok(())
     }
 }
@@ -105,7 +121,7 @@ mod tests {
 
         let projects = registry.list().unwrap();
         assert_eq!(projects.len(), 1);
-        assert!(projects[0].path.ends_with("my_project"));
+        assert_eq!(projects[0].file_name().unwrap(), "my_project");
     }
 
     #[test]

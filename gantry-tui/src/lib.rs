@@ -148,7 +148,9 @@ pub fn run() -> Result<()> {
                         }
                         if input.starts_with('/') {
                             let filter = input.strip_prefix('/').unwrap_or("");
-                            let has_match = App::available_commands().iter().any(|c| c.name.starts_with(filter));
+                            let has_match = App::available_commands()
+                                .iter()
+                                .any(|c| c.name.starts_with(filter));
                             if !has_match {
                                 app.input_buffer.clear();
                                 terminal.draw(|frame| app.render(frame))?;

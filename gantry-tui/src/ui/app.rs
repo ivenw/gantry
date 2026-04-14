@@ -35,12 +35,10 @@ impl App {
     }
 
     pub fn available_commands() -> Vec<command_picker::Command> {
-        vec![
-            command_picker::Command {
-                name: "health".to_string(),
-                description: "Check connection to server".to_string(),
-            },
-        ]
+        vec![command_picker::Command {
+            name: "health".to_string(),
+            description: "Check connection to server".to_string(),
+        }]
     }
 
     pub fn add_user_message(&mut self, content: String) {
@@ -117,7 +115,9 @@ impl App {
     }
 
     pub fn activate_command_picker(&mut self) {
-        self.command_picker = Some(command_picker::CommandPicker::new(Self::available_commands()));
+        self.command_picker = Some(command_picker::CommandPicker::new(
+            Self::available_commands(),
+        ));
     }
 
     pub fn deactivate_command_picker(&mut self) {
@@ -143,7 +143,9 @@ impl App {
     }
 
     pub fn selected_command(&self) -> Option<&command_picker::Command> {
-        self.command_picker.as_ref().and_then(|p| p.selected_command())
+        self.command_picker
+            .as_ref()
+            .and_then(|p| p.selected_command())
     }
 
     pub fn set_status(&mut self, message: String) {
@@ -159,7 +161,10 @@ impl App {
         let input_height = if self.status_message.is_some() {
             3
         } else if self.is_command_picker_active() {
-            self.command_picker.as_ref().map(|p| p.calc_height(area.width)).unwrap_or(3)
+            self.command_picker
+                .as_ref()
+                .map(|p| p.calc_height(area.width))
+                .unwrap_or(3)
         } else {
             input::Input::calc_height(&self.input_buffer, area.width)
         };

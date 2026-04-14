@@ -9,7 +9,6 @@ pub mod tools;
 pub mod types;
 
 pub use agent_factory::RigAgentFactory;
-pub use project_registry::ProjectInfo;
 pub use provider_config::{
     ConfiguredModel, ModelId, ModelSelection, OllamaProviderConfig, ProviderConfig,
     ProviderConfigCatalog, ProviderId,

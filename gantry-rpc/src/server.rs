@@ -1,7 +1,7 @@
 use anyhow::Result;
 use gantry_core::{
-    AppEvent, AppService, Message, PendingMessage, ProjectInfo, SelectFormRequest,
-    SelectFormResponse, SessionInfo, StreamMessageRequest,
+    AppEvent, AppService, Message, PendingMessage, SelectFormRequest, SelectFormResponse,
+    SessionInfo, StreamMessageRequest,
 };
 use jsonrpsee::RpcModule;
 use jsonrpsee::core::{RpcResult, SubscriptionResult, async_trait};
@@ -9,6 +9,7 @@ use jsonrpsee::server::{
     PendingSubscriptionSink, ServerBuilder, ServerConfig, ServerHandle, SubscriptionSink,
 };
 use jsonrpsee::types::ErrorObjectOwned;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -41,16 +42,16 @@ impl RpcApp {
 
 #[async_trait]
 impl GantryRpcServer for RpcApp {
-    async fn register_project(&self, path: String) -> RpcResult<()> {
+    async fn register_project(&self, path: PathBuf) -> RpcResult<()> {
         dbg!("rpc.register_project.request", &path);
         self.app
-            .register_project(std::path::Path::new(&path))
+            .register_project(&path)
             .map_err(|e| internal_error(e.to_string()))?;
         dbg!("rpc.register_project.done", &path);
         Ok(())
     }
 
-    async fn list_projects(&self) -> RpcResult<Vec<ProjectInfo>> {
+    async fn list_projects(&self) -> RpcResult<Vec<PathBuf>> {
         dbg!("rpc.list_projects.request");
         let projects = self
             .app
@@ -60,47 +61,55 @@ impl GantryRpcServer for RpcApp {
         Ok(projects)
     }
 
-    async fn create_session(&self, project_path: String) -> RpcResult<String> {
+    async fn unregister_project(&self, path: PathBuf) -> RpcResult<()> {
+        dbg!("rpc.unregister_project.request", &path);
+        self.app
+            .unregister_project(&path)
+            .map_err(|e| internal_error(e.to_string()))?;
+        dbg!("rpc.unregister_project.done", &path);
+        Ok(())
+    }
+
+    async fn create_session(&self, project_path: PathBuf) -> RpcResult<String> {
         dbg!("rpc.create_session.request", &project_path);
         let id = self
             .app
-            .create_session(std::path::Path::new(&project_path))
+            .create_session(&project_path)
             .map_err(|e| internal_error(e.to_string()))?;
         dbg!("rpc.create_session.created", &id);
         Ok(id)
     }
 
-    async fn list_sessions(&self, project_path: String) -> RpcResult<Vec<SessionInfo>> {
+    async fn list_sessions(&self, project_path: PathBuf) -> RpcResult<Vec<SessionInfo>> {
         dbg!("rpc.list_sessions.request", &project_path);
         let sessions = self
             .app
-            .list_sessions(std::path::Path::new(&project_path))
+            .list_sessions(&project_path)
             .map_err(|e| internal_error(e.to_string()))?;
         dbg!("rpc.list_sessions.count", sessions.len());
         Ok(sessions)
     }
 
-    async fn connect_session(&self, session_id: String, project_path: String) -> RpcResult<()> {
+    async fn connect_session(&self, session_id: String, project_path: PathBuf) -> RpcResult<()> {
         dbg!("rpc.connect_session.request", &session_id, &project_path);
+        let project_path_str = project_path.to_string_lossy().into_owned();
         // Validate: load (or verify) the session exists
         self.app
-            .get_or_load_session(&project_path, &session_id)
+            .get_or_load_session(&project_path_str, &session_id)
             .await
             .map_err(|e| invalid_request(e.to_string()))?;
 
-        *self.session.lock().await = Some((session_id.clone(), project_path.clone()));
+        *self.session.lock().await = Some((session_id.clone(), project_path_str));
         dbg!("rpc.connect_session.done", &session_id);
         Ok(())
     }
 
     async fn send_message(&self, content: String) -> RpcResult<Vec<Message>> {
         dbg!("rpc.send_message.request", &content);
-        let (session_id, project_path) = self
-            .session
-            .lock()
-            .await
-            .clone()
-            .ok_or_else(|| invalid_request("no session selected; call connect_session first"))?;
+        let (session_id, project_path) =
+            self.session.lock().await.clone().ok_or_else(|| {
+                invalid_request("no session selected; call connect_session first")
+            })?;
 
         let session = self
             .app
@@ -115,12 +124,10 @@ impl GantryRpcServer for RpcApp {
 
     async fn stream_message(&self, req: StreamMessageRequest) -> RpcResult<PendingMessage> {
         dbg!("rpc.stream_message.request.content", &req.content);
-        let (session_id, project_path) = self
-            .session
-            .lock()
-            .await
-            .clone()
-            .ok_or_else(|| invalid_request("no session selected; call connect_session first"))?;
+        let (session_id, project_path) =
+            self.session.lock().await.clone().ok_or_else(|| {
+                invalid_request("no session selected; call connect_session first")
+            })?;
 
         let session = self
             .app
@@ -202,12 +209,10 @@ impl GantryRpcServer for RpcApp {
 
     async fn select_form(&self, req: SelectFormRequest) -> RpcResult<SelectFormResponse> {
         dbg!("rpc.select_form.request", &req.form_id, &req.selection);
-        let (session_id, project_path) = self
-            .session
-            .lock()
-            .await
-            .clone()
-            .ok_or_else(|| invalid_request("no session selected; call connect_session first"))?;
+        let (session_id, project_path) =
+            self.session.lock().await.clone().ok_or_else(|| {
+                invalid_request("no session selected; call connect_session first")
+            })?;
 
         let session = self
             .app
@@ -222,12 +227,10 @@ impl GantryRpcServer for RpcApp {
 
     async fn get_messages(&self) -> RpcResult<Vec<Message>> {
         dbg!("rpc.get_messages.request");
-        let (session_id, project_path) = self
-            .session
-            .lock()
-            .await
-            .clone()
-            .ok_or_else(|| invalid_request("no session selected; call connect_session first"))?;
+        let (session_id, project_path) =
+            self.session.lock().await.clone().ok_or_else(|| {
+                invalid_request("no session selected; call connect_session first")
+            })?;
 
         let session = self
             .app
@@ -242,12 +245,10 @@ impl GantryRpcServer for RpcApp {
 
     async fn clear_messages(&self) -> RpcResult<()> {
         dbg!("rpc.clear_messages.request");
-        let (session_id, project_path) = self
-            .session
-            .lock()
-            .await
-            .clone()
-            .ok_or_else(|| invalid_request("no session selected; call connect_session first"))?;
+        let (session_id, project_path) =
+            self.session.lock().await.clone().ok_or_else(|| {
+                invalid_request("no session selected; call connect_session first")
+            })?;
 
         let session = self
             .app
@@ -262,12 +263,10 @@ impl GantryRpcServer for RpcApp {
 
     async fn interrupt_stream(&self, message_id: String) -> RpcResult<bool> {
         dbg!("rpc.interrupt_stream.request", &message_id);
-        let (session_id, project_path) = self
-            .session
-            .lock()
-            .await
-            .clone()
-            .ok_or_else(|| invalid_request("no session selected; call connect_session first"))?;
+        let (session_id, project_path) =
+            self.session.lock().await.clone().ok_or_else(|| {
+                invalid_request("no session selected; call connect_session first")
+            })?;
 
         let session = self
             .app

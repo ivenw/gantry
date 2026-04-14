@@ -5,14 +5,14 @@ use crate::session_store::SessionStore;
 use crate::state::ConversationState;
 use crate::{
     AppEvent, ErrorEvent, FormHiddenEvent, FormShownEvent, InitEvent, Message,
-    MessageReceivedEvent, ModelId, ModelSelection, PendingClearedEvent, PendingMessage, ProjectInfo,
-    ProviderId, Role, SelectFormResponse, SessionInfo, StreamEndEvent, StreamMessageRequest,
-    StreamStartEvent, TokenEvent,
+    MessageReceivedEvent, ModelId, ModelSelection, PendingClearedEvent, PendingMessage, ProviderId,
+    Role, SelectFormResponse, SessionInfo, StreamEndEvent, StreamMessageRequest, StreamStartEvent,
+    TokenEvent,
 };
 use anyhow::Result;
 use rig::message::Message as RigMessage;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::mpsc;
@@ -199,7 +199,10 @@ impl ActiveSession {
             return Ok(pending);
         };
 
-        dbg!("session.stream_message.snapshot_len", rig_messages.len() + 1);
+        dbg!(
+            "session.stream_message.snapshot_len",
+            rig_messages.len() + 1
+        );
         let message_id = Uuid::new_v4().to_string();
         self.event_bus
             .publish(AppEvent::StreamStart(StreamStartEvent {
@@ -350,7 +353,10 @@ impl ActiveSession {
 
         if let Some(pending) = pending {
             drop(state);
-            dbg!("session.interrupt_stream.accumulated_len", accumulated.len());
+            dbg!(
+                "session.interrupt_stream.accumulated_len",
+                accumulated.len()
+            );
 
             if !accumulated.is_empty() {
                 self.event_bus.publish(AppEvent::StreamEnd(StreamEndEvent {
@@ -454,32 +460,32 @@ impl AppService {
         self.registry.register(path)
     }
 
-    pub fn list_projects(&self) -> Result<Vec<ProjectInfo>> {
+    pub fn list_projects(&self) -> Result<Vec<PathBuf>> {
         self.registry.list()
+    }
+
+    pub fn unregister_project(&self, path: &Path) -> Result<()> {
+        self.registry.unregister(path)
     }
 
     // --- session management ---
 
     pub fn create_session(&self, project_path: &std::path::Path) -> Result<String> {
         // Verify the project is registered
-        let abs = project_path
-            .canonicalize()
-            .map_err(|_| anyhow::anyhow!("project path does not exist: {}", project_path.display()))?;
-        let abs_str = abs.to_string_lossy().to_string();
+        let abs = project_path.canonicalize().map_err(|_| {
+            anyhow::anyhow!("project path does not exist: {}", project_path.display())
+        })?;
         let projects = self.registry.list()?;
-        if !projects.iter().any(|p| p.path == abs_str) {
-            return Err(anyhow::anyhow!(
-                "project not registered: {}",
-                abs_str
-            ));
+        if !projects.contains(&abs) {
+            return Err(anyhow::anyhow!("project not registered: {}", abs.display()));
         }
         SessionStore::create(&abs)
     }
 
     pub fn list_sessions(&self, project_path: &std::path::Path) -> Result<Vec<SessionInfo>> {
-        let abs = project_path
-            .canonicalize()
-            .map_err(|_| anyhow::anyhow!("project path does not exist: {}", project_path.display()))?;
+        let abs = project_path.canonicalize().map_err(|_| {
+            anyhow::anyhow!("project path does not exist: {}", project_path.display())
+        })?;
         SessionStore::list(&abs)
     }
 

@@ -15,8 +15,12 @@ impl SessionStore {
     /// Returns the new session UUID.
     pub fn create(project_path: &Path) -> Result<String> {
         let sessions_dir = Self::sessions_dir(project_path);
-        std::fs::create_dir_all(&sessions_dir)
-            .with_context(|| format!("failed to create sessions dir at {}", sessions_dir.display()))?;
+        std::fs::create_dir_all(&sessions_dir).with_context(|| {
+            format!(
+                "failed to create sessions dir at {}",
+                sessions_dir.display()
+            )
+        })?;
 
         let id = Uuid::new_v4().to_string();
         let file = sessions_dir.join(format!("{}.jsonl", id));
@@ -39,12 +43,12 @@ impl SessionStore {
         {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    sessions.push(SessionInfo {
-                        id: stem.to_string(),
-                    });
-                }
+            if path.extension().and_then(|e| e.to_str()) == Some("jsonl")
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+            {
+                sessions.push(SessionInfo {
+                    id: stem.to_string(),
+                });
             }
         }
 
@@ -63,8 +67,7 @@ impl SessionStore {
         message: &crate::Message,
     ) -> Result<()> {
         let path = Self::session_path(project_path, session_id);
-        let line = serde_json::to_string(message)
-            .context("failed to serialize message")?;
+        let line = serde_json::to_string(message).context("failed to serialize message")?;
         let mut file = std::fs::OpenOptions::new()
             .append(true)
             .open(&path)
@@ -85,8 +88,8 @@ impl SessionStore {
             .with_context(|| format!("failed to read session file {}", path.display()))?;
         let mut messages = vec![];
         for line in contents.lines() {
-            let msg: crate::Message =
-                serde_json::from_str(line).with_context(|| format!("invalid JSON line in {}", path.display()))?;
+            let msg: crate::Message = serde_json::from_str(line)
+                .with_context(|| format!("invalid JSON line in {}", path.display()))?;
             messages.push(msg);
         }
         Ok(messages)
@@ -127,12 +130,13 @@ mod tests {
         let id = SessionStore::create(tmp.path()).unwrap();
 
         assert!(!id.is_empty());
-        assert!(tmp
-            .path()
-            .join(".gantry")
-            .join("sessions")
-            .join(format!("{}.jsonl", id))
-            .exists());
+        assert!(
+            tmp.path()
+                .join(".gantry")
+                .join("sessions")
+                .join(format!("{}.jsonl", id))
+                .exists()
+        );
     }
 
     #[test]

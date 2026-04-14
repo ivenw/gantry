@@ -1,10 +1,11 @@
 use anyhow::Result;
 use gantry_core::{
-    AppEvent, Message, PendingMessage, ProjectInfo, SelectFormRequest, SelectFormResponse,
-    SessionInfo, StreamMessageRequest,
+    AppEvent, Message, PendingMessage, SelectFormRequest, SelectFormResponse, SessionInfo,
+    StreamMessageRequest,
 };
 use jsonrpsee::core::client::Subscription;
 use jsonrpsee::ws_client::{WsClient, WsClientBuilder};
+use std::path::PathBuf;
 use tokio::{sync::mpsc, task::JoinHandle};
 
 use crate::GantryRpcClient;
@@ -20,28 +21,34 @@ impl JsonRpcClient {
             .build(&url)
             .await
             .map_err(|e| anyhow::anyhow!("failed to create ws client: {}", e))?;
-        Ok(Self { inner: std::sync::Arc::new(inner) })
+        Ok(Self {
+            inner: std::sync::Arc::new(inner),
+        })
     }
 
     // --- project & session management ---
 
-    pub async fn register_project(&self, path: String) -> Result<()> {
+    pub async fn register_project(&self, path: PathBuf) -> Result<()> {
         Ok(self.inner.register_project(path).await?)
     }
 
-    pub async fn list_projects(&self) -> Result<Vec<ProjectInfo>> {
+    pub async fn list_projects(&self) -> Result<Vec<PathBuf>> {
         Ok(self.inner.list_projects().await?)
     }
 
-    pub async fn create_session(&self, project_path: String) -> Result<String> {
+    pub async fn unregister_project(&self, path: PathBuf) -> Result<()> {
+        Ok(self.inner.unregister_project(path).await?)
+    }
+
+    pub async fn create_session(&self, project_path: PathBuf) -> Result<String> {
         Ok(self.inner.create_session(project_path).await?)
     }
 
-    pub async fn list_sessions(&self, project_path: String) -> Result<Vec<SessionInfo>> {
+    pub async fn list_sessions(&self, project_path: PathBuf) -> Result<Vec<SessionInfo>> {
         Ok(self.inner.list_sessions(project_path).await?)
     }
 
-    pub async fn connect_session(&self, session_id: String, project_path: String) -> Result<()> {
+    pub async fn connect_session(&self, session_id: String, project_path: PathBuf) -> Result<()> {
         Ok(self.inner.connect_session(session_id, project_path).await?)
     }
 
