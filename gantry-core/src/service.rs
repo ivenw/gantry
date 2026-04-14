@@ -199,6 +199,7 @@ impl AppService {
         let mut accumulated = String::new();
         let mut token_count = 0usize;
         let mut cancelled = false;
+        let mut line_buffer = String::new();
         loop {
             tokio::select! {
                 _ = &mut cancel_rx => {
@@ -211,16 +212,27 @@ impl AppService {
                         Some(token) => {
                             accumulated.push_str(&token);
                             token_count += 1;
-                            dbg!("app.stream_message.publish_token", &token);
-                            self.event_bus.publish(AppEvent::Token(TokenEvent {
-                                message_id: message_id.clone(),
-                                delta: token,
-                            }));
+                            line_buffer.push_str(&token);
+
+                            while let Some(newline_idx) = line_buffer.find('\n') {
+                                let line = line_buffer.drain(..=newline_idx).collect::<String>();
+                                self.event_bus.publish(AppEvent::Token(TokenEvent {
+                                    message_id: message_id.clone(),
+                                    delta: line,
+                                }));
+                            }
                         }
                         None => break,
                     }
                 }
             }
+        }
+
+        if !line_buffer.is_empty() {
+            self.event_bus.publish(AppEvent::Token(TokenEvent {
+                message_id: message_id.clone(),
+                delta: line_buffer,
+            }));
         }
 
         if cancelled {

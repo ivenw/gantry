@@ -13,6 +13,7 @@ pub struct App {
     pub input_buffer: String,
     pub streaming_content: Option<String>,
     pub streaming_message_idx: Option<usize>,
+    pub streaming_buffer: String,
     pub show_form: bool,
 }
 
@@ -23,6 +24,7 @@ impl App {
             input_buffer: String::new(),
             streaming_content: None,
             streaming_message_idx: None,
+            streaming_buffer: String::new(),
             show_form: false,
         }
     }
@@ -40,11 +42,19 @@ impl App {
 
     pub fn append_to_streaming(&mut self, content: &str) {
         if let Some(ref mut streaming) = self.streaming_content {
-            streaming.push_str(content);
-            if let Some(idx) = self.streaming_message_idx
-                && idx < self.messages.len()
-            {
-                self.messages[idx].content.push_str(content);
+            self.streaming_buffer.push_str(content);
+
+            while let Some(newline_idx) = self.streaming_buffer.find('\n') {
+                let line = self
+                    .streaming_buffer
+                    .drain(..=newline_idx)
+                    .collect::<String>();
+                streaming.push_str(&line);
+                if let Some(idx) = self.streaming_message_idx
+                    && idx < self.messages.len()
+                {
+                    self.messages[idx].content.push_str(&line);
+                }
             }
         }
     }
@@ -60,8 +70,19 @@ impl App {
     }
 
     pub fn finish_streaming(&mut self) {
+        if !self.streaming_buffer.is_empty()
+            && let Some(ref mut streaming) = self.streaming_content
+        {
+            streaming.push_str(&self.streaming_buffer);
+            if let Some(idx) = self.streaming_message_idx
+                && idx < self.messages.len()
+            {
+                self.messages[idx].content.push_str(&self.streaming_buffer);
+            }
+        }
         self.streaming_content = None;
         self.streaming_message_idx = None;
+        self.streaming_buffer.clear();
     }
 
     #[allow(dead_code)]
