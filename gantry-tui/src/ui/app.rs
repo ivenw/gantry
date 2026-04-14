@@ -3,8 +3,8 @@ use super::input;
 use gantry_core::{Message, Role};
 
 use ratatui::{
-    layout::{Constraint, Direction, Layout},
     Frame,
+    layout::{Constraint, Direction, Layout},
 };
 
 #[derive(Clone)]
@@ -18,7 +18,13 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
-        Self { messages: Vec::new(), input_buffer: String::new(), streaming_content: None, streaming_message_idx: None, show_form: false }
+        Self {
+            messages: Vec::new(),
+            input_buffer: String::new(),
+            streaming_content: None,
+            streaming_message_idx: None,
+            show_form: false,
+        }
     }
 
     pub fn add_user_message(&mut self, content: String) {
@@ -35,10 +41,10 @@ impl App {
     pub fn append_to_streaming(&mut self, content: &str) {
         if let Some(ref mut streaming) = self.streaming_content {
             streaming.push_str(content);
-            if let Some(idx) = self.streaming_message_idx {
-                if idx < self.messages.len() {
-                    self.messages[idx].content.push_str(content);
-                }
+            if let Some(idx) = self.streaming_message_idx
+                && idx < self.messages.len()
+            {
+                self.messages[idx].content.push_str(content);
             }
         }
     }
@@ -46,10 +52,10 @@ impl App {
     #[allow(dead_code)]
     pub fn update_streaming_content(&mut self, content: String) {
         self.streaming_content = Some(content.clone());
-        if let Some(idx) = self.streaming_message_idx {
-            if idx < self.messages.len() {
-                self.messages[idx].content = content;
-            }
+        if let Some(idx) = self.streaming_message_idx
+            && idx < self.messages.len()
+        {
+            self.messages[idx].content = content;
         }
     }
 

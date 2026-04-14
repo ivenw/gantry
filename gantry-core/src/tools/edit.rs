@@ -63,8 +63,16 @@ impl fmt::Display for EditToolError {
                 }
                 Ok(())
             }
-            EditError::OverlappingEdits { a_start, a_end, b_start, b_end } => {
-                write!(f, "overlapping edits: [{b_start}-{b_end}] and [{a_start}-{a_end}]")
+            EditError::OverlappingEdits {
+                a_start,
+                a_end,
+                b_start,
+                b_end,
+            } => {
+                write!(
+                    f,
+                    "overlapping edits: [{b_start}-{b_end}] and [{a_start}-{a_end}]"
+                )
             }
             EditError::Io(e) => write!(f, "I/O error while editing file: {e}"),
         }
@@ -74,10 +82,16 @@ impl fmt::Display for EditToolError {
 fn fmt_stale_line(s: &StaleLine) -> String {
     match &s.kind {
         StaleLineKind::OutOfRange { file_len } => {
-            format!("line {} does not exist (file has {} lines)", s.line, file_len)
+            format!(
+                "line {} does not exist (file has {} lines)",
+                s.line, file_len
+            )
         }
         StaleLineKind::HashMismatch { expected, actual } => {
-            format!("line {} is stale: expected hash '{expected}', got '{actual}'", s.line)
+            format!(
+                "line {} is stale: expected hash '{expected}', got '{actual}'",
+                s.line
+            )
         }
     }
 }

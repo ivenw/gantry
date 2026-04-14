@@ -196,7 +196,10 @@ mod tests {
         let sensitive = grep_files("Hello", dir.path(), false, None, None).unwrap();
         let insensitive = grep_files("Hello", dir.path(), true, None, None).unwrap();
         assert_eq!(sensitive.lines().filter(|l| l.contains("Hello")).count(), 1);
-        assert_eq!(insensitive.lines().filter(|l| l.contains("ello")).count(), 2);
+        assert_eq!(
+            insensitive.lines().filter(|l| l.contains("ello")).count(),
+            2
+        );
     }
 
     #[test]
@@ -212,7 +215,9 @@ mod tests {
 
     #[test]
     fn result_cap_with_truncation_message() {
-        let content = (1..=20).map(|i| format!("match line {i}\n")).collect::<String>();
+        let content = (1..=20)
+            .map(|i| format!("match line {i}\n"))
+            .collect::<String>();
         let dir = setup(&[("big.txt", &content)]);
         let result = grep_files("match", dir.path(), false, None, Some(5)).unwrap();
         assert!(result.contains("truncated at 5 matches"));

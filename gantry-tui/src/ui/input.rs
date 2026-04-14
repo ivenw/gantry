@@ -16,17 +16,13 @@ impl<'a> Input<'a> {
     }
 
     pub fn calc_height(value: &str, width: u16) -> u16 {
-        let text_width = width
-            .saturating_sub(1 + Self::PREFIX.len() as u16)
-            .max(1) as usize;
+        let text_width = width.saturating_sub(1 + Self::PREFIX.len() as u16).max(1) as usize;
         let wrapped_lines = Self::wrapped_line_count(value, text_width);
         (wrapped_lines as u16 + 2).max(3)
     }
 
     pub fn calc_cursor_pos(value: &str, width: u16) -> (u16, u16) {
-        let text_width = width
-            .saturating_sub(1 + Self::PREFIX.len() as u16)
-            .max(1) as usize;
+        let text_width = width.saturating_sub(1 + Self::PREFIX.len() as u16).max(1) as usize;
         let mut col = 0usize;
         let mut row = 0usize;
 
@@ -110,11 +106,12 @@ impl<'a> Widget for Input<'a> {
         let cursor_x = text_area.x + col;
         let cursor_y = text_area.y + row;
 
-        if cursor_x < text_area.right() && cursor_y < text_area.bottom() {
-            if let Some(cell) = buf.cell_mut((cursor_x, cursor_y)) {
-                cell.set_char('█')
-                    .set_style(ratatui::style::Style::default().fg(ratatui::style::Color::White));
-            }
+        if cursor_x < text_area.right()
+            && cursor_y < text_area.bottom()
+            && let Some(cell) = buf.cell_mut((cursor_x, cursor_y))
+        {
+            cell.set_char('█')
+                .set_style(ratatui::style::Style::default().fg(ratatui::style::Color::White));
         }
     }
 }

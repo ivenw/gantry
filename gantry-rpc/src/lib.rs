@@ -2,8 +2,7 @@ mod client;
 pub mod server;
 
 pub use gantry_core::{
-    AppEvent, Message, PendingMessage, SelectFormRequest, SelectFormResponse,
-    StreamMessageRequest,
+    AppEvent, Message, PendingMessage, SelectFormRequest, SelectFormResponse, StreamMessageRequest,
 };
 use jsonrpsee::core::{RpcResult, SubscriptionResult};
 use jsonrpsee::proc_macros::rpc;

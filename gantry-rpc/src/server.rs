@@ -5,7 +5,9 @@ use gantry_core::{
 };
 use jsonrpsee::RpcModule;
 use jsonrpsee::core::{RpcResult, SubscriptionResult, async_trait};
-use jsonrpsee::server::{PendingSubscriptionSink, ServerBuilder, ServerConfig, ServerHandle, SubscriptionSink};
+use jsonrpsee::server::{
+    PendingSubscriptionSink, ServerBuilder, ServerConfig, ServerHandle, SubscriptionSink,
+};
 use jsonrpsee::types::ErrorObjectOwned;
 
 use crate::GantryRpcServer;
@@ -125,16 +127,15 @@ where
 {
     dbg!("rpc.start_server", addr, port);
     let config = ServerConfig::builder().ws_only().build();
-    let rpc_server = ServerBuilder::new().set_config(config).build((addr, port)).await?;
+    let rpc_server = ServerBuilder::new()
+        .set_config(config)
+        .build((addr, port))
+        .await?;
     dbg!("rpc.server_listening", addr, port);
     Ok(rpc_server.start(module))
 }
 
-pub async fn start_app_rpc_server(
-    addr: &str,
-    port: u16,
-    app: AppService,
-) -> Result<ServerHandle> {
+pub async fn start_app_rpc_server(addr: &str, port: u16, app: AppService) -> Result<ServerHandle> {
     start_rpc_server(addr, port, RpcApp::new(app).into_rpc().remove_context()).await
 }
 

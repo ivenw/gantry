@@ -53,10 +53,11 @@ impl Tool for ReadTool {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Read a file and return its contents with line numbers and content hashes. \
+            description:
+                "Read a file and return its contents with line numbers and content hashes. \
                 Each line is prefixed with 'N#XX| ' where N is the 1-indexed line number and XX is \
                 a 2-character hash used to identify lines for subsequent edits."
-                .to_string(),
+                    .to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -80,12 +81,10 @@ impl Tool for ReadTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let path = args.path.clone();
-        Ok(
-            tokio::task::spawn_blocking(move || {
-                gantry_tools::read_file(&path, args.offset, args.limit)
-            })
-            .await
-            .expect("read_file task panicked")?,
-        )
+        Ok(tokio::task::spawn_blocking(move || {
+            gantry_tools::read_file(&path, args.offset, args.limit)
+        })
+        .await
+        .expect("read_file task panicked")?)
     }
 }

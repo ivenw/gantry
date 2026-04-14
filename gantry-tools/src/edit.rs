@@ -45,7 +45,10 @@ pub enum StaleLineKind {
 #[derive(Debug, Error)]
 pub enum EditError {
     #[error("invalid line ref {raw:?}: {reason}")]
-    InvalidLineRef { raw: String, reason: InvalidLineRefReason },
+    InvalidLineRef {
+        raw: String,
+        reason: InvalidLineRefReason,
+    },
     #[error("stale line references")]
     StaleReferences(Vec<StaleLine>),
     #[error("overlapping edits: [{a_start}-{a_end}] and [{b_start}-{b_end}]")]
@@ -65,16 +68,16 @@ impl FromStr for LineRef {
     /// Parses a line reference of the form `"N#XX"` where `N` is a 1-indexed line number
     /// and `XX` is a 2-character content hash.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (line_part, hash) =
-            s.split_once('#')
-                .ok_or_else(|| EditError::InvalidLineRef {
-                    raw: s.to_string(),
-                    reason: InvalidLineRefReason::MissingHash,
-                })?;
-        let line = line_part.parse::<usize>().map_err(|_| EditError::InvalidLineRef {
+        let (line_part, hash) = s.split_once('#').ok_or_else(|| EditError::InvalidLineRef {
             raw: s.to_string(),
-            reason: InvalidLineRefReason::InvalidLineNumber,
+            reason: InvalidLineRefReason::MissingHash,
         })?;
+        let line = line_part
+            .parse::<usize>()
+            .map_err(|_| EditError::InvalidLineRef {
+                raw: s.to_string(),
+                reason: InvalidLineRefReason::InvalidLineNumber,
+            })?;
         if line == 0 {
             return Err(EditError::InvalidLineRef {
                 raw: s.to_string(),
@@ -87,7 +90,10 @@ impl FromStr for LineRef {
                 reason: InvalidLineRefReason::BadHashLength,
             });
         }
-        Ok(Self { line, hash: hash.to_string() })
+        Ok(Self {
+            line,
+            hash: hash.to_string(),
+        })
     }
 }
 
@@ -154,7 +160,9 @@ fn validate_hashes(lines: &[&str], ops: &[EditOp]) -> Result<(), EditError> {
             if idx >= lines.len() {
                 stale.push(StaleLine {
                     line: lref.line,
-                    kind: StaleLineKind::OutOfRange { file_len: lines.len() },
+                    kind: StaleLineKind::OutOfRange {
+                        file_len: lines.len(),
+                    },
                 });
                 continue;
             }
@@ -212,7 +220,10 @@ mod tests {
     }
 
     fn ref_of(line: usize, content: &str) -> LineRef {
-        LineRef { line, hash: hash(content) }
+        LineRef {
+            line,
+            hash: hash(content),
+        }
     }
 
     #[test]
@@ -286,7 +297,10 @@ mod tests {
     fn staleness_rejection() {
         let src = lines("a\nb\nc");
         let ops = vec![EditOp {
-            start: LineRef { line: 2, hash: "xx".into() },
+            start: LineRef {
+                line: 2,
+                hash: "xx".into(),
+            },
             end: Some(ref_of(2, "b")),
             content: Some("Z".into()),
         }];
@@ -306,7 +320,10 @@ mod tests {
                 content: Some("A".into()),
             },
             EditOp {
-                start: LineRef { line: 2, hash: "xx".into() },
+                start: LineRef {
+                    line: 2,
+                    hash: "xx".into(),
+                },
                 end: Some(ref_of(2, "b")),
                 content: Some("B".into()),
             },
@@ -349,19 +366,31 @@ mod tests {
     fn line_ref_parse_invalid() {
         assert!(matches!(
             "abc".parse::<LineRef>().unwrap_err(),
-            EditError::InvalidLineRef { reason: InvalidLineRefReason::MissingHash, .. }
+            EditError::InvalidLineRef {
+                reason: InvalidLineRefReason::MissingHash,
+                ..
+            }
         ));
         assert!(matches!(
             "0#ab".parse::<LineRef>().unwrap_err(),
-            EditError::InvalidLineRef { reason: InvalidLineRefReason::ZeroLineNumber, .. }
+            EditError::InvalidLineRef {
+                reason: InvalidLineRefReason::ZeroLineNumber,
+                ..
+            }
         ));
         assert!(matches!(
             "5#a".parse::<LineRef>().unwrap_err(),
-            EditError::InvalidLineRef { reason: InvalidLineRefReason::BadHashLength, .. }
+            EditError::InvalidLineRef {
+                reason: InvalidLineRefReason::BadHashLength,
+                ..
+            }
         ));
         assert!(matches!(
             "5#abc".parse::<LineRef>().unwrap_err(),
-            EditError::InvalidLineRef { reason: InvalidLineRefReason::BadHashLength, .. }
+            EditError::InvalidLineRef {
+                reason: InvalidLineRefReason::BadHashLength,
+                ..
+            }
         ));
     }
 }

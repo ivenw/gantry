@@ -17,7 +17,11 @@ pub enum ReadError {
 ///
 /// `offset` is 1-indexed; if provided, reading starts at that line number.
 /// `limit` caps the number of lines returned.
-pub fn read_file(path: &Path, offset: Option<usize>, limit: Option<usize>) -> Result<String, ReadError> {
+pub fn read_file(
+    path: &Path,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> Result<String, ReadError> {
     let content = std::fs::read_to_string(path)?;
     Ok(format_hashlines(&content, offset, limit))
 }
@@ -128,6 +132,9 @@ mod tests {
     fn trailing_newline_not_extra_line() {
         let with_newline = format_hashlines("a\nb\n", None, None);
         let without_newline = format_hashlines("a\nb", None, None);
-        assert_eq!(with_newline.lines().count(), without_newline.lines().count());
+        assert_eq!(
+            with_newline.lines().count(),
+            without_newline.lines().count()
+        );
     }
 }

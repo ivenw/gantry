@@ -1,7 +1,6 @@
 use anyhow::Result;
 use gantry_core::{
-    AppEvent, Message, PendingMessage, SelectFormRequest, SelectFormResponse,
-    StreamMessageRequest,
+    AppEvent, Message, PendingMessage, SelectFormRequest, SelectFormResponse, StreamMessageRequest,
 };
 use jsonrpsee::core::client::Subscription;
 use jsonrpsee::ws_client::{WsClient, WsClientBuilder};
@@ -39,13 +38,20 @@ impl JsonRpcClient {
             while let Some(next) = sub.next().await {
                 match next {
                     Ok(event) => {
-                        if event_tx.send(WsConnectionEvent::Event(event)).await.is_err() {
+                        if event_tx
+                            .send(WsConnectionEvent::Event(event))
+                            .await
+                            .is_err()
+                        {
                             return;
                         }
                     }
                     Err(err) => {
                         let _ = event_tx
-                            .send(WsConnectionEvent::Error(format!("Subscription error: {}", err)))
+                            .send(WsConnectionEvent::Error(format!(
+                                "Subscription error: {}",
+                                err
+                            )))
                             .await;
                         break;
                     }

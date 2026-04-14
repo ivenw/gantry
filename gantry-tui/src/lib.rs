@@ -79,36 +79,38 @@ pub fn run() -> Result<()> {
             })?;
         }
 
-        if event::poll(std::time::Duration::from_millis(10))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind != KeyEventKind::Press {
-                    continue;
+        if event::poll(std::time::Duration::from_millis(10))?
+            && let Event::Key(key) = event::read()?
+        {
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
+
+            match key.code {
+                KeyCode::Char('q') => {
+                    break;
                 }
+                KeyCode::Enter => {
+                    if key.modifiers.contains(KeyModifiers::SHIFT) {
+                        app.input_buffer.push('\n');
+                    } else {
+                        let input = app.input_buffer.clone();
+                        if input.trim().is_empty() || app.is_streaming() {
+                            continue;
+                        }
+                        app.input_buffer.clear();
+                        app.add_user_message(input.clone());
+                        app.start_streaming_message();
 
-                match key.code {
-                    KeyCode::Char('q') => {
-                        break;
-                    }
-                    KeyCode::Enter => {
-                        if key.modifiers.contains(KeyModifiers::SHIFT) {
-                            app.input_buffer.push('\n');
-                        } else {
-                            let input = app.input_buffer.clone();
-                            if input.trim().is_empty() || app.is_streaming() {
-                                continue;
-                            }
-                            app.input_buffer.clear();
-                            app.add_user_message(input.clone());
-                            app.start_streaming_message();
+                        terminal.draw(|frame| {
+                            app.render(frame);
+                        })?;
 
-                            terminal.draw(|frame| {
-                                app.render(frame);
-                            })?;
-
-                            let stream_result_tx = stream_result_tx.clone();
-                            let addr_for_request = addr.clone();
-                            rt.spawn(async move {
-                                let result = match JsonRpcClient::connect_ws(&addr_for_request, port).await {
+                        let stream_result_tx = stream_result_tx.clone();
+                        let addr_for_request = addr.clone();
+                        rt.spawn(async move {
+                            let result =
+                                match JsonRpcClient::connect_ws(&addr_for_request, port).await {
                                     Ok(client) => client
                                         .stream_message(input)
                                         .await
@@ -116,29 +118,28 @@ pub fn run() -> Result<()> {
                                         .map_err(|e| e.to_string()),
                                     Err(e) => Err(e.to_string()),
                                 };
-                                let _ = stream_result_tx.send(result);
-                            });
-                        }
-                    }
-                    KeyCode::Char(c) => {
-                        app.input_buffer.push(c);
-                    }
-                    KeyCode::Backspace => {
-                        app.input_buffer.pop();
-                    }
-                    _ => {}
-                }
-
-                if let KeyCode::Char('c') = key.code {
-                    if key.modifiers.contains(KeyModifiers::CONTROL) {
-                        break;
+                            let _ = stream_result_tx.send(result);
+                        });
                     }
                 }
-
-                terminal.draw(|frame| {
-                    app.render(frame);
-                })?;
+                KeyCode::Char(c) => {
+                    app.input_buffer.push(c);
+                }
+                KeyCode::Backspace => {
+                    app.input_buffer.pop();
+                }
+                _ => {}
             }
+
+            if let KeyCode::Char('c') = key.code
+                && key.modifiers.contains(KeyModifiers::CONTROL)
+            {
+                break;
+            }
+
+            terminal.draw(|frame| {
+                app.render(frame);
+            })?;
         }
     }
 
@@ -146,11 +147,7 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-fn process_app_event(
-    event: AppEvent,
-    app: &mut App,
-    pending_id: &Arc<Mutex<Option<String>>>,
-) {
+fn process_app_event(event: AppEvent, app: &mut App, pending_id: &Arc<Mutex<Option<String>>>) {
     match event {
         AppEvent::Init(ev) => {
             app.messages = ev.messages;
@@ -199,8 +196,10 @@ impl TerminalGuard {
         crossterm::terminal::enable_raw_mode()?;
         execute!(io::stdout(), EnableBracketedPaste)?;
 
-        let keyboard_enhancement_enabled =
-            matches!(crossterm::terminal::supports_keyboard_enhancement(), Ok(true));
+        let keyboard_enhancement_enabled = matches!(
+            crossterm::terminal::supports_keyboard_enhancement(),
+            Ok(true)
+        );
         if keyboard_enhancement_enabled {
             execute!(
                 io::stdout(),

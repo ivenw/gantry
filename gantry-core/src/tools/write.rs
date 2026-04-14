@@ -86,6 +86,9 @@ impl Tool for WriteTool {
             .await
             .expect("write_file task panicked")
             .map_err(WriteToolError::from)?;
-        Ok(format!("wrote {byte_count} bytes to {}", args.path.display()))
+        Ok(format!(
+            "wrote {byte_count} bytes to {}",
+            args.path.display()
+        ))
     }
 }
