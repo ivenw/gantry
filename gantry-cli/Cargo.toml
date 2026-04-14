@@ -10,5 +10,6 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 tokio.workspace = true
+gantry-rpc = { path = "../gantry-rpc" }
 gantry-server = { path = "../gantry-server" }
 gantry-tui = { path = "../gantry-tui" }

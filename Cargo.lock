@@ -835,6 +835,7 @@ name = "gantry-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "gantry-rpc",
  "gantry-server",
  "gantry-tui",
  "tokio",

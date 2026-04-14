@@ -1,17 +1,21 @@
 pub mod agent_factory;
 pub mod event_bus;
+pub mod project_registry;
 pub mod provider_config;
 pub mod service;
+pub mod session_store;
 pub mod state;
 pub mod tools;
 pub mod types;
 
 pub use agent_factory::RigAgentFactory;
+pub use project_registry::ProjectInfo;
 pub use provider_config::{
     ConfiguredModel, ModelId, ModelSelection, OllamaProviderConfig, ProviderConfig,
     ProviderConfigCatalog, ProviderId,
 };
 pub use service::AppService;
+pub use session_store::SessionInfo;
 pub use types::{
     AppEvent, ErrorEvent, FormHiddenEvent, FormShownEvent, FormState, InitEvent, Message,
     MessageReceivedEvent, PendingClearedEvent, PendingMessage, Role, SelectFormRequest,

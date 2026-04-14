@@ -1,7 +1,7 @@
 use anyhow::Result;
 use gantry_core::{
-    AppEvent, AppService, Message, PendingMessage, SelectFormRequest, SelectFormResponse,
-    StreamMessageRequest,
+    AppEvent, AppService, Message, PendingMessage, ProjectInfo, SelectFormRequest,
+    SelectFormResponse, SessionInfo, StreamMessageRequest,
 };
 use jsonrpsee::RpcModule;
 use jsonrpsee::core::{RpcResult, SubscriptionResult, async_trait};
@@ -9,36 +9,126 @@ use jsonrpsee::server::{
     PendingSubscriptionSink, ServerBuilder, ServerConfig, ServerHandle, SubscriptionSink,
 };
 use jsonrpsee::types::ErrorObjectOwned;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use crate::GantryRpcServer;
-
-pub struct RpcApp {
-    inner: AppService,
-}
-
-impl RpcApp {
-    fn new(inner: AppService) -> Self {
-        Self { inner }
-    }
-}
 
 fn internal_error(details: impl Into<String>) -> ErrorObjectOwned {
     ErrorObjectOwned::owned(-32603, "Internal error", Some(details.into()))
 }
 
+fn invalid_request(msg: impl Into<String>) -> ErrorObjectOwned {
+    ErrorObjectOwned::owned(-32600, "Invalid request", Some(msg.into()))
+}
+
+// Per-connection state. `RpcApp` is cloned per connection by jsonrpsee.
+#[derive(Clone)]
+pub struct RpcApp {
+    app: AppService,
+    /// (session_id, project_path) — set by connect_session
+    session: Arc<Mutex<Option<(String, String)>>>,
+}
+
+impl RpcApp {
+    fn new(app: AppService) -> Self {
+        Self {
+            app,
+            session: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+
 #[async_trait]
 impl GantryRpcServer for RpcApp {
+    async fn register_project(&self, path: String) -> RpcResult<()> {
+        dbg!("rpc.register_project.request", &path);
+        self.app
+            .register_project(std::path::Path::new(&path))
+            .map_err(|e| internal_error(e.to_string()))?;
+        dbg!("rpc.register_project.done", &path);
+        Ok(())
+    }
+
+    async fn list_projects(&self) -> RpcResult<Vec<ProjectInfo>> {
+        dbg!("rpc.list_projects.request");
+        let projects = self
+            .app
+            .list_projects()
+            .map_err(|e| internal_error(e.to_string()))?;
+        dbg!("rpc.list_projects.count", projects.len());
+        Ok(projects)
+    }
+
+    async fn create_session(&self, project_path: String) -> RpcResult<String> {
+        dbg!("rpc.create_session.request", &project_path);
+        let id = self
+            .app
+            .create_session(std::path::Path::new(&project_path))
+            .map_err(|e| internal_error(e.to_string()))?;
+        dbg!("rpc.create_session.created", &id);
+        Ok(id)
+    }
+
+    async fn list_sessions(&self, project_path: String) -> RpcResult<Vec<SessionInfo>> {
+        dbg!("rpc.list_sessions.request", &project_path);
+        let sessions = self
+            .app
+            .list_sessions(std::path::Path::new(&project_path))
+            .map_err(|e| internal_error(e.to_string()))?;
+        dbg!("rpc.list_sessions.count", sessions.len());
+        Ok(sessions)
+    }
+
+    async fn connect_session(&self, session_id: String, project_path: String) -> RpcResult<()> {
+        dbg!("rpc.connect_session.request", &session_id, &project_path);
+        // Validate: load (or verify) the session exists
+        self.app
+            .get_or_load_session(&project_path, &session_id)
+            .await
+            .map_err(|e| invalid_request(e.to_string()))?;
+
+        *self.session.lock().await = Some((session_id.clone(), project_path.clone()));
+        dbg!("rpc.connect_session.done", &session_id);
+        Ok(())
+    }
+
     async fn send_message(&self, content: String) -> RpcResult<Vec<Message>> {
         dbg!("rpc.send_message.request", &content);
-        let messages = self.inner.send_message(content).await;
+        let (session_id, project_path) = self
+            .session
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| invalid_request("no session selected; call connect_session first"))?;
+
+        let session = self
+            .app
+            .get_or_load_session(&project_path, &session_id)
+            .await
+            .map_err(|e| internal_error(e.to_string()))?;
+
+        let messages = session.send_message(content).await;
         dbg!("rpc.send_message.response_count", messages.len());
         Ok(messages)
     }
 
     async fn stream_message(&self, req: StreamMessageRequest) -> RpcResult<PendingMessage> {
         dbg!("rpc.stream_message.request.content", &req.content);
-        let pending = self
-            .inner
+        let (session_id, project_path) = self
+            .session
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| invalid_request("no session selected; call connect_session first"))?;
+
+        let session = self
+            .app
+            .get_or_load_session(&project_path, &session_id)
+            .await
+            .map_err(|e| internal_error(e.to_string()))?;
+
+        let pending = session
             .stream_message(req)
             .await
             .map_err(|e| internal_error(e.to_string()))?;
@@ -52,17 +142,32 @@ impl GantryRpcServer for RpcApp {
 
     async fn subscribe_events(&self, pending: PendingSubscriptionSink) -> SubscriptionResult {
         dbg!("rpc.subscribe_events.request");
+
+        let (session_id, project_path) = {
+            self.session
+                .lock()
+                .await
+                .clone()
+                .ok_or("no session selected; call connect_session first")?
+        };
+
+        let session = self
+            .app
+            .get_or_load_session(&project_path, &session_id)
+            .await
+            .map_err(|e| e.to_string())?;
+
         let sink = pending.accept().await.map_err(|e| e.to_string())?;
         dbg!("rpc.subscribe_events.accepted");
 
-        let init_event = self.inner.init_event().await;
+        let init_event = session.init_event().await;
         if let Err(err) = send_event(&sink, &init_event).await {
             dbg!("rpc.subscribe_events.init_send_failed", &err);
             return Ok(());
         }
         dbg!("rpc.subscribe_events.init_sent");
 
-        let mut event_rx = self.inner.subscribe_events();
+        let mut event_rx = session.subscribe_events();
         loop {
             tokio::select! {
                 _ = sink.closed() => break,
@@ -77,7 +182,7 @@ impl GantryRpcServer for RpcApp {
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                             dbg!("rpc.subscribe_events.lagged");
-                            let catch_up = self.inner.init_event().await;
+                            let catch_up = session.init_event().await;
                             if let Err(err) = send_event(&sink, &catch_up).await {
                                 dbg!("rpc.subscribe_events.catchup_send_failed", &err);
                                 break;
@@ -97,28 +202,80 @@ impl GantryRpcServer for RpcApp {
 
     async fn select_form(&self, req: SelectFormRequest) -> RpcResult<SelectFormResponse> {
         dbg!("rpc.select_form.request", &req.form_id, &req.selection);
-        let response = self.inner.select_form(req.form_id, req.selection).await;
+        let (session_id, project_path) = self
+            .session
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| invalid_request("no session selected; call connect_session first"))?;
+
+        let session = self
+            .app
+            .get_or_load_session(&project_path, &session_id)
+            .await
+            .map_err(|e| internal_error(e.to_string()))?;
+
+        let response = session.select_form(req.form_id, req.selection).await;
         dbg!("rpc.select_form.response", &response);
         Ok(response)
     }
 
     async fn get_messages(&self) -> RpcResult<Vec<Message>> {
         dbg!("rpc.get_messages.request");
-        let messages = self.inner.get_messages().await;
+        let (session_id, project_path) = self
+            .session
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| invalid_request("no session selected; call connect_session first"))?;
+
+        let session = self
+            .app
+            .get_or_load_session(&project_path, &session_id)
+            .await
+            .map_err(|e| internal_error(e.to_string()))?;
+
+        let messages = session.get_messages().await;
         dbg!("rpc.get_messages.response_count", messages.len());
         Ok(messages)
     }
 
     async fn clear_messages(&self) -> RpcResult<()> {
         dbg!("rpc.clear_messages.request");
-        self.inner.clear_messages().await;
+        let (session_id, project_path) = self
+            .session
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| invalid_request("no session selected; call connect_session first"))?;
+
+        let session = self
+            .app
+            .get_or_load_session(&project_path, &session_id)
+            .await
+            .map_err(|e| internal_error(e.to_string()))?;
+
+        session.clear_messages().await;
         dbg!("rpc.clear_messages.done");
         Ok(())
     }
 
     async fn interrupt_stream(&self, message_id: String) -> RpcResult<bool> {
         dbg!("rpc.interrupt_stream.request", &message_id);
-        let result = self.inner.interrupt_stream(message_id).await;
+        let (session_id, project_path) = self
+            .session
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| invalid_request("no session selected; call connect_session first"))?;
+
+        let session = self
+            .app
+            .get_or_load_session(&project_path, &session_id)
+            .await
+            .map_err(|e| internal_error(e.to_string()))?;
+
+        let result = session.interrupt_stream(message_id).await;
         dbg!("rpc.interrupt_stream.response", result);
         Ok(result)
     }

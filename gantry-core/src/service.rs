@@ -1,21 +1,31 @@
 use crate::agent_factory::RigAgentFactory;
 use crate::event_bus::EventBus;
+use crate::project_registry::ProjectRegistry;
+use crate::session_store::SessionStore;
 use crate::state::ConversationState;
 use crate::{
     AppEvent, ErrorEvent, FormHiddenEvent, FormShownEvent, InitEvent, Message,
-    MessageReceivedEvent, ModelId, ModelSelection, PendingClearedEvent, PendingMessage, ProviderId,
-    Role, SelectFormResponse, StreamEndEvent, StreamMessageRequest, StreamStartEvent, TokenEvent,
+    MessageReceivedEvent, ModelId, ModelSelection, PendingClearedEvent, PendingMessage, ProjectInfo,
+    ProviderId, Role, SelectFormResponse, SessionInfo, StreamEndEvent, StreamMessageRequest,
+    StreamStartEvent, TokenEvent,
 };
 use anyhow::Result;
 use rig::message::Message as RigMessage;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::mpsc;
 use tokio::sync::{Mutex, broadcast, oneshot};
 use uuid::Uuid;
 
-#[derive(Clone)]
-pub struct AppService {
+// ---------------------------------------------------------------------------
+// ActiveSession — per-session in-memory state
+// ---------------------------------------------------------------------------
+
+pub struct ActiveSession {
+    pub project_path: PathBuf,
+    pub session_id: String,
     state: Arc<Mutex<ConversationState>>,
     event_bus: EventBus,
     agent_factory: RigAgentFactory,
@@ -23,14 +33,20 @@ pub struct AppService {
     cancel_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
 }
 
-impl AppService {
-    pub fn new(agent_factory: RigAgentFactory) -> Self {
-        let default_selection = agent_factory
-            .catalog()
-            .default_selection()
-            .expect("provider catalog should be valid when constructing AppService");
+impl ActiveSession {
+    fn new(
+        project_path: PathBuf,
+        session_id: String,
+        initial_messages: Vec<Message>,
+        agent_factory: RigAgentFactory,
+        default_selection: ModelSelection,
+    ) -> Self {
+        let mut state = ConversationState::new(default_selection);
+        state.messages = initial_messages;
         Self {
-            state: Arc::new(Mutex::new(ConversationState::new(default_selection))),
+            project_path,
+            session_id,
+            state: Arc::new(Mutex::new(state)),
             event_bus: EventBus::new(1000),
             agent_factory,
             is_streaming: Arc::new(AtomicBool::new(false)),
@@ -97,30 +113,32 @@ impl AppService {
     }
 
     pub async fn send_message(&self, content: String) -> Vec<Message> {
-        dbg!("app.send_message.request", &content);
+        dbg!("session.send_message.request", &content);
         {
             let mut state = self.state.lock().await;
-            state.messages.push(Message::new(Role::User, content));
+            let msg = Message::new(Role::User, content);
+            state.messages.push(msg.clone());
+            let _ = SessionStore::append_message(&self.project_path, &self.session_id, &msg);
         }
 
         let snapshot = self.get_messages().await;
         let selection = self.get_active_selection().await;
         let mut rig_messages = Self::to_rig_messages(snapshot);
-        dbg!("app.send_message.snapshot_len", rig_messages.len());
+        dbg!("session.send_message.snapshot_len", rig_messages.len());
         let response = match rig_messages.pop() {
             Some(prompt) => match self.agent_factory.agent(&selection).await {
                 Ok(agent) => match agent.chat(prompt, rig_messages).await {
                     Ok(content) => {
-                        dbg!("app.send_message.llm_ok_len", content.len());
+                        dbg!("session.send_message.llm_ok_len", content.len());
                         Message::new(Role::Assistant, content)
                     }
                     Err(err) => {
-                        dbg!("app.send_message.llm_err", err.to_string());
+                        dbg!("session.send_message.llm_err", err.to_string());
                         Message::new(Role::Error, err.to_string())
                     }
                 },
                 Err(err) => {
-                    dbg!("app.send_message.agent_err", err.to_string());
+                    dbg!("session.send_message.agent_err", err.to_string());
                     Message::new(Role::Error, err.to_string())
                 }
             },
@@ -131,16 +149,17 @@ impl AppService {
         };
 
         let mut state = self.state.lock().await;
-        state.messages.push(response);
+        state.messages.push(response.clone());
+        let _ = SessionStore::append_message(&self.project_path, &self.session_id, &response);
         dbg!(
-            "app.send_message.response_messages_len",
+            "session.send_message.response_messages_len",
             state.messages.len()
         );
         state.messages.clone()
     }
 
     pub async fn stream_message(&self, req: StreamMessageRequest) -> Result<PendingMessage> {
-        dbg!("app.stream_message.request", &req.content);
+        dbg!("session.stream_message.request", &req.content);
         if self
             .is_streaming
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -156,7 +175,9 @@ impl AppService {
 
         {
             let mut state = self.state.lock().await;
-            state.messages.push(Message::new(Role::User, req.content));
+            let msg = Message::new(Role::User, req.content);
+            state.messages.push(msg.clone());
+            let _ = SessionStore::append_message(&self.project_path, &self.session_id, &msg);
             state.pending_message = Some(pending.clone());
         }
 
@@ -165,7 +186,7 @@ impl AppService {
                 id: pending.id.clone(),
                 content: pending.content.clone(),
             }));
-        dbg!("app.stream_message.pending_published", &pending.id);
+        dbg!("session.stream_message.pending_published", &pending.id);
 
         let snapshot = self.get_messages().await;
         let selection = self.get_active_selection().await;
@@ -178,7 +199,7 @@ impl AppService {
             return Ok(pending);
         };
 
-        dbg!("app.stream_message.snapshot_len", rig_messages.len() + 1);
+        dbg!("session.stream_message.snapshot_len", rig_messages.len() + 1);
         let message_id = Uuid::new_v4().to_string();
         self.event_bus
             .publish(AppEvent::StreamStart(StreamStartEvent {
@@ -203,7 +224,7 @@ impl AppService {
         loop {
             tokio::select! {
                 _ = &mut cancel_rx => {
-                    dbg!("app.stream_message.cancelled");
+                    dbg!("session.stream_message.cancelled");
                     cancelled = true;
                     break;
                 }
@@ -236,7 +257,7 @@ impl AppService {
         }
 
         if cancelled {
-            dbg!("app.stream_message.was_cancelled");
+            dbg!("session.stream_message.was_cancelled");
             self.is_streaming.store(false, Ordering::SeqCst);
             return Ok(pending);
         }
@@ -244,7 +265,7 @@ impl AppService {
         match llm_task.await {
             Ok(Ok(())) => {}
             Ok(Err(err)) => {
-                dbg!("app.stream_message.llm_err", err.to_string());
+                dbg!("session.stream_message.llm_err", err.to_string());
                 self.clear_pending(&pending.id).await;
                 self.event_bus.publish(AppEvent::Error(ErrorEvent {
                     message: err.to_string(),
@@ -252,7 +273,7 @@ impl AppService {
                 return Ok(pending);
             }
             Err(err) => {
-                dbg!("app.stream_message.llm_join_err", err.to_string());
+                dbg!("session.stream_message.llm_join_err", err.to_string());
                 self.clear_pending(&pending.id).await;
                 self.event_bus.publish(AppEvent::Error(ErrorEvent {
                     message: format!("llm task failed: {}", err),
@@ -261,24 +282,24 @@ impl AppService {
             }
         }
 
-        dbg!("app.stream_message.tokens_received", token_count);
-        dbg!("app.stream_message.accumulated_len", accumulated.len());
+        dbg!("session.stream_message.tokens_received", token_count);
+        dbg!("session.stream_message.accumulated_len", accumulated.len());
 
         self.event_bus.publish(AppEvent::StreamEnd(StreamEndEvent {
             message_id,
             content: accumulated.clone(),
         }));
-        dbg!("app.stream_message.end_published");
+        dbg!("session.stream_message.end_published");
 
         {
             let mut state = self.state.lock().await;
-            state
-                .messages
-                .push(Message::new(Role::Assistant, accumulated));
+            let msg = Message::new(Role::Assistant, accumulated);
+            state.messages.push(msg.clone());
+            let _ = SessionStore::append_message(&self.project_path, &self.session_id, &msg);
         }
 
         self.clear_pending(&pending.id).await;
-        dbg!("app.stream_message.done", &pending.id);
+        dbg!("session.stream_message.done", &pending.id);
         Ok(pending)
     }
 
@@ -311,11 +332,11 @@ impl AppService {
     }
 
     pub async fn interrupt_stream(&self, message_id: String) -> bool {
-        dbg!("app.interrupt_stream", &message_id);
+        dbg!("session.interrupt_stream", &message_id);
 
         if let Some(cancel_tx) = self.cancel_tx.lock().await.take() {
             let _ = cancel_tx.send(());
-            dbg!("app.interrupt_stream.sent_cancel");
+            dbg!("session.interrupt_stream.sent_cancel");
         }
 
         let state = self.state.lock().await;
@@ -329,7 +350,7 @@ impl AppService {
 
         if let Some(pending) = pending {
             drop(state);
-            dbg!("app.interrupt_stream.accumulated_len", accumulated.len());
+            dbg!("session.interrupt_stream.accumulated_len", accumulated.len());
 
             if !accumulated.is_empty() {
                 self.event_bus.publish(AppEvent::StreamEnd(StreamEndEvent {
@@ -342,7 +363,7 @@ impl AppService {
         }
 
         self.is_streaming.store(false, Ordering::SeqCst);
-        dbg!("app.interrupt_stream.done");
+        dbg!("session.interrupt_stream.done");
         true
     }
 
@@ -373,7 +394,7 @@ impl AppService {
     }
 
     async fn clear_pending(&self, pending_id: &str) {
-        dbg!("app.clear_pending", pending_id);
+        dbg!("session.clear_pending", pending_id);
         {
             let mut state = self.state.lock().await;
             state.pending_message = None;
@@ -404,5 +425,115 @@ struct StreamingGuard {
 impl Drop for StreamingGuard {
     fn drop(&mut self) {
         self.is_streaming.store(false, Ordering::SeqCst);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AppService — project registry + session lifecycle management
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+pub struct AppService {
+    registry: Arc<ProjectRegistry>,
+    sessions: Arc<Mutex<HashMap<String, Arc<ActiveSession>>>>,
+    agent_factory: RigAgentFactory,
+}
+
+impl AppService {
+    pub fn new(agent_factory: RigAgentFactory, registry_path: PathBuf) -> Self {
+        Self {
+            registry: Arc::new(ProjectRegistry::new(registry_path)),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            agent_factory,
+        }
+    }
+
+    // --- project management ---
+
+    pub fn register_project(&self, path: &std::path::Path) -> Result<()> {
+        self.registry.register(path)
+    }
+
+    pub fn list_projects(&self) -> Result<Vec<ProjectInfo>> {
+        self.registry.list()
+    }
+
+    // --- session management ---
+
+    pub fn create_session(&self, project_path: &std::path::Path) -> Result<String> {
+        // Verify the project is registered
+        let abs = project_path
+            .canonicalize()
+            .map_err(|_| anyhow::anyhow!("project path does not exist: {}", project_path.display()))?;
+        let abs_str = abs.to_string_lossy().to_string();
+        let projects = self.registry.list()?;
+        if !projects.iter().any(|p| p.path == abs_str) {
+            return Err(anyhow::anyhow!(
+                "project not registered: {}",
+                abs_str
+            ));
+        }
+        SessionStore::create(&abs)
+    }
+
+    pub fn list_sessions(&self, project_path: &std::path::Path) -> Result<Vec<SessionInfo>> {
+        let abs = project_path
+            .canonicalize()
+            .map_err(|_| anyhow::anyhow!("project path does not exist: {}", project_path.display()))?;
+        SessionStore::list(&abs)
+    }
+
+    /// Returns an `Arc<ActiveSession>`, creating it in memory if needed.
+    /// Returns an error if the session does not exist on disk.
+    pub async fn get_or_load_session(
+        &self,
+        project_path_str: &str,
+        session_id: &str,
+    ) -> Result<Arc<ActiveSession>> {
+        let project_path = std::path::Path::new(project_path_str);
+        let abs = project_path
+            .canonicalize()
+            .map_err(|_| anyhow::anyhow!("project path does not exist: {}", project_path_str))?;
+
+        if !SessionStore::exists(&abs, session_id) {
+            return Err(anyhow::anyhow!("session not found: {}", session_id));
+        }
+
+        let mut sessions = self.sessions.lock().await;
+        if let Some(session) = sessions.get(session_id) {
+            return Ok(session.clone());
+        }
+
+        let messages = SessionStore::load_messages(&abs, session_id)?;
+        let default_selection = self
+            .agent_factory
+            .catalog()
+            .default_selection()
+            .expect("provider catalog must be valid");
+
+        let session = Arc::new(ActiveSession::new(
+            abs,
+            session_id.to_string(),
+            messages,
+            self.agent_factory.clone(),
+            default_selection,
+        ));
+        sessions.insert(session_id.to_string(), session.clone());
+        Ok(session)
+    }
+
+    /// Called when a client disconnects. Removes the session from the in-memory map
+    /// if no other clients hold a reference to it (Arc strong count == 1 means only the map holds it).
+    pub async fn release_session(&self, session_id: &str) {
+        let mut sessions = self.sessions.lock().await;
+        if let Some(session) = sessions.get(session_id) {
+            // Arc::strong_count: map holds 1, caller holds 1 while checking.
+            // After this function returns the caller's ref will be dropped.
+            // If count is 2, no other client holds it → safe to evict.
+            if Arc::strong_count(session) <= 2 {
+                sessions.remove(session_id);
+                dbg!("app.release_session.evicted", session_id);
+            }
+        }
     }
 }

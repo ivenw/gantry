@@ -42,7 +42,11 @@ pub async fn run_server(addr: &str, port: u16) -> Result<()> {
     };
 
     let agent_factory = RigAgentFactory::new(catalog)?;
-    let app = AppService::new(agent_factory);
+    let home = std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let registry_path = home.join(".gantry").join("projects.json");
+    let app = AppService::new(agent_factory, registry_path);
 
     let rpc_handle = start_app_rpc_server(addr, port, app.clone()).await?;
 
