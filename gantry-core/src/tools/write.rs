@@ -25,50 +25,43 @@ pub fn write_file(path: &Path, content: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs;
 
-    fn tmp(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!("gantry_write_test_{name}"))
-    }
+    use super::*;
 
     #[test]
     fn creates_file_with_content() {
-        let path = tmp("creates_file_with_content.txt");
-        let _ = fs::remove_file(&path);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("file.txt");
         write_file(&path, "hello world").unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "hello world");
-        fs::remove_file(&path).unwrap();
     }
 
     #[test]
     fn empty_content_creates_zero_byte_file() {
-        let path = tmp("empty_content.txt");
-        let _ = fs::remove_file(&path);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("empty.txt");
         write_file(&path, "").unwrap();
         assert!(path.exists());
         assert_eq!(fs::metadata(&path).unwrap().len(), 0);
-        fs::remove_file(&path).unwrap();
     }
 
     #[test]
     fn errors_if_file_exists() {
-        let path = tmp("errors_if_file_exists.txt");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("existing.txt");
         fs::write(&path, "original").unwrap();
         let err = write_file(&path, "new content").unwrap_err();
         assert!(err.to_string().contains("already exists"));
         assert!(err.to_string().contains("edit_file"));
-        // original content must be untouched
         assert_eq!(fs::read_to_string(&path).unwrap(), "original");
-        fs::remove_file(&path).unwrap();
     }
 
     #[test]
     fn creates_parent_directories() {
-        let path = tmp("creates_parent_directories/a/b/c.txt");
-        let _ = fs::remove_dir_all(tmp("creates_parent_directories"));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a/b/c.txt");
         write_file(&path, "deep").unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "deep");
-        fs::remove_dir_all(tmp("creates_parent_directories")).unwrap();
     }
 }
