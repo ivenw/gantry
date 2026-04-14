@@ -19,12 +19,29 @@ use ui::App;
 const DEFAULT_ADDR: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 3444;
 
+fn discover_project() -> Option<std::path::PathBuf> {
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        if dir.join(".gantry").is_dir() {
+            return Some(dir);
+        }
+        match dir.parent() {
+            Some(parent) => dir = parent.to_path_buf(),
+            None => return None,
+        }
+    }
+}
+
 pub fn run() -> Result<()> {
     let addr = std::env::var("GANTRY_ADDR").unwrap_or_else(|_| DEFAULT_ADDR.to_string());
     let port: u16 = std::env::var("GANTRY_PORT")
         .unwrap_or_else(|_| DEFAULT_PORT.to_string())
         .parse()
         .unwrap_or(DEFAULT_PORT);
+
+    let project_path = discover_project().ok_or_else(|| {
+        anyhow!("no gantry project found in current directory or any parent\nRun `gantry init` to register this project.")
+    })?;
 
     let rt = tokio::runtime::Runtime::new()?;
 
@@ -39,6 +56,13 @@ pub fn run() -> Result<()> {
                 )
             })?,
     );
+
+    let session_id = rt
+        .block_on(client.create_session(project_path.clone()))
+        .map_err(|e| anyhow!("failed to create session: {}", e))?;
+
+    rt.block_on(client.connect_session(session_id.clone(), project_path.clone()))
+        .map_err(|e| anyhow!("failed to connect session: {}", e))?;
 
     let (event_handle, mut event_rx) = rt.block_on(client.subscribe_events())?;
     let (stream_result_tx, stream_result_rx) = mpsc::channel::<Result<(), String>>();
@@ -114,9 +138,15 @@ pub fn run() -> Result<()> {
                             }
                             let pending_id_clone = pending.clone();
                             let addr_clone = addr.clone();
+                            let session_id_clone = session_id.clone();
+                            let project_path_clone = project_path.clone();
                             rt.spawn(async move {
                                 if let Ok(client) =
                                     JsonRpcClient::connect_ws(&addr_clone, port).await
+                                    && client
+                                        .connect_session(session_id_clone, project_path_clone)
+                                        .await
+                                        .is_ok()
                                 {
                                     let _ =
                                         client.interrupt_stream(pending_id_clone.unwrap()).await;
@@ -168,16 +198,28 @@ pub fn run() -> Result<()> {
                         let stream_result_tx = stream_result_tx.clone();
                         let addr_for_request = addr.clone();
                         let stream_task = stream_task.clone();
+                        let session_id_for_task = session_id.clone();
+                        let project_path_for_task = project_path.clone();
                         let task = rt.spawn(async move {
-                            let result =
-                                match JsonRpcClient::connect_ws(&addr_for_request, port).await {
-                                    Ok(client) => client
-                                        .stream_message(input)
+                            let result = match JsonRpcClient::connect_ws(&addr_for_request, port)
+                                .await
+                            {
+                                Ok(client) => {
+                                    if let Err(e) = client
+                                        .connect_session(session_id_for_task, project_path_for_task)
                                         .await
-                                        .map(|_| ())
-                                        .map_err(|e| e.to_string()),
-                                    Err(e) => Err(e.to_string()),
-                                };
+                                    {
+                                        Err(format!("failed to connect session: {}", e))
+                                    } else {
+                                        client
+                                            .stream_message(input)
+                                            .await
+                                            .map(|_| ())
+                                            .map_err(|e| e.to_string())
+                                    }
+                                }
+                                Err(e) => Err(e.to_string()),
+                            };
                             let _ = stream_result_tx.send(result);
                         });
                         *stream_task.lock().unwrap() = Some(task);
