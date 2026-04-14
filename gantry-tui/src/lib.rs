@@ -148,7 +148,7 @@ pub fn run() -> Result<()> {
                         }
                         if input.starts_with('/') {
                             let filter = input.strip_prefix('/').unwrap_or("");
-                            let has_match = app.commands.iter().any(|c| c.name.starts_with(filter));
+                            let has_match = App::available_commands().iter().any(|c| c.name.starts_with(filter));
                             if !has_match {
                                 app.input_buffer.clear();
                                 terminal.draw(|frame| app.render(frame))?;
@@ -185,7 +185,7 @@ pub fn run() -> Result<()> {
                     if app.status_message.is_some() {
                         app.clear_status();
                     }
-                    if c == '/' && !app.commands.is_empty() {
+                    if c == '/' && !App::available_commands().is_empty() {
                         app.input_buffer.push(c);
                         app.activate_command_picker();
                     } else if app.is_command_picker_active() {
@@ -258,7 +258,6 @@ fn process_app_event(event: AppEvent, app: &mut App, pending_id: &Arc<Mutex<Opti
     match event {
         AppEvent::Init(ev) => {
             app.messages = ev.messages;
-            app.commands = ev.commands;
             if let Some(pending) = ev.pending_message {
                 app.add_user_message(pending.content.clone());
                 app.start_streaming_message();

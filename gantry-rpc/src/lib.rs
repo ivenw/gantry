@@ -2,7 +2,7 @@ mod client;
 pub mod server;
 
 pub use gantry_core::{
-    AppEvent, Command, Message, PendingMessage, SelectFormRequest, SelectFormResponse,
+    AppEvent, Message, PendingMessage, SelectFormRequest, SelectFormResponse,
     StreamMessageRequest,
 };
 use jsonrpsee::core::{RpcResult, SubscriptionResult};
@@ -39,7 +39,4 @@ pub trait GantryRpc {
 
     #[method(name = "ping")]
     async fn ping(&self) -> RpcResult<()>;
-
-    #[method(name = "get_commands")]
-    async fn get_commands(&self) -> RpcResult<Vec<Command>>;
 }

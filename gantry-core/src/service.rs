@@ -2,7 +2,7 @@ use crate::agent_factory::RigAgentFactory;
 use crate::event_bus::EventBus;
 use crate::state::ConversationState;
 use crate::{
-    AppEvent, Command, ErrorEvent, FormHiddenEvent, FormShownEvent, InitEvent, Message,
+    AppEvent, ErrorEvent, FormHiddenEvent, FormShownEvent, InitEvent, Message,
     MessageReceivedEvent, ModelId, ModelSelection, PendingClearedEvent, PendingMessage, ProviderId,
     Role, SelectFormResponse, StreamEndEvent, StreamMessageRequest, StreamStartEvent, TokenEvent,
 };
@@ -53,10 +53,6 @@ impl AppService {
             messages: state.messages.clone(),
             pending_message: state.pending_message.clone(),
             form: state.active_form.clone(),
-            commands: vec![Command {
-                name: "health".to_string(),
-                description: "Check connection to server".to_string(),
-            }],
         })
     }
 

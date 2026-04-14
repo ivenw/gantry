@@ -1,7 +1,7 @@
 use super::chat;
 use super::command_picker;
 use super::input;
-use gantry_core::{Command, Message, Role};
+use gantry_core::{Message, Role};
 
 use ratatui::{
     Frame,
@@ -16,7 +16,6 @@ pub struct App {
     pub streaming_message_idx: Option<usize>,
     pub streaming_buffer: String,
     pub show_form: bool,
-    pub commands: Vec<Command>,
     pub command_picker: Option<command_picker::CommandPicker>,
     pub status_message: Option<String>,
 }
@@ -30,10 +29,18 @@ impl App {
             streaming_message_idx: None,
             streaming_buffer: String::new(),
             show_form: false,
-            commands: Vec::new(),
             command_picker: None,
             status_message: None,
         }
+    }
+
+    pub fn available_commands() -> Vec<command_picker::Command> {
+        vec![
+            command_picker::Command {
+                name: "health".to_string(),
+                description: "Check connection to server".to_string(),
+            },
+        ]
     }
 
     pub fn add_user_message(&mut self, content: String) {
@@ -106,11 +113,11 @@ impl App {
     }
 
     pub fn is_command_picker_active(&self) -> bool {
-        self.input_buffer.starts_with('/') && !self.commands.is_empty()
+        self.input_buffer.starts_with('/') && !Self::available_commands().is_empty()
     }
 
     pub fn activate_command_picker(&mut self) {
-        self.command_picker = Some(command_picker::CommandPicker::new(self.commands.clone()));
+        self.command_picker = Some(command_picker::CommandPicker::new(Self::available_commands()));
     }
 
     pub fn deactivate_command_picker(&mut self) {
@@ -135,7 +142,7 @@ impl App {
         }
     }
 
-    pub fn selected_command(&self) -> Option<&Command> {
+    pub fn selected_command(&self) -> Option<&command_picker::Command> {
         self.command_picker.as_ref().and_then(|p| p.selected_command())
     }
 

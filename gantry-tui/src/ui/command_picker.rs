@@ -1,9 +1,14 @@
-use gantry_core::Command;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
     widgets::{Block, BorderType, Borders, Widget},
 };
+
+#[derive(Clone, Debug)]
+pub struct Command {
+    pub name: String,
+    pub description: String,
+}
 
 #[derive(Clone)]
 pub struct CommandPicker {
