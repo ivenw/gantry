@@ -17,3 +17,5 @@
     bar()
   }
   ```
+
+- ALWAYS confirm with the user before supressing any lint instead of fixing it.
