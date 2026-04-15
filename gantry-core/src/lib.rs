@@ -2,9 +2,11 @@ pub mod agent_factory;
 pub mod event_bus;
 pub mod project_registry;
 pub mod provider_config;
+pub mod resource_loader;
 pub mod service;
 pub mod session;
 pub mod state;
+pub mod system_prompt;
 pub mod tools;
 pub mod types;
 

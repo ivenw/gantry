@@ -1,9 +1,11 @@
 use crate::agent_factory::RigAgentFactory;
 use crate::event_bus::EventBus;
 use crate::project_registry::ProjectRegistry;
+use crate::resource_loader::discover_agents_md;
 use crate::session::manager::SessionManager;
 use crate::session::store::SessionStore;
 use crate::state::ConversationState;
+use crate::system_prompt::build_system_prompt;
 use crate::{
     AppEvent, ErrorEvent, FormHiddenEvent, FormShownEvent, InitEvent, Message,
     MessageReceivedEvent, ModelId, ModelSelection, PendingClearedEvent, PendingMessage, ProviderId,
@@ -133,10 +135,15 @@ impl ActiveSession {
             mgr.context_messages()
         };
         let selection = self.get_active_selection().await;
+        let system_prompt = build_system_prompt(&discover_agents_md(&self.project_path));
         let mut rig_messages = Self::to_rig_messages(context);
         dbg!("session.send_message.snapshot_len", rig_messages.len());
         let response = match rig_messages.pop() {
-            Some(prompt) => match self.agent_factory.agent(&selection).await {
+            Some(prompt) => match self
+                .agent_factory
+                .agent(&selection, Some(&system_prompt))
+                .await
+            {
                 Ok(agent) => match agent.chat(prompt, rig_messages).await {
                     Ok(content) => {
                         dbg!("session.send_message.llm_ok_len", content.len());
@@ -206,6 +213,7 @@ impl ActiveSession {
 
         let snapshot = self.get_messages().await;
         let selection = self.get_active_selection().await;
+        let system_prompt = build_system_prompt(&discover_agents_md(&self.project_path));
         let mut rig_messages = Self::to_rig_messages(snapshot);
         let Some(prompt) = rig_messages.pop() else {
             self.clear_pending(&pending.id).await;
@@ -230,7 +238,10 @@ impl ActiveSession {
         let (cancel_tx, mut cancel_rx) = oneshot::channel();
         *self.cancel_tx.lock().await = Some(cancel_tx);
 
-        let agent = self.agent_factory.agent(&selection).await;
+        let agent = self
+            .agent_factory
+            .agent(&selection, Some(&system_prompt))
+            .await;
         let llm_task = tokio::spawn(async move {
             let agent = agent?;
             agent.stream_chat(prompt, rig_messages, token_tx).await

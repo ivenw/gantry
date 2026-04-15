@@ -31,7 +31,11 @@ impl RigAgentFactory {
     // TODO: Why is this async? We are not awaiting anything inside of it.
     // TODO: We actually wanted to return a AgentBuilder here. Since that has to be wrapped, we
     // probably still need the ConfiguredAgent wrapper too.
-    pub async fn agent(&self, selection: &ModelSelection) -> Result<ConfiguredAgent> {
+    pub async fn agent(
+        &self,
+        selection: &ModelSelection,
+        preamble: Option<&str>,
+    ) -> Result<ConfiguredAgent> {
         match self.provider_config(selection)? {
             ProviderConfig::Ollama(provider) => {
                 let model = self
@@ -51,9 +55,11 @@ impl RigAgentFactory {
                     .base_url(&provider.base_url)
                     .build()?;
 
-                Ok(ConfiguredAgent::ollama(
-                    client.agent(&model.provider_model_name).build(),
-                ))
+                let mut builder = client.agent(&model.provider_model_name);
+                if let Some(p) = preamble {
+                    builder = builder.preamble(p);
+                }
+                Ok(ConfiguredAgent::ollama(builder.build()))
             }
         }
     }
