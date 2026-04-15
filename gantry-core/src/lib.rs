@@ -19,6 +19,5 @@ pub use session::store::SessionInfo;
 pub use types::{
     AppEvent, ErrorEvent, FormHiddenEvent, FormShownEvent, FormState, InitEvent, Message,
     MessageReceivedEvent, PendingClearedEvent, PendingMessage, Role, SelectFormRequest,
-    SelectFormResponse, SessionHeader, StreamEndEvent, StreamMessageRequest, StreamStartEvent,
-    TokenEvent,
+    SelectFormResponse, StreamEndEvent, StreamMessageRequest, StreamStartEvent, TokenEvent,
 };

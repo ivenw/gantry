@@ -2,21 +2,21 @@ use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::session::store::SessionStore;
+use crate::session::store::{MessageEntry, SessionEntry, SessionStore};
 use crate::types::{Message, Role};
 
 /// In-memory session state for a single conversation tree.
 ///
-/// All messages from the JSONL file are loaded into a HashMap keyed by message
-/// ID. `current_leaf_id` tracks the tip of the active branch; new messages are
+/// All entries from the JSONL file are loaded into a HashMap keyed by entry ID.
+/// `current_leaf_id` tracks the tip of the active branch; new entries are
 /// appended as children of that node.
 pub struct SessionManager {
     pub session_id: String,
-    /// The ID of the last message on the currently active branch.
-    /// `None` only when the session has no messages yet.
+    /// The ID of the last entry on the currently active branch.
+    /// `None` only when the session has no entries yet.
     pub current_leaf_id: Option<String>,
-    /// All messages in the tree, keyed by message ID.
-    messages: HashMap<String, Message>,
+    /// All entries in the tree, keyed by entry ID.
+    entries: HashMap<String, SessionEntry>,
     /// Retained so disk writes don't need the caller to pass it every time.
     project_path: PathBuf,
 }
@@ -28,93 +28,94 @@ impl SessionManager {
         Ok(Self {
             session_id,
             current_leaf_id: None,
-            messages: HashMap::new(),
+            entries: HashMap::new(),
             project_path: project_path.to_path_buf(),
         })
     }
 
     /// Load an existing session from disk into memory.
     ///
-    /// `current_leaf_id` is initialised to the most recently created message
+    /// `current_leaf_id` is initialised to the most recently created entry
     /// that has no children (i.e. a leaf node with the latest `created_at`).
     pub fn load(project_path: &Path, session_id: &str) -> Result<Self> {
-        let messages_vec = SessionStore::load_messages(project_path, session_id)
+        let entries_vec = SessionStore::load_entries(project_path, session_id)
             .with_context(|| format!("failed to load session {}", session_id))?;
 
-        let messages: HashMap<String, Message> = messages_vec
+        let entries: HashMap<String, SessionEntry> = entries_vec
             .into_iter()
-            .map(|m| (m.id.clone(), m))
+            .map(|e| (e.id().to_string(), e))
             .collect();
 
-        // Determine the current leaf: a message whose id is not referenced as
-        // any other message's parent_id, with the latest created_at timestamp.
-        let parent_ids: std::collections::HashSet<&str> = messages
-            .values()
-            .filter_map(|m| m.parent_id.as_deref())
-            .collect();
+        let parent_ids: std::collections::HashSet<&str> =
+            entries.values().filter_map(|e| e.parent_id()).collect();
 
-        let current_leaf_id = messages
+        let current_leaf_id = entries
             .values()
-            .filter(|m| !parent_ids.contains(m.id.as_str()))
-            .max_by(|a, b| a.created_at.cmp(&b.created_at))
-            .map(|m| m.id.clone());
+            .filter(|e| !parent_ids.contains(e.id()))
+            .max_by(|a, b| a.created_at().cmp(b.created_at()))
+            .map(|e| e.id().to_string());
 
         Ok(Self {
             session_id: session_id.to_string(),
             current_leaf_id,
-            messages,
+            entries,
             project_path: project_path.to_path_buf(),
         })
     }
 
-    /// Append a new message as a child of the current leaf.
+    /// Append a new message entry as a child of the current leaf.
     ///
-    /// Writes to disk via `SessionStore`, then updates the in-memory map and
-    /// advances `current_leaf_id` to the new message.
-    pub fn append(&mut self, role: Role, content: String) -> Result<&Message> {
-        let msg = Message::new(role, content).with_parent_opt(self.current_leaf_id.clone());
+    /// Writes to disk via `SessionStore`, updates the in-memory map, and
+    /// advances `current_leaf_id` to the new entry.
+    pub fn append(&mut self, role: Role, content: String) -> Result<&MessageEntry> {
+        let entry = SessionEntry::Message(MessageEntry::new(
+            role,
+            content,
+            self.current_leaf_id.clone(),
+        ));
 
-        SessionStore::append_message(&self.project_path, &self.session_id, &msg)
-            .with_context(|| format!("failed to persist message to session {}", self.session_id))?;
+        SessionStore::append_entry(&self.project_path, &self.session_id, &entry)
+            .with_context(|| format!("failed to persist entry to session {}", self.session_id))?;
 
-        let id = msg.id.clone();
+        let id = entry.id().to_string();
         self.current_leaf_id = Some(id.clone());
-        self.messages.insert(id.clone(), msg);
+        self.entries.insert(id.clone(), entry);
 
-        Ok(self.messages.get(&id).expect("just inserted"))
+        let SessionEntry::Message(ref msg) = self.entries[&id];
+        Ok(msg)
     }
 
-    /// Set `current_leaf_id` to an arbitrary message already in the tree.
+    /// Set `current_leaf_id` to an arbitrary entry already in the tree.
     ///
     /// The next `append()` will create a new branch from this point.
-    /// Returns `Err` if `from_message_id` is not present in this session.
-    pub fn branch(&mut self, from_message_id: &str) -> Result<()> {
-        if !self.messages.contains_key(from_message_id) {
+    /// Returns `Err` if `from_entry_id` is not present in this session.
+    pub fn branch(&mut self, from_entry_id: &str) -> Result<()> {
+        if !self.entries.contains_key(from_entry_id) {
             return Err(anyhow::anyhow!(
-                "message {} not found in session {}",
-                from_message_id,
+                "entry {} not found in session {}",
+                from_entry_id,
                 self.session_id
             ));
         }
-        self.current_leaf_id = Some(from_message_id.to_string());
+        self.current_leaf_id = Some(from_entry_id.to_string());
         Ok(())
     }
 
     /// Return all messages on the path from the root to `current_leaf_id`,
     /// in root-first order. This is the context slice to send to the LLM.
-    pub fn context_messages(&self) -> Vec<&Message> {
+    pub fn context_messages(&self) -> Vec<Message> {
         let Some(leaf_id) = &self.current_leaf_id else {
             return vec![];
         };
 
-        let mut chain = vec![];
+        let mut chain: Vec<&SessionEntry> = vec![];
         let mut current_id = leaf_id.as_str();
         loop {
-            let Some(msg) = self.messages.get(current_id) else {
+            let Some(entry) = self.entries.get(current_id) else {
                 break;
             };
-            chain.push(msg);
-            match msg.parent_id.as_deref() {
+            chain.push(entry);
+            match entry.parent_id() {
                 Some(parent_id) => current_id = parent_id,
                 None => break,
             }
@@ -122,28 +123,16 @@ impl SessionManager {
 
         chain.reverse();
         chain
+            .into_iter()
+            .map(|e| match e {
+                SessionEntry::Message(m) => m.to_message(),
+            })
+            .collect()
     }
 
-    /// All messages in the tree (order not guaranteed).
-    pub fn all_messages(&self) -> impl Iterator<Item = &Message> {
-        self.messages.values()
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Helper extension on Message
-// ---------------------------------------------------------------------------
-
-trait WithParentOpt {
-    fn with_parent_opt(self, parent_id: Option<String>) -> Self;
-}
-
-impl WithParentOpt for Message {
-    fn with_parent_opt(self, parent_id: Option<String>) -> Self {
-        match parent_id {
-            Some(id) => self.with_parent(id),
-            None => self,
-        }
+    /// All entries in the tree (order not guaranteed).
+    pub fn all_entries(&self) -> impl Iterator<Item = &SessionEntry> {
+        self.entries.values()
     }
 }
 
@@ -180,10 +169,25 @@ mod tests {
         assert_eq!(ctx.len(), 2);
         assert_eq!(ctx[0].content, "hello");
         assert_eq!(ctx[1].content, "hi");
+    }
 
-        // Verify parent linkage
-        let leaf = ctx[1];
-        assert_eq!(leaf.parent_id.as_deref(), Some(ctx[0].id.as_str()));
+    #[test]
+    fn append_sets_parent_id() {
+        let tmp = project_dir();
+        let mut mgr = SessionManager::create(tmp.path()).unwrap();
+
+        let first_id = mgr
+            .append(Role::User, "root".to_string())
+            .unwrap()
+            .base
+            .id
+            .clone();
+        mgr.append(Role::Assistant, "reply".to_string()).unwrap();
+
+        // The second entry should reference the first as parent
+        let leaf_id = mgr.current_leaf_id.clone().unwrap();
+        let SessionEntry::Message(ref leaf) = mgr.entries[&leaf_id];
+        assert_eq!(leaf.base.parent_id.as_deref(), Some(first_id.as_str()));
     }
 
     #[test]
@@ -191,14 +195,15 @@ mod tests {
         let tmp = project_dir();
         let mut mgr = SessionManager::create(tmp.path()).unwrap();
 
-        let msg1_id = {
-            let m = mgr.append(Role::User, "root".to_string()).unwrap();
-            m.id.clone()
-        };
+        let root_id = mgr
+            .append(Role::User, "root".to_string())
+            .unwrap()
+            .base
+            .id
+            .clone();
         mgr.append(Role::Assistant, "branch A".to_string()).unwrap();
 
-        // Branch back to the root message
-        mgr.branch(&msg1_id).unwrap();
+        mgr.branch(&root_id).unwrap();
         mgr.append(Role::User, "branch B".to_string()).unwrap();
 
         let ctx = mgr.context_messages();

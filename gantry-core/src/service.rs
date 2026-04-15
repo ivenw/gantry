@@ -122,7 +122,7 @@ impl ActiveSession {
             let mut mgr = self.session_manager.lock().await;
             let msg = mgr
                 .append(Role::User, content)
-                .cloned()
+                .map(|e| e.to_message())
                 .unwrap_or_else(|_| Message::new(Role::Error, "failed to persist message"));
             let mut state = self.state.lock().await;
             state.messages.push(msg);
@@ -131,9 +131,6 @@ impl ActiveSession {
         let context = {
             let mgr = self.session_manager.lock().await;
             mgr.context_messages()
-                .into_iter()
-                .cloned()
-                .collect::<Vec<_>>()
         };
         let selection = self.get_active_selection().await;
         let mut rig_messages = Self::to_rig_messages(context);
@@ -193,7 +190,7 @@ impl ActiveSession {
             let mut mgr = self.session_manager.lock().await;
             let msg = mgr
                 .append(Role::User, req.content)
-                .cloned()
+                .map(|e| e.to_message())
                 .unwrap_or_else(|_| Message::new(Role::Error, "failed to persist message"));
             let mut state = self.state.lock().await;
             state.messages.push(msg);
@@ -317,7 +314,7 @@ impl ActiveSession {
             let mut mgr = self.session_manager.lock().await;
             let msg = mgr
                 .append(Role::Assistant, accumulated)
-                .cloned()
+                .map(|e| e.to_message())
                 .unwrap_or_else(|_| Message::new(Role::Error, "failed to persist message"));
             let mut state = self.state.lock().await;
             state.messages.push(msg);
@@ -533,11 +530,7 @@ impl AppService {
         }
 
         let session_manager = SessionManager::load(&abs, session_id)?;
-        let messages = session_manager
-            .context_messages()
-            .into_iter()
-            .cloned()
-            .collect::<Vec<_>>();
+        let messages = session_manager.context_messages();
         let default_selection = self
             .agent_factory
             .catalog()

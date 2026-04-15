@@ -6,7 +6,97 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-use crate::types::SessionHeader;
+use crate::types::{Message, Role};
+
+fn now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionHeader {
+    #[serde(rename = "type")]
+    kind: String,
+    id: String,
+    created_at: String,
+}
+
+impl SessionHeader {
+    fn new(id: String) -> Self {
+        Self {
+            kind: "header".to_string(),
+            id,
+            created_at: now_rfc3339(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum SessionEntry {
+    Message(MessageEntry),
+}
+
+impl SessionEntry {
+    pub fn id(&self) -> &str {
+        match self {
+            SessionEntry::Message(e) => &e.base.id,
+        }
+    }
+
+    pub fn parent_id(&self) -> Option<&str> {
+        match self {
+            SessionEntry::Message(e) => e.base.parent_id.as_deref(),
+        }
+    }
+
+    pub fn created_at(&self) -> &str {
+        match self {
+            SessionEntry::Message(e) => &e.base.created_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryBase {
+    pub id: String,
+    pub parent_id: Option<String>,
+    pub created_at: String,
+}
+
+impl EntryBase {
+    pub fn new(parent_id: Option<String>) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            parent_id,
+            created_at: now_rfc3339(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageEntry {
+    #[serde(flatten)]
+    pub base: EntryBase,
+    pub role: Role,
+    pub content: String,
+}
+
+impl MessageEntry {
+    pub fn new(role: Role, content: String, parent_id: Option<String>) -> Self {
+        Self {
+            base: EntryBase::new(parent_id),
+            role,
+            content,
+        }
+    }
+
+    pub fn to_message(&self) -> Message {
+        Message::new(self.role, &self.content)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionInfo {
@@ -89,15 +179,11 @@ impl SessionStore {
         Self::find_session_path(project_path, session_id).is_some()
     }
 
-    /// Append a message to a session's `.jsonl` file.
-    pub fn append_message(
-        project_path: &Path,
-        session_id: &str,
-        message: &crate::Message,
-    ) -> Result<()> {
+    /// Append an entry to a session's `.jsonl` file.
+    pub fn append_entry(project_path: &Path, session_id: &str, entry: &SessionEntry) -> Result<()> {
         let path = Self::find_session_path(project_path, session_id)
             .with_context(|| format!("session not found: {}", session_id))?;
-        let line = serde_json::to_string(message).context("failed to serialize message")?;
+        let line = serde_json::to_string(entry).context("failed to serialize entry")?;
         let mut file = std::fs::OpenOptions::new()
             .append(true)
             .open(&path)
@@ -107,26 +193,27 @@ impl SessionStore {
         Ok(())
     }
 
-    /// Load all messages from a session's `.jsonl` file (skips the header line).
-    pub fn load_messages(project_path: &Path, session_id: &str) -> Result<Vec<crate::Message>> {
+    /// Load all entries from a session's `.jsonl` file (skips the header line).
+    pub fn load_entries(project_path: &Path, session_id: &str) -> Result<Vec<SessionEntry>> {
         let path = Self::find_session_path(project_path, session_id)
             .with_context(|| format!("session not found: {}", session_id))?;
         let contents = std::fs::read_to_string(&path)
             .with_context(|| format!("failed to read session file {}", path.display()))?;
-        let mut messages = vec![];
+        let mut entries = vec![];
         for line in contents.lines().skip(1) {
             if line.trim().is_empty() {
                 continue;
             }
-            let msg: crate::Message = serde_json::from_str(line)
+            let entry: SessionEntry = serde_json::from_str(line)
                 .with_context(|| format!("invalid JSON line in {}", path.display()))?;
-            messages.push(msg);
+            entries.push(entry);
         }
-        Ok(messages)
+        Ok(entries)
     }
 
     /// Load the session header (first line of the file).
-    pub fn load_header(project_path: &Path, session_id: &str) -> Result<SessionHeader> {
+    #[cfg(test)]
+    fn load_header(project_path: &Path, session_id: &str) -> Result<SessionHeader> {
         let path = Self::find_session_path(project_path, session_id)
             .with_context(|| format!("session not found: {}", session_id))?;
         let contents = std::fs::read_to_string(&path)
@@ -162,7 +249,7 @@ impl SessionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Message, Role};
+    use crate::Role;
     use tempfile::TempDir;
 
     fn project_dir() -> TempDir {
@@ -244,31 +331,39 @@ mod tests {
     }
 
     #[test]
-    fn append_and_load_messages_roundtrip() {
+    fn append_and_load_entries_roundtrip() {
         let tmp = project_dir();
         let id = SessionStore::create(tmp.path()).unwrap();
 
-        let msg1 = Message::new(Role::User, "hello");
-        let msg2 = Message::new(Role::Assistant, "hi there");
+        let e1 = SessionEntry::Message(MessageEntry::new(Role::User, "hello".into(), None));
+        let e2 = SessionEntry::Message(MessageEntry::new(
+            Role::Assistant,
+            "hi there".into(),
+            Some(e1.id().to_string()),
+        ));
 
-        SessionStore::append_message(tmp.path(), &id, &msg1).unwrap();
-        SessionStore::append_message(tmp.path(), &id, &msg2).unwrap();
+        SessionStore::append_entry(tmp.path(), &id, &e1).unwrap();
+        SessionStore::append_entry(tmp.path(), &id, &e2).unwrap();
 
-        let loaded = SessionStore::load_messages(tmp.path(), &id).unwrap();
+        let loaded = SessionStore::load_entries(tmp.path(), &id).unwrap();
         assert_eq!(loaded.len(), 2);
-        assert_eq!(loaded[0].content, "hello");
-        assert_eq!(loaded[1].content, "hi there");
-        assert!(!loaded[0].id.is_empty());
-        assert!(!loaded[0].created_at.is_empty());
-        assert!(loaded[0].parent_id.is_none());
+
+        let SessionEntry::Message(ref m1) = loaded[0];
+        let SessionEntry::Message(ref m2) = loaded[1];
+        assert_eq!(m1.content, "hello");
+        assert_eq!(m2.content, "hi there");
+        assert!(!m1.base.id.is_empty());
+        assert!(!m1.base.created_at.is_empty());
+        assert!(m1.base.parent_id.is_none());
+        assert_eq!(m2.base.parent_id.as_deref(), Some(m1.base.id.as_str()));
     }
 
     #[test]
-    fn load_messages_returns_empty_for_new_session() {
+    fn load_entries_returns_empty_for_new_session() {
         let tmp = project_dir();
         let id = SessionStore::create(tmp.path()).unwrap();
 
-        let messages = SessionStore::load_messages(tmp.path(), &id).unwrap();
-        assert!(messages.is_empty());
+        let entries = SessionStore::load_entries(tmp.path(), &id).unwrap();
+        assert!(entries.is_empty());
     }
 }
