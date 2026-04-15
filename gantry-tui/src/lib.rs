@@ -49,7 +49,7 @@ pub fn run() -> Result<()> {
         rt.block_on(async { JsonRpcClient::connect_ws(&addr, port).await })
             .map_err(|e| {
                 anyhow!(
-                    "failed to connect to gantry daemon at {}:{} ({})\nRun `gantry setup`, then start daemon with `gantry server`.",
+                    "failed to connect to gantry daemon at {}:{} ({})\n Start daemon with `gantry server`.",
                     addr,
                     port,
                     e
