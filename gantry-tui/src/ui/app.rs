@@ -18,6 +18,7 @@ pub struct App {
     pub show_form: bool,
     pub command_picker: Option<command_picker::CommandPicker>,
     pub status_message: Option<String>,
+    pub connected: bool,
 }
 
 impl App {
@@ -31,14 +32,29 @@ impl App {
             show_form: false,
             command_picker: None,
             status_message: None,
+            connected: false,
         }
     }
 
     pub fn available_commands() -> Vec<command_picker::Command> {
-        vec![command_picker::Command {
-            name: "health".to_string(),
-            description: "Check connection to server".to_string(),
-        }]
+        vec![
+            command_picker::Command {
+                name: "health".to_string(),
+                description: "Check connection to server".to_string(),
+            },
+            command_picker::Command {
+                name: "new".to_string(),
+                description: "Start a new session".to_string(),
+            },
+        ]
+    }
+
+    pub fn reset_for_new_session(&mut self) {
+        self.messages.clear();
+        self.streaming_content = None;
+        self.streaming_message_idx = None;
+        self.streaming_buffer.clear();
+        self.show_form = false;
     }
 
     pub fn add_user_message(&mut self, content: String) {

@@ -13,7 +13,11 @@ use gantry_core::{AppEvent, Message, Role};
 use gantry_rpc::{JsonRpcClient, WsConnectionEvent};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, mpsc};
+use tokio::runtime::Runtime;
+use tokio::sync::mpsc::Receiver;
+use tokio::task::JoinHandle;
 use ui::App;
 
 const DEFAULT_ADDR: &str = "127.0.0.1";
@@ -32,6 +36,89 @@ fn discover_project() -> Option<std::path::PathBuf> {
     }
 }
 
+struct ReconnectSuccess {
+    client: JsonRpcClient,
+    session_id: String,
+    event_handle: JoinHandle<()>,
+    event_rx: Receiver<WsConnectionEvent>,
+    clear_messages: bool,
+}
+
+enum SessionMode {
+    ResumeOrCreate,
+    AlwaysCreate,
+}
+
+async fn try_connect_async(
+    addr: &str,
+    port: u16,
+    project_path: &Path,
+    mode: SessionMode,
+) -> Option<(JsonRpcClient, String, JoinHandle<()>, Receiver<WsConnectionEvent>)> {
+    let client = JsonRpcClient::connect_ws(addr, port).await.ok()?;
+
+    let session_id = match mode {
+        SessionMode::AlwaysCreate => client.create_session(project_path.to_path_buf()).await.ok()?,
+        SessionMode::ResumeOrCreate => {
+            let sessions = client.list_sessions(project_path.to_path_buf()).await.ok()?;
+            if let Some(last) = sessions.last() {
+                last.id.clone()
+            } else {
+                client.create_session(project_path.to_path_buf()).await.ok()?
+            }
+        }
+    };
+
+    client
+        .connect_session(session_id.clone(), project_path.to_path_buf())
+        .await
+        .ok()?;
+
+    let (handle, rx) = client.subscribe_events().await.ok()?;
+
+    Some((client, session_id, handle, rx))
+}
+
+fn make_empty_subscription(rt: &Runtime) -> (JoinHandle<()>, Receiver<WsConnectionEvent>) {
+    let (_, rx) = tokio::sync::mpsc::channel(1);
+    let handle = rt.spawn(async {});
+    (handle, rx)
+}
+
+fn spawn_reconnect_task(
+    rt: &Runtime,
+    addr: String,
+    port: u16,
+    project_path: PathBuf,
+    tx: mpsc::SyncSender<ReconnectSuccess>,
+) {
+    rt.spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            if let Some((client, session_id, event_handle, event_rx)) =
+                try_connect_async(&addr, port, &project_path, SessionMode::ResumeOrCreate).await
+            {
+                let _ = tx.send(ReconnectSuccess {
+                    client,
+                    session_id,
+                    event_handle,
+                    event_rx,
+                    clear_messages: false,
+                });
+                return;
+            }
+        }
+    });
+}
+
+fn is_connection_error(err: &str) -> bool {
+    err.contains("connection refused")
+        || err.contains("failed to connect")
+        || err.contains("broken pipe")
+        || err.contains("WebSocket")
+        || err.contains("os error")
+}
+
 pub fn run() -> Result<()> {
     let addr = std::env::var("GANTRY_ADDR").unwrap_or_else(|_| DEFAULT_ADDR.to_string());
     let port: u16 = std::env::var("GANTRY_PORT")
@@ -45,32 +132,37 @@ pub fn run() -> Result<()> {
 
     let rt = tokio::runtime::Runtime::new()?;
 
-    let client = Arc::new(
-        rt.block_on(async { JsonRpcClient::connect_ws(&addr, port).await })
-            .map_err(|e| {
-                anyhow!(
-                    "failed to connect to gantry daemon at {}:{} ({})\n Start daemon with `gantry server`.",
-                    addr,
-                    port,
-                    e
-                )
-            })?,
-    );
+    let (reconnect_tx, reconnect_rx) = mpsc::sync_channel::<ReconnectSuccess>(1);
+    let session_id: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+    let mut client: Option<Arc<JsonRpcClient>> = None;
+    let mut reconnect_pending = false;
 
-    let session_id = rt
-        .block_on(client.create_session(project_path.clone()))
-        .map_err(|e| anyhow!("failed to create session: {}", e))?;
+    let (_terminal_guard, mut terminal) = TerminalGuard::enter()?;
+    let mut app = App::new();
 
-    rt.block_on(client.connect_session(session_id.clone(), project_path.clone()))
-        .map_err(|e| anyhow!("failed to connect session: {}", e))?;
+    let (mut event_handle, mut event_rx) = if let Some((c, sid, handle, rx)) = rt.block_on(
+        try_connect_async(&addr, port, &project_path, SessionMode::ResumeOrCreate),
+    ) {
+        *session_id.lock().unwrap() = sid;
+        client = Some(Arc::new(c));
+        app.connected = true;
+        (handle, rx)
+    } else {
+        app.set_status("Disconnected \u{2014} reconnecting...".to_string());
+        spawn_reconnect_task(
+            &rt,
+            addr.clone(),
+            port,
+            project_path.clone(),
+            reconnect_tx.clone(),
+        );
+        reconnect_pending = true;
+        make_empty_subscription(&rt)
+    };
 
-    let (event_handle, mut event_rx) = rt.block_on(client.subscribe_events())?;
     let (stream_result_tx, stream_result_rx) = mpsc::channel::<Result<(), String>>();
     let (command_result_tx, command_result_rx) = mpsc::channel::<String>();
 
-    let (_terminal_guard, mut terminal) = TerminalGuard::enter()?;
-
-    let mut app = App::new();
     let pending_id = Arc::new(Mutex::new(Option::<String>::None));
     let stream_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>> = Arc::new(Mutex::new(None));
 
@@ -84,7 +176,28 @@ pub fn run() -> Result<()> {
                 WsConnectionEvent::Event(ev) => {
                     process_app_event(ev, &mut app, &pending_id);
                 }
-                WsConnectionEvent::Disconnected => {}
+                WsConnectionEvent::Disconnected => {
+                    if app.connected {
+                        app.connected = false;
+                        client = None;
+                        app.set_status("Disconnected \u{2014} reconnecting...".to_string());
+                        if let Some(task) = stream_task.lock().unwrap().take() {
+                            task.abort();
+                        }
+                        app.finish_streaming();
+                        *pending_id.lock().unwrap() = None;
+                        if !reconnect_pending {
+                            reconnect_pending = true;
+                            spawn_reconnect_task(
+                                &rt,
+                                addr.clone(),
+                                port,
+                                project_path.clone(),
+                                reconnect_tx.clone(),
+                            );
+                        }
+                    }
+                }
                 WsConnectionEvent::Error(message) => {
                     app.messages.push(Message::new(Role::Error, message));
                 }
@@ -96,9 +209,26 @@ pub fn run() -> Result<()> {
         }
 
         while let Ok(result) = stream_result_rx.try_recv() {
-            if let Err(err) = result {
-                app.messages.push(Message::new(Role::Error, err));
+            if let Err(ref err) = result {
+                if app.connected && is_connection_error(err) {
+                    app.connected = false;
+                    client = None;
+                    app.set_status("Disconnected \u{2014} reconnecting...".to_string());
+                    if !reconnect_pending {
+                        reconnect_pending = true;
+                        spawn_reconnect_task(
+                            &rt,
+                            addr.clone(),
+                            port,
+                            project_path.clone(),
+                            reconnect_tx.clone(),
+                        );
+                    }
+                } else {
+                    app.messages.push(Message::new(Role::Error, err.clone()));
+                }
                 app.finish_streaming();
+                *pending_id.lock().unwrap() = None;
             }
 
             terminal.draw(|frame| {
@@ -111,6 +241,21 @@ pub fn run() -> Result<()> {
             terminal.draw(|frame| {
                 app.render(frame);
             })?;
+        }
+
+        while let Ok(success) = reconnect_rx.try_recv() {
+            reconnect_pending = false;
+            event_handle.abort();
+            event_handle = success.event_handle;
+            event_rx = success.event_rx;
+            *session_id.lock().unwrap() = success.session_id;
+            client = Some(Arc::new(success.client));
+            app.connected = true;
+            if success.clear_messages {
+                app.reset_for_new_session();
+            }
+            app.status_message = None;
+            terminal.draw(|frame| app.render(frame))?;
         }
 
         if event::poll(std::time::Duration::from_millis(10))?
@@ -138,7 +283,7 @@ pub fn run() -> Result<()> {
                             }
                             let pending_id_clone = pending.clone();
                             let addr_clone = addr.clone();
-                            let session_id_clone = session_id.clone();
+                            let session_id_clone = session_id.lock().unwrap().clone();
                             let project_path_clone = project_path.clone();
                             rt.spawn(async move {
                                 if let Ok(client) =
@@ -165,7 +310,16 @@ pub fn run() -> Result<()> {
                     } else if app.is_command_picker_active() {
                         if let Some(cmd) = app.selected_command() {
                             let cmd_name = cmd.name.clone();
-                            execute_command(&cmd_name, &client, command_result_tx.clone());
+                            execute_command(
+                                &cmd_name,
+                                &rt,
+                                &client,
+                                command_result_tx.clone(),
+                                reconnect_tx.clone(),
+                                addr.clone(),
+                                port,
+                                project_path.clone(),
+                            );
                         }
                         app.input_buffer.clear();
                         app.deactivate_command_picker();
@@ -187,6 +341,13 @@ pub fn run() -> Result<()> {
                                 continue;
                             }
                         }
+                        if !app.connected {
+                            app.set_status(
+                                "Not connected to server \u{2014} reconnecting...".to_string(),
+                            );
+                            terminal.draw(|frame| app.render(frame))?;
+                            continue;
+                        }
                         app.input_buffer.clear();
                         app.add_user_message(input.clone());
                         app.start_streaming_message();
@@ -198,7 +359,7 @@ pub fn run() -> Result<()> {
                         let stream_result_tx = stream_result_tx.clone();
                         let addr_for_request = addr.clone();
                         let stream_task = stream_task.clone();
-                        let session_id_for_task = session_id.clone();
+                        let session_id_for_task = session_id.lock().unwrap().clone();
                         let project_path_for_task = project_path.clone();
                         let task = rt.spawn(async move {
                             let result = match JsonRpcClient::connect_ws(&addr_for_request, port)
@@ -385,19 +546,51 @@ impl Drop for TerminalGuard {
     }
 }
 
-fn execute_command(name: &str, client: &JsonRpcClient, command_result_tx: mpsc::Sender<String>) {
+#[allow(clippy::too_many_arguments)]
+fn execute_command(
+    name: &str,
+    rt: &Runtime,
+    client: &Option<Arc<JsonRpcClient>>,
+    command_result_tx: mpsc::Sender<String>,
+    reconnect_tx: mpsc::SyncSender<ReconnectSuccess>,
+    addr: String,
+    port: u16,
+    project_path: PathBuf,
+) {
     if name == "health" {
-        let client = client.clone();
-        tokio::spawn(async move {
-            let start = std::time::Instant::now();
-            match client.ping().await {
-                Ok(_) => {
-                    let latency = start.elapsed().as_millis();
-                    let _ = command_result_tx.send(format!("Connected: {}ms", latency));
-                }
-                Err(e) => {
-                    let _ = command_result_tx.send(format!("Ping failed: {}", e));
-                }
+        match client {
+            Some(c) => {
+                let c = c.clone();
+                let tx = command_result_tx.clone();
+                rt.spawn(async move {
+                    let start = std::time::Instant::now();
+                    match c.ping().await {
+                        Ok(_) => {
+                            let latency = start.elapsed().as_millis();
+                            let _ = tx.send(format!("Connected: {}ms", latency));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(format!("Ping failed: {}", e));
+                        }
+                    }
+                });
+            }
+            None => {
+                let _ = command_result_tx.send("Not connected".to_string());
+            }
+        }
+    } else if name == "new" {
+        rt.spawn(async move {
+            if let Some((client, session_id, event_handle, event_rx)) =
+                try_connect_async(&addr, port, &project_path, SessionMode::AlwaysCreate).await
+            {
+                let _ = reconnect_tx.send(ReconnectSuccess {
+                    client,
+                    session_id,
+                    event_handle,
+                    event_rx,
+                    clear_messages: true,
+                });
             }
         });
     }
