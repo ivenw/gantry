@@ -48,8 +48,8 @@ impl JsonRpcClient {
         Ok(self.inner.list_sessions(project_path).await?)
     }
 
-    pub async fn connect_session(&self, session_id: String, project_path: PathBuf) -> Result<()> {
-        Ok(self.inner.connect_session(session_id, project_path).await?)
+    pub async fn bind_session(&self, session_id: String, project_path: PathBuf) -> Result<()> {
+        Ok(self.inner.bind_session(session_id, project_path).await?)
     }
 
     // --- messaging ---

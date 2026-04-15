@@ -30,11 +30,11 @@ pub trait GantryRpc {
     #[method(name = "list_sessions")]
     async fn list_sessions(&self, project_path: PathBuf) -> RpcResult<Vec<SessionInfo>>;
 
-    /// Bind this connection to a session. Must be called before any message methods.
-    #[method(name = "connect_session")]
-    async fn connect_session(&self, session_id: String, project_path: PathBuf) -> RpcResult<()>;
+    /// Bind this connection to a chat session. Must be called before any message methods.
+    #[method(name = "bind_session")]
+    async fn bind_session(&self, session_id: String, project_path: PathBuf) -> RpcResult<()>;
 
-    // --- messaging (require connect_session first) ---
+    // --- messaging (require bind_session first) ---
 
     #[method(name = "send_message")]
     async fn send_message(&self, content: String) -> RpcResult<Vec<Message>>;

@@ -27,7 +27,7 @@ fn invalid_request(msg: impl Into<String>) -> ErrorObjectOwned {
 #[derive(Clone)]
 pub struct RpcApp {
     app: AppService,
-    /// (session_id, project_path) — set by connect_session
+    /// (session_id, project_path) — set by bind_session
     session: Arc<Mutex<Option<(String, String)>>>,
 }
 
@@ -90,8 +90,8 @@ impl GantryRpcServer for RpcApp {
         Ok(sessions)
     }
 
-    async fn connect_session(&self, session_id: String, project_path: PathBuf) -> RpcResult<()> {
-        dbg!("rpc.connect_session.request", &session_id, &project_path);
+    async fn bind_session(&self, session_id: String, project_path: PathBuf) -> RpcResult<()> {
+        dbg!("rpc.bind_session.request", &session_id, &project_path);
         let project_path_str = project_path.to_string_lossy().into_owned();
         // Validate: load (or verify) the session exists
         self.app
@@ -100,7 +100,7 @@ impl GantryRpcServer for RpcApp {
             .map_err(|e| invalid_request(e.to_string()))?;
 
         *self.session.lock().await = Some((session_id.clone(), project_path_str));
-        dbg!("rpc.connect_session.done", &session_id);
+        dbg!("rpc.bind_session.done", &session_id);
         Ok(())
     }
 
@@ -108,7 +108,7 @@ impl GantryRpcServer for RpcApp {
         dbg!("rpc.send_message.request", &content);
         let (session_id, project_path) =
             self.session.lock().await.clone().ok_or_else(|| {
-                invalid_request("no session selected; call connect_session first")
+                invalid_request("no session selected; call bind_session first")
             })?;
 
         let session = self
@@ -126,7 +126,7 @@ impl GantryRpcServer for RpcApp {
         dbg!("rpc.stream_message.request.content", &req.content);
         let (session_id, project_path) =
             self.session.lock().await.clone().ok_or_else(|| {
-                invalid_request("no session selected; call connect_session first")
+                invalid_request("no session selected; call bind_session first")
             })?;
 
         let session = self
@@ -155,7 +155,7 @@ impl GantryRpcServer for RpcApp {
                 .lock()
                 .await
                 .clone()
-                .ok_or("no session selected; call connect_session first")?
+                .ok_or("no session selected; call bind_session first")?
         };
 
         let session = self
@@ -211,7 +211,7 @@ impl GantryRpcServer for RpcApp {
         dbg!("rpc.select_form.request", &req.form_id, &req.selection);
         let (session_id, project_path) =
             self.session.lock().await.clone().ok_or_else(|| {
-                invalid_request("no session selected; call connect_session first")
+                invalid_request("no session selected; call bind_session first")
             })?;
 
         let session = self
@@ -229,7 +229,7 @@ impl GantryRpcServer for RpcApp {
         dbg!("rpc.get_messages.request");
         let (session_id, project_path) =
             self.session.lock().await.clone().ok_or_else(|| {
-                invalid_request("no session selected; call connect_session first")
+                invalid_request("no session selected; call bind_session first")
             })?;
 
         let session = self
@@ -247,7 +247,7 @@ impl GantryRpcServer for RpcApp {
         dbg!("rpc.clear_messages.request");
         let (session_id, project_path) =
             self.session.lock().await.clone().ok_or_else(|| {
-                invalid_request("no session selected; call connect_session first")
+                invalid_request("no session selected; call bind_session first")
             })?;
 
         let session = self
@@ -265,7 +265,7 @@ impl GantryRpcServer for RpcApp {
         dbg!("rpc.interrupt_stream.request", &message_id);
         let (session_id, project_path) =
             self.session.lock().await.clone().ok_or_else(|| {
-                invalid_request("no session selected; call connect_session first")
+                invalid_request("no session selected; call bind_session first")
             })?;
 
         let session = self

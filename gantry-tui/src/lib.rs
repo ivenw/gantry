@@ -44,33 +44,22 @@ struct ReconnectSuccess {
     clear_messages: bool,
 }
 
-enum SessionMode {
-    ResumeOrCreate,
-    AlwaysCreate,
-}
-
 async fn try_connect_async(
     addr: &str,
     port: u16,
     project_path: &Path,
-    mode: SessionMode,
 ) -> Option<(JsonRpcClient, String, JoinHandle<()>, Receiver<WsConnectionEvent>)> {
     let client = JsonRpcClient::connect_ws(addr, port).await.ok()?;
 
-    let session_id = match mode {
-        SessionMode::AlwaysCreate => client.create_session(project_path.to_path_buf()).await.ok()?,
-        SessionMode::ResumeOrCreate => {
-            let sessions = client.list_sessions(project_path.to_path_buf()).await.ok()?;
-            if let Some(last) = sessions.last() {
-                last.id.clone()
-            } else {
-                client.create_session(project_path.to_path_buf()).await.ok()?
-            }
-        }
+    let sessions = client.list_sessions(project_path.to_path_buf()).await.ok()?;
+    let session_id = if let Some(last) = sessions.last() {
+        last.id.clone()
+    } else {
+        client.create_session(project_path.to_path_buf()).await.ok()?
     };
 
     client
-        .connect_session(session_id.clone(), project_path.to_path_buf())
+        .bind_session(session_id.clone(), project_path.to_path_buf())
         .await
         .ok()?;
 
@@ -96,7 +85,7 @@ fn spawn_reconnect_task(
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             if let Some((client, session_id, event_handle, event_rx)) =
-                try_connect_async(&addr, port, &project_path, SessionMode::ResumeOrCreate).await
+                try_connect_async(&addr, port, &project_path).await
             {
                 let _ = tx.send(ReconnectSuccess {
                     client,
@@ -141,7 +130,7 @@ pub fn run() -> Result<()> {
     let mut app = App::new();
 
     let (mut event_handle, mut event_rx) = if let Some((c, sid, handle, rx)) = rt.block_on(
-        try_connect_async(&addr, port, &project_path, SessionMode::ResumeOrCreate),
+        try_connect_async(&addr, port, &project_path),
     ) {
         *session_id.lock().unwrap() = sid;
         client = Some(Arc::new(c));
@@ -289,7 +278,7 @@ pub fn run() -> Result<()> {
                                 if let Ok(client) =
                                     JsonRpcClient::connect_ws(&addr_clone, port).await
                                     && client
-                                        .connect_session(session_id_clone, project_path_clone)
+                                        .bind_session(session_id_clone, project_path_clone)
                                         .await
                                         .is_ok()
                                 {
@@ -316,8 +305,6 @@ pub fn run() -> Result<()> {
                                 &client,
                                 command_result_tx.clone(),
                                 reconnect_tx.clone(),
-                                addr.clone(),
-                                port,
                                 project_path.clone(),
                             );
                         }
@@ -367,7 +354,7 @@ pub fn run() -> Result<()> {
                             {
                                 Ok(client) => {
                                     if let Err(e) = client
-                                        .connect_session(session_id_for_task, project_path_for_task)
+                                        .bind_session(session_id_for_task, project_path_for_task)
                                         .await
                                     {
                                         Err(format!("failed to connect session: {}", e))
@@ -546,15 +533,12 @@ impl Drop for TerminalGuard {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn execute_command(
     name: &str,
     rt: &Runtime,
     client: &Option<Arc<JsonRpcClient>>,
     command_result_tx: mpsc::Sender<String>,
     reconnect_tx: mpsc::SyncSender<ReconnectSuccess>,
-    addr: String,
-    port: u16,
     project_path: PathBuf,
 ) {
     if name == "health" {
@@ -580,18 +564,31 @@ fn execute_command(
             }
         }
     } else if name == "new" {
-        rt.spawn(async move {
-            if let Some((client, session_id, event_handle, event_rx)) =
-                try_connect_async(&addr, port, &project_path, SessionMode::AlwaysCreate).await
-            {
-                let _ = reconnect_tx.send(ReconnectSuccess {
-                    client,
-                    session_id,
-                    event_handle,
-                    event_rx,
-                    clear_messages: true,
+        match client {
+            Some(c) => {
+                let c = c.clone();
+                rt.spawn(async move {
+                    let Ok(session_id) = c.create_session(project_path.to_path_buf()).await else {
+                        return;
+                    };
+                    if c.bind_session(session_id.clone(), project_path.to_path_buf()).await.is_err() {
+                        return;
+                    }
+                    let Ok((event_handle, event_rx)) = c.subscribe_events().await else {
+                        return;
+                    };
+                    let _ = reconnect_tx.send(ReconnectSuccess {
+                        client: (*c).clone(),
+                        session_id,
+                        event_handle,
+                        event_rx,
+                        clear_messages: true,
+                    });
                 });
             }
-        });
+            None => {
+                let _ = command_result_tx.send("Not connected".to_string());
+            }
+        }
     }
 }
