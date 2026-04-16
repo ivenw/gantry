@@ -4,64 +4,19 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Widget},
 };
 
-#[derive(Clone, Debug)]
-pub struct Command {
-    pub name: String,
-    pub description: String,
+use crate::model::CommandPicker;
+
+pub struct CommandPickerView<'a> {
+    state: &'a CommandPicker,
 }
 
-#[derive(Clone)]
-pub struct CommandPickerView {
-    commands: Vec<Command>,
-    filter: String,
-    selected_index: usize,
-}
-
-impl CommandPickerView {
-    pub fn new(commands: Vec<Command>) -> Self {
-        Self {
-            commands,
-            filter: String::new(),
-            selected_index: 0,
-        }
-    }
-
-    pub fn set_filter(&mut self, filter: &str) {
-        self.filter = filter.to_string();
-        self.selected_index = 0;
-    }
-
-    pub fn selected_command(&self) -> Option<&Command> {
-        let filtered = self.filtered_commands();
-        filtered.get(self.selected_index).copied()
-    }
-
-    pub fn move_selection_up(&mut self) {
-        let filtered = self.filtered_commands();
-        if !filtered.is_empty() {
-            self.selected_index = self.selected_index.saturating_sub(1);
-        }
-    }
-
-    pub fn move_selection_down(&mut self) {
-        let filtered = self.filtered_commands();
-        if !filtered.is_empty() {
-            self.selected_index = (self.selected_index + 1) % filtered.len();
-        }
-    }
-
-    fn filtered_commands(&self) -> Vec<&Command> {
-        if self.filter.is_empty() {
-            return self.commands.iter().collect();
-        }
-        self.commands
-            .iter()
-            .filter(|cmd| cmd.name.starts_with(&self.filter))
-            .collect()
+impl<'a> CommandPickerView<'a> {
+    pub fn new(state: &'a CommandPicker) -> Self {
+        Self { state }
     }
 
     pub fn calc_height(&self, width: u16) -> u16 {
-        let filtered = self.filtered_commands();
+        let filtered = self.state.filtered_commands();
 
         if filtered.is_empty() {
             return 3;
@@ -84,9 +39,9 @@ impl CommandPickerView {
     }
 }
 
-impl Widget for &CommandPickerView {
+impl Widget for CommandPickerView<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let filtered = self.filtered_commands();
+        let filtered = self.state.filtered_commands();
 
         if filtered.is_empty() {
             let block = Block::default()
@@ -120,7 +75,7 @@ impl Widget for &CommandPickerView {
         let text_width = inner_area.width as usize;
 
         for (i, cmd) in filtered.iter().enumerate() {
-            let is_selected = i == self.selected_index;
+            let is_selected = i == self.state.selected_idx;
             let style = if is_selected {
                 ratatui::style::Style::default()
                     .fg(ratatui::style::Color::Black)

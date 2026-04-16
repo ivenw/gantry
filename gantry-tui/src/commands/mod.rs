@@ -1,34 +1,22 @@
 pub mod health;
 pub mod new;
 
-use crate::views::app::AppView;
-use gantry_rpc::{JsonRpcClient, WsConnectionEvent};
-use std::sync::{Arc, Mutex, mpsc};
-use tokio::runtime::Runtime;
+use crate::message::Msg;
+use gantry_rpc::JsonRpcClient;
+use std::sync::Arc;
+use tokio::runtime::Handle;
 
-pub struct CommandContext<'a> {
-    pub rt: &'a Runtime,
+pub struct CommandContext {
     pub client: Option<Arc<JsonRpcClient>>,
     pub project_path: std::path::PathBuf,
-}
-
-pub struct AppEffectContext<'a> {
-    pub app: &'a mut AppView,
-    pub client: &'a mut Option<Arc<JsonRpcClient>>,
-    pub session_id: &'a Arc<Mutex<String>>,
-    pub event_handle: &'a mut tokio::task::JoinHandle<()>,
-    pub event_rx: &'a mut tokio::sync::mpsc::Receiver<WsConnectionEvent>,
-}
-
-pub enum CommandEffect {
-    Status(String),
-    Apply(Box<dyn FnOnce(&mut AppEffectContext) + Send>),
+    pub msg_tx: tokio::sync::mpsc::Sender<Msg>,
+    pub rt_handle: Handle,
 }
 
 pub trait Command: Send + Sync {
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;
-    fn execute(&self, ctx: CommandContext, tx: mpsc::Sender<CommandEffect>);
+    fn execute(&self, ctx: CommandContext);
 }
 
 pub fn all_commands() -> Vec<Box<dyn Command>> {

@@ -6,45 +6,18 @@ use ratatui::{
 
 const PREFIX: &str = "> ";
 
-pub struct InputView {
-    value: String,
+pub struct InputView<'a> {
+    value: &'a str,
 }
 
-impl InputView {
-
-    pub fn new() -> Self {
-        Self {
-            value: String::new(),
-        }
-    }
-
-    pub fn value(&self) -> &str {
-        &self.value
-    }
-
-    pub fn push_char(&mut self, c: char) {
-        self.value.push(c);
-    }
-
-    pub fn push_str(&mut self, s: &str) {
-        self.value.push_str(s);
-    }
-
-    pub fn pop(&mut self) {
-        self.value.pop();
-    }
-
-    pub fn clear(&mut self) {
-        self.value.clear();
-    }
-
-    pub fn set(&mut self, s: String) {
-        self.value = s;
+impl<'a> InputView<'a> {
+    pub fn new(value: &'a str) -> Self {
+        Self { value }
     }
 
     pub fn calc_height(&self, width: u16) -> u16 {
         let text_width = width.saturating_sub(1 + PREFIX.len() as u16).max(1) as usize;
-        let wrapped_lines = Self::wrapped_line_count(&self.value, text_width);
+        let wrapped_lines = Self::wrapped_line_count(self.value, text_width);
         (wrapped_lines as u16 + 2).max(3)
     }
 
@@ -91,7 +64,7 @@ impl InputView {
     }
 }
 
-impl Widget for &InputView {
+impl Widget for InputView<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let inner_area = Rect::new(
             area.x + 1,
@@ -123,7 +96,7 @@ impl Widget for &InputView {
         }
 
         if !self.value.is_empty() {
-            let paragraph = ratatui::widgets::Paragraph::new(self.value.as_str())
+            let paragraph = ratatui::widgets::Paragraph::new(self.value)
                 .style(ratatui::style::Style::default().fg(ratatui::style::Color::White))
                 .wrap(ratatui::widgets::Wrap { trim: false });
             paragraph.render(text_area, buf);

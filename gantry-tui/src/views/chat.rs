@@ -6,86 +6,18 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 
-use crate::views::{Message, Role};
+use gantry_core::{Message, Role};
 
 const USER_PREFIX: &str = "> ";
 const ASSISTANT_PREFIX: &str = "< ";
 
-pub struct ChatView {
-    pub messages: Vec<Message>,
-    streaming_content: Option<String>,
-    streaming_message_idx: Option<usize>,
-    streaming_buffer: String,
+pub struct ChatViewState<'a> {
+    pub messages: &'a [Message],
+    pub streaming_content: Option<&'a str>,
 }
 
-impl ChatView {
-    pub fn new() -> Self {
-        Self {
-            messages: Vec::new(),
-            streaming_content: None,
-            streaming_message_idx: None,
-            streaming_buffer: String::new(),
-        }
-    }
-
-    pub fn add_user_message(&mut self, content: String) {
-        self.messages.push(Message::new(Role::User, content));
-    }
-
-    pub fn start_streaming_message(&mut self) {
-        self.streaming_content = Some(String::new());
-        self.streaming_message_idx = Some(self.messages.len());
-        self.messages
-            .push(Message::new(Role::Assistant, String::new()));
-    }
-
-    pub fn append_to_streaming(&mut self, content: &str) {
-        if let Some(ref mut streaming) = self.streaming_content {
-            self.streaming_buffer.push_str(content);
-
-            while let Some(newline_idx) = self.streaming_buffer.find('\n') {
-                let line = self
-                    .streaming_buffer
-                    .drain(..=newline_idx)
-                    .collect::<String>();
-                streaming.push_str(&line);
-                if let Some(idx) = self.streaming_message_idx
-                    && idx < self.messages.len()
-                {
-                    self.messages[idx].content.push_str(&line);
-                }
-            }
-        }
-    }
-
-    pub fn finish_streaming(&mut self) {
-        if !self.streaming_buffer.is_empty()
-            && let Some(ref mut streaming) = self.streaming_content
-        {
-            streaming.push_str(&self.streaming_buffer);
-            if let Some(idx) = self.streaming_message_idx
-                && idx < self.messages.len()
-            {
-                self.messages[idx].content.push_str(&self.streaming_buffer);
-            }
-        }
-        self.streaming_content = None;
-        self.streaming_message_idx = None;
-        self.streaming_buffer.clear();
-    }
-
-    pub fn is_streaming(&self) -> bool {
-        self.streaming_content.is_some()
-    }
-
-    pub fn reset(&mut self) {
-        self.messages.clear();
-        self.streaming_content = None;
-        self.streaming_message_idx = None;
-        self.streaming_buffer.clear();
-    }
-
-    fn calc_msg_height(content: &str, width: u16) -> u16 {
+impl ChatViewState<'_> {
+    pub fn calc_msg_height(content: &str, width: u16) -> u16 {
         if width == 0 {
             return 1;
         }
@@ -111,7 +43,7 @@ impl ChatView {
     }
 }
 
-impl Widget for &ChatView {
+impl Widget for ChatViewState<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if self.messages.is_empty() {
             let text = "Type a message and press Enter to start...";
@@ -128,15 +60,11 @@ impl Widget for &ChatView {
             .iter()
             .map(|m| {
                 let text_width = match m.role {
-                    Role::User => area
-                        .width
-                        .saturating_sub(1 + USER_PREFIX.len() as u16),
-                    Role::Assistant => area
-                        .width
-                        .saturating_sub(1 + ASSISTANT_PREFIX.len() as u16),
+                    Role::User => area.width.saturating_sub(1 + USER_PREFIX.len() as u16),
+                    Role::Assistant => area.width.saturating_sub(1 + ASSISTANT_PREFIX.len() as u16),
                     _ => area.width.saturating_sub(2),
                 };
-                ChatView::calc_msg_height(&m.content, text_width)
+                Self::calc_msg_height(&m.content, text_width)
             })
             .sum();
 
@@ -147,25 +75,20 @@ impl Widget for &ChatView {
             area.y
         };
 
-        let visible_messages: Vec<Message> = self.messages.to_vec();
         let mut y = start_y;
 
-        for message in visible_messages {
+        for message in self.messages {
             if y >= area.bottom() {
                 break;
             }
 
             let text_width = match message.role {
-                Role::User => area
-                    .width
-                    .saturating_sub(1 + USER_PREFIX.len() as u16),
-                Role::Assistant => area
-                    .width
-                    .saturating_sub(1 + ASSISTANT_PREFIX.len() as u16),
+                Role::User => area.width.saturating_sub(1 + USER_PREFIX.len() as u16),
+                Role::Assistant => area.width.saturating_sub(1 + ASSISTANT_PREFIX.len() as u16),
                 _ => area.width.saturating_sub(2),
             };
 
-            let msg_height = ChatView::calc_msg_height(&message.content, text_width);
+            let msg_height = Self::calc_msg_height(&message.content, text_width);
 
             if y + msg_height > area.bottom() {
                 break;

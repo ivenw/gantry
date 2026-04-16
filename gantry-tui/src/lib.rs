@@ -1,6 +1,9 @@
-mod app;
 mod commands;
 mod connection;
+mod message;
+mod model;
+mod runtime;
+mod update;
 mod views;
 
 use anyhow::{Result, anyhow};
@@ -42,8 +45,8 @@ pub fn run() -> Result<()> {
     })?;
 
     let (_terminal_guard, mut terminal) = TerminalGuard::enter()?;
-    let mut app = app::App::new(addr, port, project_path)?;
-    app.run(&mut terminal)
+    let mut runtime = runtime::Runtime::new(addr, port, project_path)?;
+    runtime.run(&mut terminal)
 }
 
 struct TerminalGuard {
