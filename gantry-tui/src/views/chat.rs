@@ -6,22 +6,83 @@ use ratatui::{
     widgets::{Paragraph, Widget},
 };
 
-use crate::ui::{Message, Role};
+use crate::views::{Message, Role};
 
-pub struct Chat<'a> {
-    messages: &'a [Message],
+const USER_PREFIX: &str = "> ";
+const ASSISTANT_PREFIX: &str = "< ";
+
+pub struct ChatView {
+    pub messages: Vec<Message>,
     streaming_content: Option<String>,
+    streaming_message_idx: Option<usize>,
+    streaming_buffer: String,
 }
 
-impl<'a> Chat<'a> {
-    const USER_PREFIX: &'static str = "> ";
-    const ASSISTANT_PREFIX: &'static str = "< ";
-
-    pub fn new(messages: &'a [Message], streaming_content: Option<String>) -> Self {
+impl ChatView {
+    pub fn new() -> Self {
         Self {
-            messages,
-            streaming_content,
+            messages: Vec::new(),
+            streaming_content: None,
+            streaming_message_idx: None,
+            streaming_buffer: String::new(),
         }
+    }
+
+    pub fn add_user_message(&mut self, content: String) {
+        self.messages.push(Message::new(Role::User, content));
+    }
+
+    pub fn start_streaming_message(&mut self) {
+        self.streaming_content = Some(String::new());
+        self.streaming_message_idx = Some(self.messages.len());
+        self.messages
+            .push(Message::new(Role::Assistant, String::new()));
+    }
+
+    pub fn append_to_streaming(&mut self, content: &str) {
+        if let Some(ref mut streaming) = self.streaming_content {
+            self.streaming_buffer.push_str(content);
+
+            while let Some(newline_idx) = self.streaming_buffer.find('\n') {
+                let line = self
+                    .streaming_buffer
+                    .drain(..=newline_idx)
+                    .collect::<String>();
+                streaming.push_str(&line);
+                if let Some(idx) = self.streaming_message_idx
+                    && idx < self.messages.len()
+                {
+                    self.messages[idx].content.push_str(&line);
+                }
+            }
+        }
+    }
+
+    pub fn finish_streaming(&mut self) {
+        if !self.streaming_buffer.is_empty()
+            && let Some(ref mut streaming) = self.streaming_content
+        {
+            streaming.push_str(&self.streaming_buffer);
+            if let Some(idx) = self.streaming_message_idx
+                && idx < self.messages.len()
+            {
+                self.messages[idx].content.push_str(&self.streaming_buffer);
+            }
+        }
+        self.streaming_content = None;
+        self.streaming_message_idx = None;
+        self.streaming_buffer.clear();
+    }
+
+    pub fn is_streaming(&self) -> bool {
+        self.streaming_content.is_some()
+    }
+
+    pub fn reset(&mut self) {
+        self.messages.clear();
+        self.streaming_content = None;
+        self.streaming_message_idx = None;
+        self.streaming_buffer.clear();
     }
 
     fn calc_msg_height(content: &str, width: u16) -> u16 {
@@ -33,7 +94,6 @@ impl<'a> Chat<'a> {
 
         for line in content.split('\n') {
             let char_count = line.chars().count();
-            // Keep explicit blank lines and account for soft wrapping.
             line_count += if char_count == 0 {
                 1
             } else {
@@ -44,14 +104,14 @@ impl<'a> Chat<'a> {
         line_count.max(1) as u16
     }
 
-    fn streaming_message_idx(&self) -> Option<usize> {
+    fn last_assistant_idx(&self) -> Option<usize> {
         self.messages
             .iter()
             .rposition(|m| m.role == Role::Assistant)
     }
 }
 
-impl<'a> Widget for Chat<'a> {
+impl Widget for &ChatView {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if self.messages.is_empty() {
             let text = "Type a message and press Enter to start...";
@@ -70,13 +130,13 @@ impl<'a> Widget for Chat<'a> {
                 let text_width = match m.role {
                     Role::User => area
                         .width
-                        .saturating_sub(1 + Self::USER_PREFIX.len() as u16),
+                        .saturating_sub(1 + USER_PREFIX.len() as u16),
                     Role::Assistant => area
                         .width
-                        .saturating_sub(1 + Self::ASSISTANT_PREFIX.len() as u16),
+                        .saturating_sub(1 + ASSISTANT_PREFIX.len() as u16),
                     _ => area.width.saturating_sub(2),
                 };
-                Self::calc_msg_height(&m.content, text_width)
+                ChatView::calc_msg_height(&m.content, text_width)
             })
             .sum();
 
@@ -98,14 +158,14 @@ impl<'a> Widget for Chat<'a> {
             let text_width = match message.role {
                 Role::User => area
                     .width
-                    .saturating_sub(1 + Self::USER_PREFIX.len() as u16),
+                    .saturating_sub(1 + USER_PREFIX.len() as u16),
                 Role::Assistant => area
                     .width
-                    .saturating_sub(1 + Self::ASSISTANT_PREFIX.len() as u16),
+                    .saturating_sub(1 + ASSISTANT_PREFIX.len() as u16),
                 _ => area.width.saturating_sub(2),
             };
 
-            let msg_height = Self::calc_msg_height(&message.content, text_width);
+            let msg_height = ChatView::calc_msg_height(&message.content, text_width);
 
             if y + msg_height > area.bottom() {
                 break;
@@ -114,15 +174,11 @@ impl<'a> Widget for Chat<'a> {
             let is_last_assistant = message.role == Role::Assistant
                 && self.streaming_content.is_some()
                 && self
-                    .streaming_message_idx()
+                    .last_assistant_idx()
                     .map(|idx| message.content == self.messages[idx].content)
                     .unwrap_or(false);
 
-            let mut content = match message.role {
-                Role::User => message.content.clone(),
-                Role::Assistant => message.content.clone(),
-                Role::Error => message.content.clone(),
-            };
+            let mut content = message.content.clone();
 
             if is_last_assistant {
                 content.push('▍');
@@ -136,18 +192,17 @@ impl<'a> Widget for Chat<'a> {
 
             if message.role == Role::User {
                 let prefix_x = area.x + 1;
-                let text_x = prefix_x + Self::USER_PREFIX.len() as u16;
+                let text_x = prefix_x + USER_PREFIX.len() as u16;
                 let text_area = Rect::new(
                     text_x,
                     y,
-                    area.width
-                        .saturating_sub(1 + Self::USER_PREFIX.len() as u16),
+                    area.width.saturating_sub(1 + USER_PREFIX.len() as u16),
                     msg_height,
                 );
                 buf.set_string(
                     prefix_x,
                     y,
-                    Self::USER_PREFIX,
+                    USER_PREFIX,
                     Style::default().fg(ratatui::style::Color::LightGreen),
                 );
 
@@ -157,18 +212,17 @@ impl<'a> Widget for Chat<'a> {
                 paragraph.render(text_area, buf);
             } else if message.role == Role::Assistant {
                 let prefix_x = area.x + 1;
-                let text_x = prefix_x + Self::ASSISTANT_PREFIX.len() as u16;
+                let text_x = prefix_x + ASSISTANT_PREFIX.len() as u16;
                 let text_area = Rect::new(
                     text_x,
                     y,
-                    area.width
-                        .saturating_sub(1 + Self::ASSISTANT_PREFIX.len() as u16),
+                    area.width.saturating_sub(1 + ASSISTANT_PREFIX.len() as u16),
                     msg_height,
                 );
                 buf.set_string(
                     prefix_x,
                     y,
-                    Self::ASSISTANT_PREFIX,
+                    ASSISTANT_PREFIX,
                     Style::default().fg(ratatui::style::Color::DarkGray),
                 );
 

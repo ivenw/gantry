@@ -4,29 +4,56 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Widget},
 };
 
-pub struct Input<'a> {
-    value: &'a str,
+const PREFIX: &str = "> ";
+
+pub struct InputView {
+    value: String,
 }
 
-impl<'a> Input<'a> {
-    const PREFIX: &'static str = "> ";
+impl InputView {
 
-    pub fn new(value: &'a str) -> Self {
-        Self { value }
+    pub fn new() -> Self {
+        Self {
+            value: String::new(),
+        }
     }
 
-    pub fn calc_height(value: &str, width: u16) -> u16 {
-        let text_width = width.saturating_sub(1 + Self::PREFIX.len() as u16).max(1) as usize;
-        let wrapped_lines = Self::wrapped_line_count(value, text_width);
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+
+    pub fn push_char(&mut self, c: char) {
+        self.value.push(c);
+    }
+
+    pub fn push_str(&mut self, s: &str) {
+        self.value.push_str(s);
+    }
+
+    pub fn pop(&mut self) {
+        self.value.pop();
+    }
+
+    pub fn clear(&mut self) {
+        self.value.clear();
+    }
+
+    pub fn set(&mut self, s: String) {
+        self.value = s;
+    }
+
+    pub fn calc_height(&self, width: u16) -> u16 {
+        let text_width = width.saturating_sub(1 + PREFIX.len() as u16).max(1) as usize;
+        let wrapped_lines = Self::wrapped_line_count(&self.value, text_width);
         (wrapped_lines as u16 + 2).max(3)
     }
 
-    pub fn calc_cursor_pos(value: &str, width: u16) -> (u16, u16) {
-        let text_width = width.saturating_sub(1 + Self::PREFIX.len() as u16).max(1) as usize;
+    pub fn calc_cursor_pos(&self, width: u16) -> (u16, u16) {
+        let text_width = width.saturating_sub(1 + PREFIX.len() as u16).max(1) as usize;
         let mut col = 0usize;
         let mut row = 0usize;
 
-        for c in value.chars() {
+        for c in self.value.chars() {
             if c == '\n' {
                 row += 1;
                 col = 0;
@@ -64,7 +91,7 @@ impl<'a> Input<'a> {
     }
 }
 
-impl<'a> Widget for Input<'a> {
+impl Widget for &InputView {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let inner_area = Rect::new(
             area.x + 1,
@@ -72,7 +99,7 @@ impl<'a> Widget for Input<'a> {
             area.width.saturating_sub(1),
             area.height.saturating_sub(2),
         );
-        let prefix_width = Self::PREFIX.len() as u16;
+        let prefix_width = PREFIX.len() as u16;
         let text_area = Rect::new(
             inner_area.x.saturating_add(prefix_width),
             inner_area.y,
@@ -90,19 +117,19 @@ impl<'a> Widget for Input<'a> {
             buf.set_string(
                 inner_area.x,
                 inner_area.y,
-                Self::PREFIX,
+                PREFIX,
                 ratatui::style::Style::default().fg(ratatui::style::Color::LightGreen),
             );
         }
 
         if !self.value.is_empty() {
-            let paragraph = ratatui::widgets::Paragraph::new(self.value)
+            let paragraph = ratatui::widgets::Paragraph::new(self.value.as_str())
                 .style(ratatui::style::Style::default().fg(ratatui::style::Color::White))
                 .wrap(ratatui::widgets::Wrap { trim: false });
             paragraph.render(text_area, buf);
         }
 
-        let (col, row) = Self::calc_cursor_pos(self.value, area.width);
+        let (col, row) = self.calc_cursor_pos(area.width);
         let cursor_x = text_area.x + col;
         let cursor_y = text_area.y + row;
 

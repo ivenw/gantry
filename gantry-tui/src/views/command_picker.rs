@@ -11,13 +11,13 @@ pub struct Command {
 }
 
 #[derive(Clone)]
-pub struct CommandPicker {
+pub struct CommandPickerView {
     commands: Vec<Command>,
     filter: String,
     selected_index: usize,
 }
 
-impl CommandPicker {
+impl CommandPickerView {
     pub fn new(commands: Vec<Command>) -> Self {
         Self {
             commands,
@@ -84,7 +84,7 @@ impl CommandPicker {
     }
 }
 
-impl Widget for CommandPicker {
+impl Widget for &CommandPickerView {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let filtered = self.filtered_commands();
 
