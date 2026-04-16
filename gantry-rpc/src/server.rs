@@ -106,10 +106,12 @@ impl GantryRpcServer for RpcApp {
 
     async fn send_message(&self, content: String) -> RpcResult<Vec<Message>> {
         dbg!("rpc.send_message.request", &content);
-        let (session_id, project_path) =
-            self.session.lock().await.clone().ok_or_else(|| {
-                invalid_request("no session selected; call bind_session first")
-            })?;
+        let (session_id, project_path) = self
+            .session
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| invalid_request("no session selected; call bind_session first"))?;
 
         let session = self
             .app
@@ -124,10 +126,12 @@ impl GantryRpcServer for RpcApp {
 
     async fn stream_message(&self, req: StreamMessageRequest) -> RpcResult<PendingMessage> {
         dbg!("rpc.stream_message.request.content", &req.content);
-        let (session_id, project_path) =
-            self.session.lock().await.clone().ok_or_else(|| {
-                invalid_request("no session selected; call bind_session first")
-            })?;
+        let (session_id, project_path) = self
+            .session
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| invalid_request("no session selected; call bind_session first"))?;
 
         let session = self
             .app
@@ -209,10 +213,12 @@ impl GantryRpcServer for RpcApp {
 
     async fn select_form(&self, req: SelectFormRequest) -> RpcResult<SelectFormResponse> {
         dbg!("rpc.select_form.request", &req.form_id, &req.selection);
-        let (session_id, project_path) =
-            self.session.lock().await.clone().ok_or_else(|| {
-                invalid_request("no session selected; call bind_session first")
-            })?;
+        let (session_id, project_path) = self
+            .session
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| invalid_request("no session selected; call bind_session first"))?;
 
         let session = self
             .app
@@ -227,10 +233,12 @@ impl GantryRpcServer for RpcApp {
 
     async fn get_messages(&self) -> RpcResult<Vec<Message>> {
         dbg!("rpc.get_messages.request");
-        let (session_id, project_path) =
-            self.session.lock().await.clone().ok_or_else(|| {
-                invalid_request("no session selected; call bind_session first")
-            })?;
+        let (session_id, project_path) = self
+            .session
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| invalid_request("no session selected; call bind_session first"))?;
 
         let session = self
             .app
@@ -245,10 +253,12 @@ impl GantryRpcServer for RpcApp {
 
     async fn clear_messages(&self) -> RpcResult<()> {
         dbg!("rpc.clear_messages.request");
-        let (session_id, project_path) =
-            self.session.lock().await.clone().ok_or_else(|| {
-                invalid_request("no session selected; call bind_session first")
-            })?;
+        let (session_id, project_path) = self
+            .session
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| invalid_request("no session selected; call bind_session first"))?;
 
         let session = self
             .app
@@ -263,10 +273,12 @@ impl GantryRpcServer for RpcApp {
 
     async fn interrupt_stream(&self, message_id: String) -> RpcResult<bool> {
         dbg!("rpc.interrupt_stream.request", &message_id);
-        let (session_id, project_path) =
-            self.session.lock().await.clone().ok_or_else(|| {
-                invalid_request("no session selected; call bind_session first")
-            })?;
+        let (session_id, project_path) = self
+            .session
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| invalid_request("no session selected; call bind_session first"))?;
 
         let session = self
             .app
