@@ -1,3 +1,4 @@
+mod commands;
 mod ui;
 
 use anyhow::{Result, anyhow};
@@ -150,7 +151,7 @@ pub fn run() -> Result<()> {
     };
 
     let (stream_result_tx, stream_result_rx) = mpsc::channel::<Result<(), String>>();
-    let (command_result_tx, command_result_rx) = mpsc::channel::<String>();
+    let (effect_tx, effect_rx) = mpsc::channel::<commands::CommandEffect>();
 
     let pending_id = Arc::new(Mutex::new(Option::<String>::None));
     let stream_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>> = Arc::new(Mutex::new(None));
@@ -225,8 +226,22 @@ pub fn run() -> Result<()> {
             })?;
         }
 
-        while let Ok(status) = command_result_rx.try_recv() {
-            app.set_status(status);
+        while let Ok(effect) = effect_rx.try_recv() {
+            match effect {
+                commands::CommandEffect::Status(msg) => {
+                    app.set_status(msg);
+                }
+                commands::CommandEffect::Apply(f) => {
+                    let mut ctx = commands::AppEffectContext {
+                        app: &mut app,
+                        client: &mut client,
+                        session_id: &session_id,
+                        event_handle: &mut event_handle,
+                        event_rx: &mut event_rx,
+                    };
+                    f(&mut ctx);
+                }
+            }
             terminal.draw(|frame| {
                 app.render(frame);
             })?;
@@ -299,14 +314,17 @@ pub fn run() -> Result<()> {
                     } else if app.is_command_picker_active() {
                         if let Some(cmd) = app.selected_command() {
                             let cmd_name = cmd.name.clone();
-                            execute_command(
-                                &cmd_name,
-                                &rt,
-                                &client,
-                                command_result_tx.clone(),
-                                reconnect_tx.clone(),
-                                project_path.clone(),
-                            );
+                            let ctx = commands::CommandContext {
+                                rt: &rt,
+                                client: client.clone(),
+                                project_path: project_path.clone(),
+                            };
+                            if let Some(c) = commands::all_commands()
+                                .into_iter()
+                                .find(|c| c.name() == cmd_name)
+                            {
+                                c.execute(ctx, effect_tx.clone());
+                            }
                         }
                         app.input_buffer.clear();
                         app.deactivate_command_picker();
@@ -533,62 +551,3 @@ impl Drop for TerminalGuard {
     }
 }
 
-fn execute_command(
-    name: &str,
-    rt: &Runtime,
-    client: &Option<Arc<JsonRpcClient>>,
-    command_result_tx: mpsc::Sender<String>,
-    reconnect_tx: mpsc::SyncSender<ReconnectSuccess>,
-    project_path: PathBuf,
-) {
-    if name == "health" {
-        match client {
-            Some(c) => {
-                let c = c.clone();
-                let tx = command_result_tx.clone();
-                rt.spawn(async move {
-                    let start = std::time::Instant::now();
-                    match c.ping().await {
-                        Ok(_) => {
-                            let latency = start.elapsed().as_millis();
-                            let _ = tx.send(format!("Connected: {}ms", latency));
-                        }
-                        Err(e) => {
-                            let _ = tx.send(format!("Ping failed: {}", e));
-                        }
-                    }
-                });
-            }
-            None => {
-                let _ = command_result_tx.send("Not connected".to_string());
-            }
-        }
-    } else if name == "new" {
-        match client {
-            Some(c) => {
-                let c = c.clone();
-                rt.spawn(async move {
-                    let Ok(session_id) = c.create_session(project_path.to_path_buf()).await else {
-                        return;
-                    };
-                    if c.bind_session(session_id.clone(), project_path.to_path_buf()).await.is_err() {
-                        return;
-                    }
-                    let Ok((event_handle, event_rx)) = c.subscribe_events().await else {
-                        return;
-                    };
-                    let _ = reconnect_tx.send(ReconnectSuccess {
-                        client: (*c).clone(),
-                        session_id,
-                        event_handle,
-                        event_rx,
-                        clear_messages: true,
-                    });
-                });
-            }
-            None => {
-                let _ = command_result_tx.send("Not connected".to_string());
-            }
-        }
-    }
-}

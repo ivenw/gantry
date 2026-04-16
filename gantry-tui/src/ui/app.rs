@@ -37,16 +37,13 @@ impl App {
     }
 
     pub fn available_commands() -> Vec<command_picker::Command> {
-        vec![
-            command_picker::Command {
-                name: "health".to_string(),
-                description: "Check connection to server".to_string(),
-            },
-            command_picker::Command {
-                name: "new".to_string(),
-                description: "Start a new session".to_string(),
-            },
-        ]
+        super::super::commands::all_commands()
+            .iter()
+            .map(|c| command_picker::Command {
+                name: c.name().to_string(),
+                description: c.description().to_string(),
+            })
+            .collect()
     }
 
     pub fn reset_for_new_session(&mut self) {
