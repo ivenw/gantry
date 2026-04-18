@@ -5,17 +5,19 @@ use ratatui::{
     widgets::{Block, Padding, Paragraph, Widget},
 };
 
-pub struct StatuslineView;
+pub struct StatusMessageView<'a> {
+    message: &'a str,
+}
 
-impl StatuslineView {
-    pub fn new() -> Self {
-        Self
+impl<'a> StatusMessageView<'a> {
+    pub fn new(message: &'a str) -> Self {
+        Self { message }
     }
 }
 
-impl Widget for StatuslineView {
+impl Widget for StatusMessageView<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        Paragraph::new("<statusline_placeholder>")
+        Paragraph::new(self.message)
             .style(Style::default().fg(Color::Gray))
             .block(Block::new().padding(Padding::horizontal(2)))
             .render(area, buf);

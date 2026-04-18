@@ -2,6 +2,7 @@ use crate::model::Model;
 use crate::views::chat::ChatViewState;
 use crate::views::command_picker::CommandPickerView;
 use crate::views::input::InputView;
+use crate::views::status_message::StatusMessageView;
 use crate::views::statusline::StatuslineView;
 
 use ratatui::{
@@ -43,5 +44,9 @@ pub fn render(frame: &mut Frame, model: &Model) {
         frame.render_widget(InputView::new(&model.input.value, model.input.cursor), input_area);
     }
 
-    frame.render_widget(StatuslineView::new(model.status_message.as_deref()), statusline_area);
+    if let Some(ref msg) = model.status_message {
+        frame.render_widget(StatusMessageView::new(msg), statusline_area);
+    } else {
+        frame.render_widget(StatuslineView::new(), statusline_area);
+    }
 }
