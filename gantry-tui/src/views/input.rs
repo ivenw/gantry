@@ -8,11 +8,12 @@ const PREFIX: &str = "> ";
 
 pub struct InputView<'a> {
     value: &'a str,
+    cursor: usize,
 }
 
 impl<'a> InputView<'a> {
-    pub fn new(value: &'a str) -> Self {
-        Self { value }
+    pub fn new(value: &'a str, cursor: usize) -> Self {
+        Self { value, cursor }
     }
 
     pub fn calc_height(&self, width: u16) -> u16 {
@@ -26,7 +27,10 @@ impl<'a> InputView<'a> {
         let mut col = 0usize;
         let mut row = 0usize;
 
-        for c in self.value.chars() {
+        for (i, c) in self.value.char_indices() {
+            if i == self.cursor {
+                break;
+            }
             if c == '\n' {
                 row += 1;
                 col = 0;

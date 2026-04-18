@@ -25,6 +25,7 @@ pub struct ChatModel {
 
 pub struct InputModel {
     pub value: String,
+    pub cursor: usize,
 }
 
 pub struct CommandPicker {
@@ -182,7 +183,49 @@ impl InputModel {
     pub fn new() -> Self {
         Self {
             value: String::new(),
+            cursor: 0,
         }
+    }
+
+    pub fn insert(&mut self, c: char) {
+        self.value.insert(self.cursor, c);
+        self.cursor += c.len_utf8();
+    }
+
+    pub fn delete_before_cursor(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        let prev = self.prev_char_boundary();
+        self.value.drain(prev..self.cursor);
+        self.cursor = prev;
+    }
+
+    pub fn move_left(&mut self) {
+        self.cursor = self.prev_char_boundary();
+    }
+
+    pub fn move_right(&mut self) {
+        if self.cursor < self.value.len() {
+            let c = self.value[self.cursor..].chars().next().unwrap();
+            self.cursor += c.len_utf8();
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.value.clear();
+        self.cursor = 0;
+    }
+
+    fn prev_char_boundary(&self) -> usize {
+        let mut pos = self.cursor;
+        while pos > 0 {
+            pos -= 1;
+            if self.value.is_char_boundary(pos) {
+                return pos;
+            }
+        }
+        0
     }
 }
 

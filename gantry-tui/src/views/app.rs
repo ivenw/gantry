@@ -17,7 +17,7 @@ pub fn render(frame: &mut Frame, model: &Model) {
     } else if let Some(ref picker) = model.command_picker {
         CommandPickerView::new(picker).calc_height(area.width)
     } else {
-        InputView::new(&model.input.value).calc_height(area.width)
+        InputView::new(&model.input.value, model.input.cursor).calc_height(area.width)
     };
 
     let chunks = Layout::default()
@@ -40,11 +40,11 @@ pub fn render(frame: &mut Frame, model: &Model) {
     frame.render_widget(chat, chat_area);
 
     if let Some(ref status) = model.status_message {
-        frame.render_widget(InputView::new(status), input_area);
+        frame.render_widget(InputView::new(status, 0), input_area);
     } else if let Some(ref picker) = model.command_picker {
         frame.render_widget(CommandPickerView::new(picker), input_area);
     } else {
-        frame.render_widget(InputView::new(&model.input.value), input_area);
+        frame.render_widget(InputView::new(&model.input.value, model.input.cursor), input_area);
     }
 
     frame.render_widget(StatuslineView::new(), statusline_area);

@@ -117,6 +117,18 @@ fn handle_key(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg>
             handle_backspace(model);
             None
         }
+        KeyCode::Left => {
+            if !model.is_command_picker_active() {
+                model.input.move_left();
+            }
+            None
+        }
+        KeyCode::Right => {
+            if !model.is_command_picker_active() {
+                model.input.move_right();
+            }
+            None
+        }
         KeyCode::Up => {
             if model.is_command_picker_active() {
                 model.move_command_selection_up();
@@ -140,7 +152,7 @@ fn handle_esc(model: &mut Model) -> Option<Msg> {
         model.status_message = None;
         None
     } else if model.is_command_picker_active() {
-        model.input.value.clear();
+        model.input.clear();
         model.deactivate_command_picker();
         None
     } else if model.chat.pending_message_id.is_some() {
@@ -158,13 +170,13 @@ fn handle_enter(model: &mut Model, modifiers: KeyModifiers) -> Option<Msg> {
 
     if model.is_command_picker_active() {
         let selected = model.selected_command();
-        model.input.value.clear();
+        model.input.clear();
         model.deactivate_command_picker();
         return selected.map(|cmd| Msg::ExecuteCommand(cmd.command));
     }
 
     if modifiers.contains(KeyModifiers::SHIFT) {
-        model.input.value.push('\n');
+        model.input.insert('\n');
         return None;
     }
 
@@ -178,7 +190,7 @@ fn handle_enter(model: &mut Model, modifiers: KeyModifiers) -> Option<Msg> {
         let available = available_command_entries();
         let has_match = available.iter().any(|c| c.name.starts_with(filter));
         if !has_match {
-            model.input.value.clear();
+            model.input.clear();
             return None;
         }
     }
@@ -188,7 +200,7 @@ fn handle_enter(model: &mut Model, modifiers: KeyModifiers) -> Option<Msg> {
         return None;
     }
 
-    model.input.value.clear();
+    model.input.clear();
     model.chat.add_user_message(input.clone());
     model.chat.start_streaming_message();
     Some(Msg::SendMessage(input))
@@ -199,14 +211,14 @@ fn handle_char(model: &mut Model, c: char) {
         model.status_message = None;
     }
     if c == '/' && !available_command_entries().is_empty() && model.input.value.is_empty() {
-        model.input.value.push(c);
+        model.input.insert(c);
         model.activate_command_picker(available_command_entries());
     } else if model.is_command_picker_active() {
-        model.input.value.push(c);
+        model.input.insert(c);
         let filter = input_filter(&model.input.value);
         model.update_command_filter(&filter);
     } else {
-        model.input.value.push(c);
+        model.input.insert(c);
     }
 }
 
@@ -216,7 +228,7 @@ fn handle_backspace(model: &mut Model) {
         return;
     }
     if model.is_command_picker_active() {
-        model.input.value.pop();
+        model.input.delete_before_cursor();
         let filter = input_filter(&model.input.value);
         if filter.is_empty() && !model.input.value.starts_with('/') {
             model.deactivate_command_picker();
@@ -224,13 +236,14 @@ fn handle_backspace(model: &mut Model) {
             model.update_command_filter(&filter);
         }
     } else {
-        model.input.value.pop();
+        model.input.delete_before_cursor();
     }
 }
 
 fn update_input_from_selection(model: &mut Model) {
     if let Some(cmd) = model.selected_command() {
         model.input.value = format!("/{}", cmd.name);
+        model.input.cursor = model.input.value.len();
     }
 }
 
