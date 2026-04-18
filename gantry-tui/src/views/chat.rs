@@ -9,8 +9,8 @@ use ratatui::{
 
 use gantry_core::{Message, Role};
 
-const USER_PREFIX: &str = "> ";
-const ASSISTANT_PREFIX: &str = "< ";
+const USER_PREFIX: &str = ">> ";
+const ASSISTANT_PREFIX: &str = "<< ";
 
 pub struct ChatView<'a> {
     pub messages: &'a [Message],
