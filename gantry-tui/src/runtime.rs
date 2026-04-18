@@ -14,7 +14,7 @@ use crate::message::Msg;
 use crate::model::{ConnectionState, Model};
 use crate::update::update;
 use crate::views;
-use crate::views::statusline::StatuslineState;
+use crate::views::ViewState;
 
 pub struct Runtime {
     model: Model,
@@ -25,7 +25,7 @@ pub struct Runtime {
     addr: String,
     port: u16,
     project_path: PathBuf,
-    statusline_state: StatuslineState,
+    view_state: ViewState,
     // Live async handles
     client: Option<Arc<JsonRpcClient>>,
     event_task: Option<JoinHandle<()>>,
@@ -62,7 +62,7 @@ impl Runtime {
             addr,
             port,
             project_path,
-            statusline_state: StatuslineState::new(),
+            view_state: ViewState::default(),
             client,
             event_task,
             stream_task: None,
@@ -77,7 +77,7 @@ impl Runtime {
     }
 
     pub fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
-        terminal.draw(|f| views::render(f, &mut self.model, &mut self.statusline_state))?;
+        terminal.draw(|f| views::render(f, &mut self.model, &mut self.view_state))?;
 
         let tick_interval = Duration::from_millis(100);
         let mut last_tick = Instant::now();
@@ -112,12 +112,12 @@ impl Runtime {
 
             if last_tick.elapsed() >= tick_interval {
                 last_tick = Instant::now();
-                self.statusline_state.tick();
+                self.view_state.statusline.tick();
                 needs_redraw = true;
             }
 
             if needs_redraw {
-                terminal.draw(|f| views::render(f, &mut self.model, &mut self.statusline_state))?;
+                terminal.draw(|f| views::render(f, &mut self.model, &mut self.view_state))?;
             }
         }
     }
@@ -149,6 +149,7 @@ impl Runtime {
                 self.spawn_ws_forwarder(event_rx);
                 return update(
                     &mut self.model,
+                    &self.view_state,
                     Msg::ReconnectSuccess {
                         client: (**self.client.as_ref().unwrap()).clone(),
                         session_id,
@@ -172,6 +173,7 @@ impl Runtime {
                 self.spawn_ws_forwarder(event_rx);
                 return update(
                     &mut self.model,
+                    &self.view_state,
                     Msg::NewSession {
                         client,
                         session_id,
@@ -203,7 +205,7 @@ impl Runtime {
             }
             _ => {}
         }
-        update(&mut self.model, msg)
+        update(&mut self.model, &self.view_state, msg)
     }
 
     fn spawn_ws_forwarder(&mut self, event_rx: Receiver<WsConnectionEvent>) {

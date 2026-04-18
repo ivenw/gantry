@@ -1,4 +1,3 @@
-use crate::views::chat::ChatRenderState;
 use gantry_core::{Message, Role};
 
 pub struct Model {
@@ -26,7 +25,6 @@ pub struct ChatModel {
     pub scroll_offset: u16,
     /// True while the user has manually scrolled up; suppresses auto-scroll-to-bottom.
     pub user_is_scrolling: bool,
-    pub render_state: ChatRenderState,
 }
 
 pub struct InputModel {
@@ -124,7 +122,6 @@ impl ChatModel {
             show_form: false,
             scroll_offset: 0,
             user_is_scrolling: false,
-            render_state: ChatRenderState::default(),
         }
     }
 

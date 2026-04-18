@@ -3,8 +3,9 @@ use gantry_core::AppEvent;
 
 use crate::message::Msg;
 use crate::model::{CommandEntry, ConnectionState, Model};
+use crate::views::ViewState;
 
-pub fn update(model: &mut Model, msg: Msg) -> Option<Msg> {
+pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg> {
     match msg {
         Msg::AppEvent(ev) => handle_app_event(model, ev),
         Msg::WsDisconnected => {
@@ -52,9 +53,9 @@ pub fn update(model: &mut Model, msg: Msg) -> Option<Msg> {
             model.status_message = None;
             None
         }
-        Msg::Key(key) => handle_key(model, key),
+        Msg::Key(key) => handle_key(model, view_state, key),
         Msg::ScrollChat(delta) => {
-            let max = model.chat.render_state.max_scroll;
+            let max = view_state.chat.max_scroll;
             let offset = model.chat.scroll_offset as i32 + delta;
             model.chat.scroll_offset = offset.clamp(0, max as i32) as u16;
             model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
@@ -109,7 +110,11 @@ fn handle_app_event(model: &mut Model, event: AppEvent) -> Option<Msg> {
     None
 }
 
-fn handle_key(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
+fn handle_key(
+    model: &mut Model,
+    view_state: &ViewState,
+    key: crossterm::event::KeyEvent,
+) -> Option<Msg> {
     if let KeyCode::Char('c') = key.code
         && key.modifiers.contains(KeyModifiers::CONTROL)
     {
@@ -145,7 +150,7 @@ fn handle_key(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg>
                 model.move_command_selection_up();
                 update_input_from_selection(model);
             } else {
-                let max = model.chat.render_state.max_scroll;
+                let max = view_state.chat.max_scroll;
                 model.chat.scroll_offset = model.chat.scroll_offset.saturating_add(1).min(max);
                 model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
             }
@@ -162,7 +167,7 @@ fn handle_key(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg>
             None
         }
         KeyCode::PageUp => {
-            let max = model.chat.render_state.max_scroll;
+            let max = view_state.chat.max_scroll;
             model.chat.scroll_offset = model.chat.scroll_offset.saturating_add(10).min(max);
             model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
             None

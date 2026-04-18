@@ -1,16 +1,17 @@
 use crate::model::Model;
-use crate::views::chat::ChatViewState;
+use crate::views::ViewState;
+use crate::views::chat::ChatView;
 use crate::views::command_picker::CommandPickerView;
 use crate::views::input::InputView;
 use crate::views::status_message::StatusMessageView;
-use crate::views::statusline::{StatuslineState, StatuslineView};
+use crate::views::statusline::StatuslineView;
 
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
 };
 
-pub fn render(frame: &mut Frame, model: &mut Model, statusline_state: &mut StatuslineState) {
+pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) {
     let area = frame.area();
 
     let input_height = if let Some(ref picker) = model.command_picker {
@@ -33,11 +34,11 @@ pub fn render(frame: &mut Frame, model: &mut Model, statusline_state: &mut Statu
     let input_area = chunks[2];
     let statusline_area = chunks[3];
 
-    let chat = ChatViewState {
+    let chat = ChatView {
         messages: &model.chat.messages,
         scroll_offset: model.chat.scroll_offset,
     };
-    frame.render_stateful_widget(chat, chat_area, &mut model.chat.render_state);
+    frame.render_stateful_widget(chat, chat_area, &mut view_state.chat);
 
     if let Some(ref picker) = model.command_picker {
         frame.render_widget(CommandPickerView::new(picker), input_area);
@@ -54,7 +55,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, statusline_state: &mut Statu
         frame.render_stateful_widget(
             StatuslineView::new(model.is_streaming()),
             statusline_area,
-            statusline_state,
+            &mut view_state.statusline,
         );
     }
 }

@@ -12,18 +12,18 @@ use gantry_core::{Message, Role};
 const USER_PREFIX: &str = "> ";
 const ASSISTANT_PREFIX: &str = "< ";
 
-pub struct ChatViewState<'a> {
+pub struct ChatView<'a> {
     pub messages: &'a [Message],
     pub scroll_offset: u16,
 }
 
 #[derive(Default)]
-pub struct ChatRenderState {
+pub struct ChatViewState {
     pub scrollbar: ScrollbarState,
     pub max_scroll: u16,
 }
 
-impl ChatViewState<'_> {
+impl ChatView<'_> {
     pub fn calc_msg_height(content: &str, width: u16) -> u16 {
         if width == 0 {
             return 1;
@@ -44,8 +44,8 @@ impl ChatViewState<'_> {
     }
 }
 
-impl StatefulWidget for ChatViewState<'_> {
-    type State = ChatRenderState;
+impl StatefulWidget for ChatView<'_> {
+    type State = ChatViewState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         if self.messages.is_empty() {

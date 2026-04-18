@@ -7,17 +7,19 @@ use ratatui::{
     widgets::{Block, Padding, Paragraph, StatefulWidget},
 };
 
-pub struct StatuslineState {
+pub struct StatuslineViewState {
     throbber: Throbber,
 }
 
-impl StatuslineState {
-    pub fn new() -> Self {
+impl Default for StatuslineViewState {
+    fn default() -> Self {
         Self {
             throbber: Throbber::new(ThrobberStyle::Ascii),
         }
     }
+}
 
+impl StatuslineViewState {
     pub fn tick(&mut self) {
         self.throbber.next();
     }
@@ -34,7 +36,7 @@ impl StatuslineView {
 }
 
 impl StatefulWidget for StatuslineView {
-    type State = StatuslineState;
+    type State = StatuslineViewState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let text = if self.is_streaming {
