@@ -5,7 +5,7 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinHandle;
 
@@ -14,6 +14,7 @@ use crate::message::Msg;
 use crate::model::{ConnectionState, Model};
 use crate::update::update;
 use crate::views;
+use crate::views::statusline::StatuslineState;
 
 pub struct Runtime {
     model: Model,
@@ -24,6 +25,7 @@ pub struct Runtime {
     addr: String,
     port: u16,
     project_path: PathBuf,
+    statusline_state: StatuslineState,
     // Live async handles
     client: Option<Arc<JsonRpcClient>>,
     event_task: Option<JoinHandle<()>>,
@@ -60,6 +62,7 @@ impl Runtime {
             addr,
             port,
             project_path,
+            statusline_state: StatuslineState::new(),
             client,
             event_task,
             stream_task: None,
@@ -74,7 +77,10 @@ impl Runtime {
     }
 
     pub fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
-        terminal.draw(|f| views::render(f, &mut self.model))?;
+        terminal.draw(|f| views::render(f, &mut self.model, &mut self.statusline_state))?;
+
+        let tick_interval = Duration::from_millis(100);
+        let mut last_tick = Instant::now();
 
         loop {
             if crossterm::event::poll(Duration::from_millis(10))? {
@@ -104,8 +110,14 @@ impl Runtime {
                 }
             }
 
+            if last_tick.elapsed() >= tick_interval {
+                last_tick = Instant::now();
+                self.statusline_state.tick();
+                needs_redraw = true;
+            }
+
             if needs_redraw {
-                terminal.draw(|f| views::render(f, &mut self.model))?;
+                terminal.draw(|f| views::render(f, &mut self.model, &mut self.statusline_state))?;
             }
         }
     }

@@ -3,14 +3,14 @@ use crate::views::chat::ChatViewState;
 use crate::views::command_picker::CommandPickerView;
 use crate::views::input::InputView;
 use crate::views::status_message::StatusMessageView;
-use crate::views::statusline::StatuslineView;
+use crate::views::statusline::{StatuslineState, StatuslineView};
 
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
 };
 
-pub fn render(frame: &mut Frame, model: &mut Model) {
+pub fn render(frame: &mut Frame, model: &mut Model, statusline_state: &mut StatuslineState) {
     let area = frame.area();
 
     let input_height = if let Some(ref picker) = model.command_picker {
@@ -51,6 +51,10 @@ pub fn render(frame: &mut Frame, model: &mut Model) {
     if let Some(ref msg) = model.status_message {
         frame.render_widget(StatusMessageView::new(msg), statusline_area);
     } else {
-        frame.render_widget(StatuslineView::new(), statusline_area);
+        frame.render_stateful_widget(
+            StatuslineView::new(model.is_streaming()),
+            statusline_area,
+            statusline_state,
+        );
     }
 }

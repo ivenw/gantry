@@ -1,5 +1,6 @@
 mod commands;
 mod connection;
+pub mod effects;
 mod message;
 mod model;
 mod runtime;
