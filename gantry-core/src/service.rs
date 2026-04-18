@@ -288,6 +288,11 @@ impl ActiveSession {
 
         if cancelled {
             dbg!("session.stream_message.was_cancelled");
+            dbg!("session.stream_message.accumulated_len", accumulated.len());
+            if !accumulated.is_empty() {
+                let mut mgr = self.session_manager.lock().await;
+                mgr.append(Role::Assistant, accumulated).ok();
+            }
             self.is_streaming.store(false, Ordering::SeqCst);
             return Ok(pending);
         }
