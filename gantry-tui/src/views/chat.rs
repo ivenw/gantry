@@ -55,9 +55,9 @@ impl Widget for ChatViewState<'_> {
             .iter()
             .map(|m| {
                 let text_width = match m.role {
-                    Role::User => area.width.saturating_sub(1 + USER_PREFIX.len() as u16),
-                    Role::Assistant => area.width.saturating_sub(1 + ASSISTANT_PREFIX.len() as u16),
-                    _ => area.width.saturating_sub(2),
+                    Role::User => area.width.saturating_sub(USER_PREFIX.len() as u16),
+                    Role::Assistant => area.width.saturating_sub(ASSISTANT_PREFIX.len() as u16),
+                    _ => area.width,
                 };
                 Self::calc_msg_height(&m.content, text_width)
             })
@@ -78,8 +78,8 @@ impl Widget for ChatViewState<'_> {
             }
 
             let text_width = match message.role {
-                Role::User => area.width.saturating_sub(1 + USER_PREFIX.len() as u16),
-                Role::Assistant => area.width.saturating_sub(1 + ASSISTANT_PREFIX.len() as u16),
+                Role::User => area.width.saturating_sub(USER_PREFIX.len() as u16),
+                Role::Assistant => area.width.saturating_sub(ASSISTANT_PREFIX.len() as u16),
                 _ => area.width.saturating_sub(2),
             };
 
@@ -98,12 +98,12 @@ impl Widget for ChatViewState<'_> {
             };
 
             if message.role == Role::User {
-                let prefix_x = area.x + 1;
+                let prefix_x = area.x;
                 let text_x = prefix_x + USER_PREFIX.len() as u16;
                 let text_area = Rect::new(
                     text_x,
                     y,
-                    area.width.saturating_sub(1 + USER_PREFIX.len() as u16),
+                    area.width.saturating_sub(USER_PREFIX.len() as u16),
                     msg_height,
                 );
                 buf.set_string(
@@ -118,12 +118,12 @@ impl Widget for ChatViewState<'_> {
                     .wrap(ratatui::widgets::Wrap { trim: false });
                 paragraph.render(text_area, buf);
             } else if message.role == Role::Assistant {
-                let prefix_x = area.x + 1;
+                let prefix_x = area.x;
                 let text_x = prefix_x + ASSISTANT_PREFIX.len() as u16;
                 let text_area = Rect::new(
                     text_x,
                     y,
-                    area.width.saturating_sub(1 + ASSISTANT_PREFIX.len() as u16),
+                    area.width.saturating_sub(ASSISTANT_PREFIX.len() as u16),
                     msg_height,
                 );
                 buf.set_string(
@@ -141,7 +141,7 @@ impl Widget for ChatViewState<'_> {
                 let paragraph = Paragraph::new(Text::raw(&content))
                     .style(style)
                     .wrap(ratatui::widgets::Wrap { trim: false });
-                let msg_area = Rect::new(area.x + 1, y, area.width.saturating_sub(1), msg_height);
+                let msg_area = Rect::new(area.x, y, area.width, msg_height);
                 paragraph.render(msg_area, buf);
             }
 

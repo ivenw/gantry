@@ -41,7 +41,10 @@ pub fn render(frame: &mut Frame, model: &Model) {
     if let Some(ref picker) = model.command_picker {
         frame.render_widget(CommandPickerView::new(picker), input_area);
     } else {
-        frame.render_widget(InputView::new(&model.input.value, model.input.cursor), input_area);
+        frame.render_widget(
+            InputView::new(&model.input.value, model.input.cursor),
+            input_area,
+        );
     }
 
     if let Some(ref msg) = model.status_message {

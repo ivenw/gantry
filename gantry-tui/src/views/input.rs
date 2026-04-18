@@ -5,6 +5,8 @@ use ratatui::{
 };
 
 const PREFIX: &str = "> ";
+const PREFIX_WIDTH: u16 = PREFIX.len() as u16;
+const BORDER_HEIGHT: u16 = 2;
 
 pub struct InputView<'a> {
     value: &'a str,
@@ -17,13 +19,13 @@ impl<'a> InputView<'a> {
     }
 
     pub fn calc_height(&self, width: u16) -> u16 {
-        let text_width = width.saturating_sub(1 + PREFIX.len() as u16).max(1) as usize;
+        let text_width = width.saturating_sub(PREFIX_WIDTH).max(1) as usize;
         let wrapped_lines = Self::wrapped_line_count(self.value, text_width);
-        (wrapped_lines as u16 + 2).max(3)
+        (wrapped_lines as u16 + BORDER_HEIGHT).max(3)
     }
 
-    pub fn calc_cursor_pos(&self, width: u16) -> (u16, u16) {
-        let text_width = width.saturating_sub(1 + PREFIX.len() as u16).max(1) as usize;
+    /// Returns (col, row) of the cursor within the text area.
+    fn calc_cursor_pos(&self, text_width: usize) -> (u16, u16) {
         let mut col = 0usize;
         let mut row = 0usize;
 
@@ -70,34 +72,30 @@ impl<'a> InputView<'a> {
 
 impl Widget for InputView<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let inner_area = Rect::new(
-            area.x + 1,
-            area.y + 1,
-            area.width.saturating_sub(1),
-            area.height.saturating_sub(2),
-        );
-        let prefix_width = PREFIX.len() as u16;
-        let text_area = Rect::new(
-            inner_area.x.saturating_add(prefix_width),
-            inner_area.y,
-            inner_area.width.saturating_sub(prefix_width),
-            inner_area.height,
-        );
-
         Block::default()
             .borders(Borders::TOP | Borders::BOTTOM)
-            .border_type(BorderType::Plain)
+            .border_type(BorderType::LightDoubleDashed)
             .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray))
             .render(area, buf);
 
-        if inner_area.width > 0 && inner_area.height > 0 {
-            buf.set_string(
-                inner_area.x,
-                inner_area.y,
-                PREFIX,
-                ratatui::style::Style::default().fg(ratatui::style::Color::LightGreen),
-            );
+        let content_area = Rect::new(area.x, area.y + 1, area.width, area.height.saturating_sub(BORDER_HEIGHT));
+        if content_area.width == 0 || content_area.height == 0 {
+            return;
         }
+
+        buf.set_string(
+            content_area.x,
+            content_area.y,
+            PREFIX,
+            ratatui::style::Style::default().fg(ratatui::style::Color::LightGreen),
+        );
+
+        let text_area = Rect::new(
+            content_area.x + PREFIX_WIDTH,
+            content_area.y,
+            content_area.width.saturating_sub(PREFIX_WIDTH),
+            content_area.height,
+        );
 
         if !self.value.is_empty() {
             let paragraph = ratatui::widgets::Paragraph::new(self.value)
@@ -106,7 +104,8 @@ impl Widget for InputView<'_> {
             paragraph.render(text_area, buf);
         }
 
-        let (col, row) = self.calc_cursor_pos(area.width);
+        let text_width = text_area.width as usize;
+        let (col, row) = self.calc_cursor_pos(text_width);
         let cursor_x = text_area.x + col;
         let cursor_y = text_area.y + row;
 
