@@ -3,9 +3,10 @@ use crate::event_bus::EventBus;
 use crate::project_registry::ProjectRegistry;
 use crate::resource_loader::discover_agents_md;
 use crate::session::manager::SessionManager;
-use crate::session::store::SessionStore;
+use crate::session::store::{SessionEntry, SessionStore};
 use crate::state::ConversationState;
 use crate::system_prompt::build_system_prompt;
+use crate::types::{Branch, BranchNode, SessionTree};
 use crate::{
     AppEvent, ErrorEvent, FormHiddenEvent, FormShownEvent, InitEvent, Message,
     MessageReceivedEvent, ModelId, ModelSelection, PendingClearedEvent, PendingMessage, ProviderId,
@@ -22,9 +23,64 @@ use tokio::sync::mpsc;
 use tokio::sync::{Mutex, broadcast, oneshot};
 use uuid::Uuid;
 
-// ---------------------------------------------------------------------------
-// ActiveSession — per-session in-memory state
-// ---------------------------------------------------------------------------
+/// Builds a `Branch` from `start_id` forward, forking into sub-branches when a node has multiple
+/// children.
+///
+/// `depth` is the nesting level of this branch and is stored on the returned `Branch`.
+fn build_branch(
+    entries: &HashMap<String, crate::session::store::SessionEntry>,
+    start_id: Option<String>,
+    depth: usize,
+) -> Branch {
+    let mut nodes = Vec::new();
+    let mut cursor = start_id;
+    while let Some(ref id) = cursor {
+        let node_id = id.clone();
+        let Some(SessionEntry::Message(m)) = entries.get(&node_id) else {
+            break;
+        };
+        let mut children: Vec<&SessionEntry> = entries
+            .values()
+            .filter(|e| e.parent_id() == Some(node_id.as_str()))
+            .collect();
+        children.sort_by_key(|e| e.id());
+        match children.len() {
+            0 => {
+                nodes.push(BranchNode {
+                    id: m.base.id.clone(),
+                    role: m.role,
+                    content: m.content.clone(),
+                    branches: vec![],
+                });
+                break;
+            }
+            1 => {
+                let next_id = children[0].id().to_string();
+                nodes.push(BranchNode {
+                    id: m.base.id.clone(),
+                    role: m.role,
+                    content: m.content.clone(),
+                    branches: vec![],
+                });
+                cursor = Some(next_id);
+            }
+            _ => {
+                let sub_branches = children
+                    .iter()
+                    .map(|c| build_branch(entries, Some(c.id().to_string()), depth + 1))
+                    .collect();
+                nodes.push(BranchNode {
+                    id: m.base.id.clone(),
+                    role: m.role,
+                    content: m.content.clone(),
+                    branches: sub_branches,
+                });
+                break;
+            }
+        }
+    }
+    Branch { depth, nodes }
+}
 
 pub struct ActiveSession {
     pub project_path: PathBuf,
@@ -84,6 +140,33 @@ impl ActiveSession {
 
     pub async fn clear_messages(&self) {
         self.state.lock().await.messages.clear();
+    }
+
+    pub async fn get_tree(&self) -> SessionTree {
+        let mgr = self.session_manager.lock().await;
+        let current_leaf_id = mgr.current_leaf_id.clone();
+        let entries: HashMap<String, crate::session::store::SessionEntry> = mgr
+            .all_entries()
+            .map(|e| (e.id().to_string(), e.clone()))
+            .collect();
+        let root_id = entries
+            .values()
+            .find(|e| e.parent_id().is_none())
+            .map(|e| e.id().to_string());
+        SessionTree {
+            current_leaf_id,
+            stem: build_branch(&entries, root_id, 0),
+        }
+    }
+
+    pub async fn branch(&self, entry_id: String) -> Result<()> {
+        let messages = {
+            let mut mgr = self.session_manager.lock().await;
+            mgr.branch(&entry_id)?;
+            mgr.context_messages()
+        };
+        self.state.lock().await.messages = messages;
+        Ok(())
     }
 
     pub async fn get_active_selection(&self) -> ModelSelection {
@@ -469,10 +552,6 @@ impl Drop for StreamingGuard {
     }
 }
 
-// ---------------------------------------------------------------------------
-// AppService — project registry + session lifecycle management
-// ---------------------------------------------------------------------------
-
 #[derive(Clone)]
 pub struct AppService {
     registry: Arc<ProjectRegistry>,
@@ -577,5 +656,158 @@ impl AppService {
                 dbg!("app.release_session.evicted", session_id);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::manager::SessionManager;
+    use crate::session::store::SessionEntry;
+    use tempfile::TempDir;
+
+    fn project_dir() -> TempDir {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".gantry").join("sessions")).unwrap();
+        tmp
+    }
+
+    fn entries_from_mgr(mgr: &SessionManager) -> HashMap<String, SessionEntry> {
+        mgr.all_entries()
+            .map(|e| (e.id().to_string(), e.clone()))
+            .collect()
+    }
+
+    fn build_branch_for_test(
+        mgr: &SessionManager,
+    ) -> (Branch, HashMap<String, SessionEntry>) {
+        let entries = entries_from_mgr(mgr);
+        let root_id = entries
+            .values()
+            .find(|e| e.parent_id().is_none())
+            .map(|e| e.id().to_string());
+        let branch = build_branch(&entries, root_id, 0);
+        (branch, entries)
+    }
+
+    #[test]
+    fn build_branch_empty() {
+        let entries = HashMap::new();
+        let branch = build_branch(&entries, None, 0);
+        assert!(branch.nodes.is_empty());
+    }
+
+    #[test]
+    fn build_branch_linear() {
+        let tmp = project_dir();
+        let mut mgr = SessionManager::create(tmp.path()).unwrap();
+        mgr.append(Role::User, "root".into()).unwrap();
+        mgr.append(Role::Assistant, "mid".into()).unwrap();
+        mgr.append(Role::User, "leaf".into()).unwrap();
+
+        let (branch, _) = build_branch_for_test(&mgr);
+
+        assert_eq!(branch.depth, 0);
+        assert_eq!(branch.nodes.len(), 3);
+        assert!(branch.nodes.iter().all(|n| n.branches.is_empty()));
+    }
+
+    #[test]
+    fn build_branch_two_children() {
+        let tmp = project_dir();
+        let mut mgr = SessionManager::create(tmp.path()).unwrap();
+        let root_id = mgr
+            .append(Role::User, "root".into())
+            .unwrap()
+            .base
+            .id
+            .clone();
+        mgr.append(Role::Assistant, "child A".into()).unwrap();
+        mgr.branch(&root_id).unwrap();
+        mgr.append(Role::Assistant, "child B".into()).unwrap();
+
+        let (branch, _) = build_branch_for_test(&mgr);
+
+        assert_eq!(branch.depth, 0);
+        assert_eq!(branch.nodes.len(), 1);
+        assert_eq!(branch.nodes[0].content, "root");
+        assert_eq!(branch.nodes[0].branches.len(), 2);
+        assert_eq!(branch.nodes[0].branches[0].depth, 1);
+        assert_eq!(branch.nodes[0].branches[0].nodes.len(), 1);
+        assert_eq!(branch.nodes[0].branches[1].depth, 1);
+        assert_eq!(branch.nodes[0].branches[1].nodes.len(), 1);
+    }
+
+    #[test]
+    fn build_branch_linear_then_fork() {
+        let tmp = project_dir();
+        let mut mgr = SessionManager::create(tmp.path()).unwrap();
+        mgr.append(Role::User, "root".into()).unwrap();
+        let mid_id = mgr
+            .append(Role::Assistant, "mid".into())
+            .unwrap()
+            .base
+            .id
+            .clone();
+        mgr.append(Role::User, "child A".into()).unwrap();
+        mgr.branch(&mid_id).unwrap();
+        mgr.append(Role::User, "child B".into()).unwrap();
+
+        let (branch, _) = build_branch_for_test(&mgr);
+
+        assert_eq!(branch.depth, 0);
+        assert_eq!(branch.nodes.len(), 2);
+        assert_eq!(branch.nodes[0].content, "root");
+        assert!(branch.nodes[0].branches.is_empty());
+        assert_eq!(branch.nodes[1].content, "mid");
+        assert_eq!(branch.nodes[1].branches.len(), 2);
+        assert_eq!(branch.nodes[1].branches[0].depth, 1);
+        assert_eq!(branch.nodes[1].branches[1].depth, 1);
+    }
+
+    #[test]
+    fn build_branch_deep_nest() {
+        let tmp = project_dir();
+        let mut mgr = SessionManager::create(tmp.path()).unwrap();
+        let root_id = mgr
+            .append(Role::User, "root".into())
+            .unwrap()
+            .base
+            .id
+            .clone();
+        // Branch 1: root -> A -> fork(B, C)
+        mgr.append(Role::Assistant, "A".into()).unwrap();
+        let a_id = mgr.current_leaf_id.clone().unwrap();
+        mgr.append(Role::User, "B".into()).unwrap();
+        mgr.branch(&a_id).unwrap();
+        mgr.append(Role::User, "C".into()).unwrap();
+        // Branch 2: root -> D
+        mgr.branch(&root_id).unwrap();
+        mgr.append(Role::Assistant, "D".into()).unwrap();
+
+        let (branch, _) = build_branch_for_test(&mgr);
+
+        // root has 2 children (A and D) → branches list of 2
+        assert_eq!(branch.nodes.len(), 1);
+        assert_eq!(branch.nodes[0].branches.len(), 2);
+
+        // One sub-branch contains A (depth=1) which itself forks into B and C
+        let sub_with_a = branch.nodes[0]
+            .branches
+            .iter()
+            .find(|b| b.nodes[0].content == "A")
+            .unwrap();
+        assert_eq!(sub_with_a.depth, 1);
+        assert_eq!(sub_with_a.nodes[0].branches.len(), 2);
+        assert_eq!(sub_with_a.nodes[0].branches[0].depth, 2);
+
+        // Other sub-branch contains D (depth=1) with no children
+        let sub_with_d = branch.nodes[0]
+            .branches
+            .iter()
+            .find(|b| b.nodes[0].content == "D")
+            .unwrap();
+        assert_eq!(sub_with_d.depth, 1);
+        assert!(sub_with_d.nodes[0].branches.is_empty());
     }
 }

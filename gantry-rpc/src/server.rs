@@ -295,6 +295,48 @@ impl GantryRpcServer for RpcApp {
         dbg!("rpc.ping.request");
         Ok(())
     }
+
+    async fn get_tree(&self) -> RpcResult<gantry_core::SessionTree> {
+        dbg!("rpc.get_tree.request");
+        let (session_id, project_path) = self
+            .session
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| invalid_request("no session selected; call bind_session first"))?;
+
+        let session = self
+            .app
+            .get_or_load_session(&project_path, &session_id)
+            .await
+            .map_err(|e| internal_error(e.to_string()))?;
+
+        let branch = session.get_tree().await;
+        Ok(branch)
+    }
+
+    async fn branch(&self, entry_id: String) -> RpcResult<()> {
+        dbg!("rpc.branch.request", &entry_id);
+        let (session_id, project_path) = self
+            .session
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| invalid_request("no session selected; call bind_session first"))?;
+
+        let session = self
+            .app
+            .get_or_load_session(&project_path, &session_id)
+            .await
+            .map_err(|e| internal_error(e.to_string()))?;
+
+        session
+            .branch(entry_id)
+            .await
+            .map_err(|e| internal_error(e.to_string()))?;
+        dbg!("rpc.branch.done");
+        Ok(())
+    }
 }
 
 pub async fn start_rpc_server<Context>(

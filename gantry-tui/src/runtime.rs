@@ -191,6 +191,17 @@ impl Runtime {
                 self.model.chat.finish_streaming();
                 return None;
             }
+            Msg::BranchTo(ref entry_id) => {
+                self.spawn_branch(entry_id.clone());
+                return None;
+            }
+            Msg::BranchToWithInput {
+                ref branch_id,
+                ref input,
+            } => {
+                self.spawn_branch_with_input(branch_id.clone(), input.clone());
+                return None;
+            }
             Msg::SendMessage(ref input) => {
                 self.spawn_send_message(input.clone());
             }
@@ -284,6 +295,54 @@ impl Runtime {
                         })
                         .await;
                     return;
+                }
+            }
+        });
+    }
+
+    fn spawn_branch(&mut self, entry_id: String) {
+        let tx = self.msg_tx.clone();
+        let Some(client) = self.client.clone() else {
+            let _ = self.msg_tx.try_send(Msg::SetStatus("Not connected".into()));
+            return;
+        };
+        self.rt.spawn(async move {
+            if let Err(e) = client.branch(entry_id).await {
+                let _ = tx
+                    .send(Msg::SetStatus(format!("branch failed: {}", e)))
+                    .await;
+                return;
+            }
+            match client.get_messages().await {
+                Ok(messages) => {
+                    let _ = tx.send(Msg::ReloadMessages(messages)).await;
+                }
+                Err(e) => {
+                    let _ = tx.send(Msg::SetStatus(e.to_string())).await;
+                }
+            }
+        });
+    }
+
+    fn spawn_branch_with_input(&mut self, entry_id: String, input: String) {
+        let tx = self.msg_tx.clone();
+        let Some(client) = self.client.clone() else {
+            let _ = self.msg_tx.try_send(Msg::SetStatus("Not connected".into()));
+            return;
+        };
+        self.rt.spawn(async move {
+            if let Err(e) = client.branch(entry_id).await {
+                let _ = tx
+                    .send(Msg::SetStatus(format!("branch failed: {}", e)))
+                    .await;
+                return;
+            }
+            match client.get_messages().await {
+                Ok(messages) => {
+                    let _ = tx.send(Msg::ReloadMessagesWithInput(messages, input)).await;
+                }
+                Err(e) => {
+                    let _ = tx.send(Msg::SetStatus(e.to_string())).await;
                 }
             }
         });

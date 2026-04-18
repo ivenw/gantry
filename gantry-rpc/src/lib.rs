@@ -2,8 +2,8 @@ mod client;
 pub mod server;
 
 pub use gantry_core::{
-    AppEvent, Message, PendingMessage, SelectFormRequest, SelectFormResponse, SessionInfo,
-    StreamMessageRequest,
+    AppEvent, Branch, BranchNode, Message, PendingMessage, SelectFormRequest, SelectFormResponse,
+    SessionInfo, SessionTree, StreamMessageRequest,
 };
 use jsonrpsee::core::{RpcResult, SubscriptionResult};
 use jsonrpsee::proc_macros::rpc;
@@ -63,4 +63,10 @@ pub trait GantryRpc {
 
     #[method(name = "ping")]
     async fn ping(&self) -> RpcResult<()>;
+
+    #[method(name = "get_tree")]
+    async fn get_tree(&self) -> RpcResult<gantry_core::SessionTree>;
+
+    #[method(name = "branch")]
+    async fn branch(&self, entry_id: String) -> RpcResult<()>;
 }

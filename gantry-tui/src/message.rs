@@ -1,4 +1,4 @@
-use gantry_core::AppEvent;
+use gantry_core::{AppEvent, SessionTree};
 use gantry_rpc::{JsonRpcClient, WsConnectionEvent};
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
@@ -38,6 +38,16 @@ pub enum Msg {
 
     // Scroll the chat window (positive = up, negative = down)
     ScrollChat(i32),
+
+    // Tree view
+    OpenTreeView(SessionTree),
+    BranchTo(String),
+    BranchToWithInput {
+        branch_id: String,
+        input: String,
+    },
+    ReloadMessages(Vec<gantry_core::Message>),
+    ReloadMessagesWithInput(Vec<gantry_core::Message>, String),
 
     // Side-effect signals intercepted by Runtime before update()
     SendMessage(String),

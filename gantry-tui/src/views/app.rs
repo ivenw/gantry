@@ -5,6 +5,7 @@ use crate::views::command_picker::CommandPickerView;
 use crate::views::input::InputView;
 use crate::views::status_message::StatusMessageView;
 use crate::views::statusline::StatuslineView;
+use crate::views::tree::TreeViewWidget;
 
 use ratatui::{
     Frame,
@@ -13,6 +14,11 @@ use ratatui::{
 
 pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) {
     let area = frame.area();
+
+    if let Some(ref tv) = model.tree_view {
+        frame.render_widget(TreeViewWidget::new(tv), area);
+        return;
+    }
 
     let input_height = if let Some(ref picker) = model.command_picker {
         CommandPickerView::new(picker).calc_height(area.width)

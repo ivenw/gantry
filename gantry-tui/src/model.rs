@@ -1,4 +1,4 @@
-use gantry_core::{Message, Role};
+use gantry_core::{Branch, BranchNode, Message, Role, SessionTree};
 
 pub struct Model {
     pub session_id: String,
@@ -6,7 +6,16 @@ pub struct Model {
     pub chat: ChatModel,
     pub input: InputModel,
     pub command_picker: Option<CommandPicker>,
+    pub tree_view: Option<TreeView>,
     pub status_message: Option<String>,
+}
+
+pub struct TreeView {
+    pub tree: SessionTree,
+    /// Index into the DFS row order of the currently highlighted row.
+    pub selected_idx: usize,
+    /// First visible row index (scroll offset).
+    pub scroll_offset: usize,
 }
 
 pub enum ConnectionState {
@@ -55,6 +64,7 @@ impl Model {
             chat: ChatModel::new(),
             input: InputModel::new(),
             command_picker: None,
+            tree_view: None,
             status_message: None,
         }
     }
@@ -111,6 +121,62 @@ impl Model {
             .as_ref()
             .and_then(|p| p.filtered_commands().get(p.selected_idx).cloned())
     }
+
+    // Tree view mutations
+
+    pub fn is_tree_view_active(&self) -> bool {
+        self.tree_view.is_some()
+    }
+
+    pub fn activate_tree_view(&mut self, tree: SessionTree) {
+        let selected_idx = branch_rows(&tree.stem)
+            .iter()
+            .position(|(n, _)| Some(&n.id) == tree.current_leaf_id.as_ref())
+            .unwrap_or(0);
+        self.tree_view = Some(TreeView {
+            tree,
+            selected_idx,
+            scroll_offset: 0,
+        });
+    }
+
+    pub fn deactivate_tree_view(&mut self) {
+        self.tree_view = None;
+    }
+
+    pub fn move_tree_selection_up(&mut self) {
+        if let Some(ref mut tv) = self.tree_view {
+            tv.selected_idx = tv.selected_idx.saturating_sub(1);
+        }
+    }
+
+    pub fn move_tree_selection_down(&mut self) {
+        if let Some(ref mut tv) = self.tree_view {
+            let count = branch_rows(&tv.tree.stem).len();
+            if count > 0 {
+                tv.selected_idx = (tv.selected_idx + 1).min(count - 1);
+            }
+        }
+    }
+
+    pub fn selected_tree_node(&self) -> Option<&BranchNode> {
+        self.tree_view
+            .as_ref()
+            .and_then(|tv| branch_rows(&tv.tree.stem).into_iter().nth(tv.selected_idx))
+            .map(|(n, _)| n)
+    }
+}
+
+/// Flatten a `Branch` into a DFS-ordered list of `(node, depth)` pairs for row-indexed access.
+pub fn branch_rows(branch: &Branch) -> Vec<(&BranchNode, usize)> {
+    let mut rows = Vec::new();
+    for node in &branch.nodes {
+        rows.push((node, branch.depth));
+        for sub in &node.branches {
+            rows.extend(branch_rows(sub));
+        }
+    }
+    rows
 }
 
 impl ChatModel {

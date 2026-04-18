@@ -1,6 +1,7 @@
 pub mod health;
 pub mod new;
 pub mod quit;
+pub mod tree;
 
 use crate::message::Msg;
 use gantry_rpc::JsonRpcClient;
@@ -25,5 +26,6 @@ pub fn all_commands() -> Vec<Box<dyn Command>> {
         Box::new(health::Health),
         Box::new(new::New),
         Box::new(quit::Quit),
+        Box::new(tree::Tree),
     ]
 }

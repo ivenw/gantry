@@ -19,7 +19,8 @@ pub use service::AppService;
 pub use session::manager::SessionManager;
 pub use session::store::SessionInfo;
 pub use types::{
-    AppEvent, ErrorEvent, FormHiddenEvent, FormShownEvent, FormState, InitEvent, Message,
-    MessageReceivedEvent, PendingClearedEvent, PendingMessage, Role, SelectFormRequest,
-    SelectFormResponse, StreamEndEvent, StreamMessageRequest, StreamStartEvent, TokenEvent,
+    AppEvent, Branch, BranchNode, ErrorEvent, FormHiddenEvent, FormShownEvent, FormState,
+    InitEvent, Message, MessageReceivedEvent, PendingClearedEvent, PendingMessage, Role,
+    SelectFormRequest, SelectFormResponse, SessionTree, StreamEndEvent, StreamMessageRequest,
+    StreamStartEvent, TokenEvent,
 };

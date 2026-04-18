@@ -9,16 +9,6 @@ pub enum Role {
     Error,
 }
 
-impl Role {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Role::User => "You",
-            Role::Assistant => "Assistant",
-            Role::Error => "Error",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Message {
@@ -179,6 +169,33 @@ pub struct SelectFormResponse {
     pub success: bool,
     pub selected_by: Option<String>,
     pub message: Option<String>,
+}
+
+/// The full message tree for a session, including which node is the active conversation tip.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTree {
+    pub current_leaf_id: Option<String>,
+    pub stem: Branch,
+}
+
+/// An ordered sequence of nodes at a given nesting depth, with sub-branches forking off nodes
+/// that have multiple children.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Branch {
+    pub depth: usize,
+    pub nodes: Vec<BranchNode>,
+}
+
+/// A single message node in the tree, carrying any sub-branches that fork from it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchNode {
+    pub id: String,
+    pub role: Role,
+    pub content: String,
+    pub branches: Vec<Branch>,
 }
 
 fn parse_id(s: &str) -> u64 {

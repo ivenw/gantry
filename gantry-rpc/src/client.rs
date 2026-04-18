@@ -123,6 +123,14 @@ impl JsonRpcClient {
     pub async fn ping(&self) -> Result<()> {
         Ok(self.inner.ping().await?)
     }
+
+    pub async fn get_tree(&self) -> Result<gantry_core::SessionTree> {
+        Ok(self.inner.get_tree().await?)
+    }
+
+    pub async fn branch(&self, entry_id: String) -> Result<()> {
+        Ok(self.inner.branch(entry_id).await?)
+    }
 }
 
 impl Clone for JsonRpcClient {

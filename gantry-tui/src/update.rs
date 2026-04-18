@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use gantry_core::AppEvent;
 
 use crate::message::Msg;
-use crate::model::{CommandEntry, ConnectionState, Model};
+use crate::model::{CommandEntry, ConnectionState, Model, branch_rows};
 use crate::views::ViewState;
 
 pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg> {
@@ -61,7 +61,32 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
             None
         }
-        Msg::Quit | Msg::SendMessage(_) | Msg::InterruptStream | Msg::ExecuteCommand(_) => None,
+        Msg::OpenTreeView(nodes) => {
+            model.activate_tree_view(nodes);
+            None
+        }
+        Msg::ReloadMessages(messages) => {
+            model.chat.messages = messages;
+            model.chat.scroll_offset = 0;
+            model.chat.user_is_scrolling = false;
+            model.deactivate_tree_view();
+            None
+        }
+        Msg::ReloadMessagesWithInput(messages, input) => {
+            model.chat.messages = messages;
+            model.chat.scroll_offset = 0;
+            model.chat.user_is_scrolling = false;
+            model.input.value = input;
+            model.input.cursor = model.input.value.chars().count();
+            model.deactivate_tree_view();
+            None
+        }
+        Msg::Quit
+        | Msg::SendMessage(_)
+        | Msg::InterruptStream
+        | Msg::ExecuteCommand(_)
+        | Msg::BranchTo(_)
+        | Msg::BranchToWithInput { .. } => None,
     }
 }
 
@@ -127,6 +152,22 @@ fn handle_key(
         return None;
     }
 
+    if model.is_tree_view_active() {
+        return match key.code {
+            KeyCode::Esc => handle_esc(model),
+            KeyCode::Enter => handle_enter(model, key.modifiers),
+            KeyCode::Up => {
+                model.move_tree_selection_up();
+                None
+            }
+            KeyCode::Down => {
+                model.move_tree_selection_down();
+                None
+            }
+            _ => None,
+        };
+    }
+
     match key.code {
         KeyCode::Esc => handle_esc(model),
         KeyCode::Enter => handle_enter(model, key.modifiers),
@@ -187,7 +228,10 @@ fn handle_key(
 }
 
 fn handle_esc(model: &mut Model) -> Option<Msg> {
-    if model.status_message.is_some() {
+    if model.is_tree_view_active() {
+        model.deactivate_tree_view();
+        None
+    } else if model.status_message.is_some() {
         model.status_message = None;
         None
     } else if model.is_command_picker_active() {
@@ -202,6 +246,26 @@ fn handle_esc(model: &mut Model) -> Option<Msg> {
 }
 
 fn handle_enter(model: &mut Model, modifiers: KeyModifiers) -> Option<Msg> {
+    if model.is_tree_view_active() {
+        let node = model.selected_tree_node()?;
+        let msg = if node.role == gantry_core::Role::User {
+            let input = node.content.clone();
+            let tv = model.tree_view.as_ref()?;
+            let rows = branch_rows(&tv.tree.stem);
+            let preceding = rows[..tv.selected_idx]
+                .iter()
+                .rfind(|(n, _)| n.role != gantry_core::Role::User)
+                .map(|(n, _)| n.id.clone())?;
+            Msg::BranchToWithInput {
+                branch_id: preceding,
+                input,
+            }
+        } else {
+            Msg::BranchTo(node.id.clone())
+        };
+        return Some(msg);
+    }
+
     if model.status_message.is_some() {
         model.status_message = None;
         return None;
