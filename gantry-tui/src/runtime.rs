@@ -143,7 +143,7 @@ impl Runtime {
                 if let Some(old) = self.event_task.take() {
                     old.abort();
                 }
-                event_handle.abort();
+                drop(event_handle); // must drop (not abort) so the event producer keeps running
                 self.client = Some(Arc::new(client));
                 self.reconnect_pending = false;
                 self.spawn_ws_forwarder(event_rx);
@@ -168,7 +168,7 @@ impl Runtime {
                 if let Some(old) = self.event_task.take() {
                     old.abort();
                 }
-                event_handle.abort();
+                drop(event_handle); // must drop (not abort) so the event producer keeps running
                 self.client = Some(Arc::clone(&client));
                 self.spawn_ws_forwarder(event_rx);
                 return update(
@@ -280,7 +280,7 @@ impl Runtime {
                             session_id,
                             event_handle,
                             event_rx,
-                            clear_messages: false,
+                            clear_messages: true,
                         })
                         .await;
                     return;
