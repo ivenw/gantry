@@ -17,10 +17,7 @@ pub fn update(model: &mut Model, msg: Msg) -> Option<Msg> {
             model.chat.add_error_message(e);
             None
         }
-        Msg::StreamResult(Ok(())) => {
-            model.chat.finish_streaming();
-            None
-        }
+        Msg::StreamResult(Ok(())) => None,
         Msg::StreamResult(Err(e)) => {
             model.chat.finish_streaming();
             if is_connection_error(&e) {

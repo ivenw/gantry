@@ -201,26 +201,17 @@ impl Runtime {
             old.abort();
         }
         let tx = self.msg_tx.clone();
-        let addr = self.addr.clone();
-        let port = self.port;
-        let session_id = self.model.session_id.clone();
-        let project_path = self.project_path.clone();
+        let Some(client) = self.client.clone() else {
+            let _ = self.msg_tx.try_send(Msg::StreamResult(Err("not connected".into())));
+            return;
+        };
 
         let task = self.rt.spawn(async move {
-            let result = match JsonRpcClient::connect_ws(&addr, port).await {
-                Ok(client) => {
-                    if let Err(e) = client.bind_session(session_id, project_path).await {
-                        Err(format!("failed to connect session: {}", e))
-                    } else {
-                        client
-                            .stream_message(input)
-                            .await
-                            .map(|_| ())
-                            .map_err(|e| e.to_string())
-                    }
-                }
-                Err(e) => Err(e.to_string()),
-            };
+            let result = client
+                .stream_message(input)
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string());
             let _ = tx.send(Msg::StreamResult(result)).await;
         });
         self.stream_task = Some(task);
