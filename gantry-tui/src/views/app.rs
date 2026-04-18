@@ -33,7 +33,6 @@ pub fn render(frame: &mut Frame, model: &Model) {
 
     let chat = ChatViewState {
         messages: &model.chat.messages,
-        streaming_content: model.chat.streaming_content.as_deref(),
     };
     frame.render_widget(chat, chat_area);
 

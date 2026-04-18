@@ -13,7 +13,6 @@ const ASSISTANT_PREFIX: &str = "< ";
 
 pub struct ChatViewState<'a> {
     pub messages: &'a [Message],
-    pub streaming_content: Option<&'a str>,
 }
 
 impl ChatViewState<'_> {
@@ -36,11 +35,7 @@ impl ChatViewState<'_> {
         line_count.max(1) as u16
     }
 
-    fn last_assistant_idx(&self) -> Option<usize> {
-        self.messages
-            .iter()
-            .rposition(|m| m.role == Role::Assistant)
-    }
+
 }
 
 impl Widget for ChatViewState<'_> {
@@ -94,18 +89,7 @@ impl Widget for ChatViewState<'_> {
                 break;
             }
 
-            let is_last_assistant = message.role == Role::Assistant
-                && self.streaming_content.is_some()
-                && self
-                    .last_assistant_idx()
-                    .map(|idx| message.content == self.messages[idx].content)
-                    .unwrap_or(false);
-
-            let mut content = message.content.clone();
-
-            if is_last_assistant {
-                content.push('▍');
-            }
+            let content = message.content.clone();
 
             let style = match message.role {
                 Role::User => Style::default().fg(ratatui::style::Color::White),
