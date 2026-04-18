@@ -2,6 +2,7 @@ use crate::model::Model;
 use crate::views::chat::ChatViewState;
 use crate::views::command_picker::CommandPickerView;
 use crate::views::input::InputView;
+use crate::views::statusline::StatuslineView;
 
 use ratatui::{
     Frame,
@@ -25,11 +26,13 @@ pub fn render(frame: &mut Frame, model: &Model) {
             Constraint::Min(1),
             Constraint::Length(1),
             Constraint::Length(input_height),
+            Constraint::Length(1),
         ])
         .split(area);
 
     let chat_area = chunks[0];
     let input_area = chunks[2];
+    let statusline_area = chunks[3];
 
     let chat = ChatViewState {
         messages: &model.chat.messages,
@@ -43,4 +46,6 @@ pub fn render(frame: &mut Frame, model: &Model) {
     } else {
         frame.render_widget(InputView::new(&model.input.value), input_area);
     }
+
+    frame.render_widget(StatuslineView::new(), statusline_area);
 }
