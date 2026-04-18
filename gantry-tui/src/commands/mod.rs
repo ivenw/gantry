@@ -1,5 +1,6 @@
 pub mod health;
 pub mod new;
+pub mod quit;
 
 use crate::message::Msg;
 use gantry_rpc::JsonRpcClient;
@@ -20,5 +21,9 @@ pub trait Command: Send + Sync {
 }
 
 pub fn all_commands() -> Vec<Box<dyn Command>> {
-    vec![Box::new(health::Health), Box::new(new::New)]
+    vec![
+        Box::new(health::Health),
+        Box::new(new::New),
+        Box::new(quit::Quit),
+    ]
 }

@@ -78,7 +78,12 @@ impl Widget for InputView<'_> {
             .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray))
             .render(area, buf);
 
-        let content_area = Rect::new(area.x, area.y + 1, area.width, area.height.saturating_sub(BORDER_HEIGHT));
+        let content_area = Rect::new(
+            area.x,
+            area.y + 1,
+            area.width,
+            area.height.saturating_sub(BORDER_HEIGHT),
+        );
         if content_area.width == 0 || content_area.height == 0 {
             return;
         }

@@ -1,9 +1,10 @@
 use ratatui::{
     buffer::Buffer,
-    layout::Rect,
+    layout::{Margin, Rect},
     style::Style,
+    symbols::scrollbar::Set as ScrollbarSet,
     text::Text,
-    widgets::{Paragraph, Widget},
+    widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
 
 use gantry_core::{Message, Role};
@@ -13,6 +14,13 @@ const ASSISTANT_PREFIX: &str = "< ";
 
 pub struct ChatViewState<'a> {
     pub messages: &'a [Message],
+    pub scroll_offset: u16,
+}
+
+#[derive(Default)]
+pub struct ChatRenderState {
+    pub scrollbar: ScrollbarState,
+    pub max_scroll: u16,
 }
 
 impl ChatViewState<'_> {
@@ -34,12 +42,12 @@ impl ChatViewState<'_> {
 
         line_count.max(1) as u16
     }
-
-
 }
 
-impl Widget for ChatViewState<'_> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
+impl StatefulWidget for ChatViewState<'_> {
+    type State = ChatRenderState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         if self.messages.is_empty() {
             let text = "Type a message and press Enter to start...";
             let x = area.x + (area.width.saturating_sub(text.len() as u16)) / 2;
@@ -48,9 +56,10 @@ impl Widget for ChatViewState<'_> {
             return;
         }
 
-        let gap = 1;
+        let gap = 1u16;
 
-        let total_height: u16 = self
+        // Compute per-message heights.
+        let heights: Vec<u16> = self
             .messages
             .iter()
             .map(|m| {
@@ -61,36 +70,52 @@ impl Widget for ChatViewState<'_> {
                 };
                 Self::calc_msg_height(&m.content, text_width)
             })
-            .sum();
+            .collect();
 
-        let total_with_gaps = total_height + ((self.messages.len() as u16 - 1) * gap);
-        let start_y = if total_with_gaps < area.height {
-            area.bottom().saturating_sub(total_with_gaps)
-        } else {
-            area.y
-        };
+        let total_content: u16 =
+            heights.iter().sum::<u16>() + (self.messages.len() as u16).saturating_sub(1) * gap;
 
-        let mut y = start_y;
+        let max_scroll = total_content.saturating_sub(area.height);
+        // scroll is the top-down viewport offset into virtual content.
+        // scroll_offset=0 → pinned to bottom → scroll=max_scroll.
+        // scroll_offset=max_scroll → scrolled to top → scroll=0.
+        let clamped_offset = self.scroll_offset.min(max_scroll);
+        let scroll = max_scroll - clamped_offset;
 
-        for message in self.messages {
-            if y >= area.bottom() {
+        // When content fits the viewport, pad from the top so messages sit at the bottom.
+        let virtual_start: u16 = area.height.saturating_sub(total_content);
+
+        // The viewport shows virtual lines [scroll, scroll + area.height).
+        // Map a virtual line to a screen row: screen_row = area.y + virtual_line - scroll.
+        // A message at virtual line `vline` with height `h` occupies virtual rows
+        // [vline, vline + h).  We render only the portion that falls inside the viewport.
+
+        let mut vline = virtual_start;
+
+        for (i, message) in self.messages.iter().enumerate() {
+            let msg_height = heights[i];
+
+            let vline_end = vline + msg_height;
+
+            // Skip messages entirely above the viewport.
+            if vline_end <= scroll {
+                vline += msg_height + gap;
+                continue;
+            }
+
+            // Stop once past the bottom of the viewport.
+            if vline >= scroll + area.height {
                 break;
             }
 
-            let text_width = match message.role {
-                Role::User => area.width.saturating_sub(USER_PREFIX.len() as u16),
-                Role::Assistant => area.width.saturating_sub(ASSISTANT_PREFIX.len() as u16),
-                _ => area.width.saturating_sub(2),
-            };
+            // Portion of this message visible in the viewport.
+            let clip_top = scroll.saturating_sub(vline);
+            let visible_lines =
+                (msg_height - clip_top).min(scroll + area.height - (vline + clip_top));
 
-            let msg_height = Self::calc_msg_height(&message.content, text_width);
-
-            if y + msg_height > area.bottom() {
-                break;
-            }
+            let screen_y = area.y + (vline + clip_top).saturating_sub(scroll);
 
             let content = message.content.clone();
-
             let style = match message.role {
                 Role::User => Style::default().fg(ratatui::style::Color::White),
                 Role::Assistant => Style::default(),
@@ -98,54 +123,82 @@ impl Widget for ChatViewState<'_> {
             };
 
             if message.role == Role::User {
-                let prefix_x = area.x;
-                let text_x = prefix_x + USER_PREFIX.len() as u16;
+                let text_width = area.width.saturating_sub(USER_PREFIX.len() as u16);
                 let text_area = Rect::new(
-                    text_x,
-                    y,
-                    area.width.saturating_sub(USER_PREFIX.len() as u16),
-                    msg_height,
+                    area.x + USER_PREFIX.len() as u16,
+                    screen_y,
+                    text_width,
+                    visible_lines,
                 );
                 buf.set_string(
-                    prefix_x,
-                    y,
+                    area.x,
+                    screen_y,
                     USER_PREFIX,
                     Style::default().fg(ratatui::style::Color::LightGreen),
                 );
-
                 let paragraph = Paragraph::new(Text::raw(&content))
                     .style(style)
-                    .wrap(ratatui::widgets::Wrap { trim: false });
+                    .wrap(ratatui::widgets::Wrap { trim: false })
+                    .scroll((clip_top, 0));
                 paragraph.render(text_area, buf);
             } else if message.role == Role::Assistant {
-                let prefix_x = area.x;
-                let text_x = prefix_x + ASSISTANT_PREFIX.len() as u16;
+                let text_width = area.width.saturating_sub(ASSISTANT_PREFIX.len() as u16);
                 let text_area = Rect::new(
-                    text_x,
-                    y,
-                    area.width.saturating_sub(ASSISTANT_PREFIX.len() as u16),
-                    msg_height,
+                    area.x + ASSISTANT_PREFIX.len() as u16,
+                    screen_y,
+                    text_width,
+                    visible_lines,
                 );
                 buf.set_string(
-                    prefix_x,
-                    y,
+                    area.x,
+                    screen_y,
                     ASSISTANT_PREFIX,
                     Style::default().fg(ratatui::style::Color::DarkGray),
                 );
-
                 let paragraph = Paragraph::new(Text::raw(&content))
                     .style(style)
-                    .wrap(ratatui::widgets::Wrap { trim: false });
+                    .wrap(ratatui::widgets::Wrap { trim: false })
+                    .scroll((clip_top, 0));
                 paragraph.render(text_area, buf);
             } else {
+                let msg_area = Rect::new(area.x, screen_y, area.width, visible_lines);
                 let paragraph = Paragraph::new(Text::raw(&content))
                     .style(style)
-                    .wrap(ratatui::widgets::Wrap { trim: false });
-                let msg_area = Rect::new(area.x, y, area.width, msg_height);
+                    .wrap(ratatui::widgets::Wrap { trim: false })
+                    .scroll((clip_top, 0));
                 paragraph.render(msg_area, buf);
             }
 
-            y += msg_height + gap;
+            vline += msg_height + gap;
+        }
+
+        // Write max_scroll back so update.rs can clamp scroll_offset.
+        state.max_scroll = max_scroll;
+
+        // Update and render the scrollbar whenever content overflows, regardless of scroll position.
+        if max_scroll > 0 {
+            // scroll is top-down; thumb at bottom when scroll_offset=0.
+            state.scrollbar = state
+                .scrollbar
+                .content_length(max_scroll as usize)
+                .position(scroll as usize);
+            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .symbols(ScrollbarSet {
+                    track: "",
+                    thumb: "▌",
+                    begin: "",
+                    end: "",
+                })
+                .thumb_style(Style::default().fg(ratatui::style::Color::DarkGray));
+            StatefulWidget::render(
+                scrollbar,
+                area.inner(Margin {
+                    vertical: 0,
+                    horizontal: 0,
+                }),
+                buf,
+                &mut state.scrollbar,
+            );
         }
     }
 }

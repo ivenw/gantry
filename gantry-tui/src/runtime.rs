@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crossterm::event::{Event, KeyEventKind};
+use crossterm::event::{Event, KeyEventKind, MouseEventKind};
 use gantry_rpc::{JsonRpcClient, WsConnectionEvent};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
@@ -74,20 +74,32 @@ impl Runtime {
     }
 
     pub fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
-        terminal.draw(|f| views::render(f, &self.model))?;
+        terminal.draw(|f| views::render(f, &mut self.model))?;
 
         loop {
-            if crossterm::event::poll(Duration::from_millis(10))?
-                && let Event::Key(key) = crossterm::event::read()?
-                && key.kind == KeyEventKind::Press
-            {
-                use crossterm::event::{KeyCode, KeyModifiers};
-                if key.code == KeyCode::Char('c')
-                    && key.modifiers.contains(KeyModifiers::CONTROL)
-                {
-                    return Ok(());
+            if crossterm::event::poll(Duration::from_millis(10))? {
+                match crossterm::event::read()? {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        use crossterm::event::{KeyCode, KeyModifiers};
+                        if key.code == KeyCode::Char('c')
+                            && key.modifiers.contains(KeyModifiers::CONTROL)
+                        {
+                            return Ok(());
+                        }
+                        let _ = self.msg_tx.try_send(Msg::Key(key));
+                    }
+                    Event::Mouse(mouse) => {
+                        let delta: i32 = match mouse.kind {
+                            MouseEventKind::ScrollUp => 1,
+                            MouseEventKind::ScrollDown => -1,
+                            _ => 0,
+                        };
+                        if delta != 0 {
+                            let _ = self.msg_tx.try_send(Msg::ScrollChat(delta));
+                        }
+                    }
+                    _ => {}
                 }
-                let _ = self.msg_tx.try_send(Msg::Key(key));
             }
 
             let mut needs_redraw = false;
@@ -99,7 +111,7 @@ impl Runtime {
             }
 
             if needs_redraw {
-                terminal.draw(|f| views::render(f, &self.model))?;
+                terminal.draw(|f| views::render(f, &mut self.model))?;
             }
         }
     }
@@ -202,7 +214,9 @@ impl Runtime {
         }
         let tx = self.msg_tx.clone();
         let Some(client) = self.client.clone() else {
-            let _ = self.msg_tx.try_send(Msg::StreamResult(Err("not connected".into())));
+            let _ = self
+                .msg_tx
+                .try_send(Msg::StreamResult(Err("not connected".into())));
             return;
         };
 

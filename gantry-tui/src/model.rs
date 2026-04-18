@@ -1,3 +1,4 @@
+use crate::views::chat::ChatRenderState;
 use gantry_core::{Message, Role};
 
 pub struct Model {
@@ -21,6 +22,11 @@ pub struct ChatModel {
     pub streaming_message_idx: Option<usize>,
     pub streaming_buffer: String,
     pub show_form: bool,
+    /// Number of lines scrolled up from the bottom (0 = pinned to bottom).
+    pub scroll_offset: u16,
+    /// True while the user has manually scrolled up; suppresses auto-scroll-to-bottom.
+    pub user_is_scrolling: bool,
+    pub render_state: ChatRenderState,
 }
 
 pub struct InputModel {
@@ -116,6 +122,9 @@ impl ChatModel {
             streaming_message_idx: None,
             streaming_buffer: String::new(),
             show_form: false,
+            scroll_offset: 0,
+            user_is_scrolling: false,
+            render_state: ChatRenderState::default(),
         }
     }
 
@@ -176,6 +185,8 @@ impl ChatModel {
         self.streaming_buffer.clear();
         self.pending_message_id = None;
         self.show_form = false;
+        self.scroll_offset = 0;
+        self.user_is_scrolling = false;
     }
 }
 

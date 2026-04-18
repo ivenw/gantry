@@ -53,6 +53,13 @@ pub fn update(model: &mut Model, msg: Msg) -> Option<Msg> {
             None
         }
         Msg::Key(key) => handle_key(model, key),
+        Msg::ScrollChat(delta) => {
+            let max = model.chat.render_state.max_scroll;
+            let offset = model.chat.scroll_offset as i32 + delta;
+            model.chat.scroll_offset = offset.clamp(0, max as i32) as u16;
+            model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
+            None
+        }
         Msg::Quit | Msg::SendMessage(_) | Msg::InterruptStream | Msg::ExecuteCommand(_) => None,
     }
 }
@@ -76,9 +83,15 @@ fn handle_app_event(model: &mut Model, event: AppEvent) -> Option<Msg> {
         AppEvent::StreamStart(_) => {}
         AppEvent::Token(ev) => {
             model.chat.append_to_streaming(&ev.delta);
+            if !model.chat.user_is_scrolling {
+                model.chat.scroll_offset = 0;
+            }
         }
         AppEvent::StreamEnd(_) => {
             model.chat.finish_streaming();
+            if !model.chat.user_is_scrolling {
+                model.chat.scroll_offset = 0;
+            }
         }
         AppEvent::PendingCleared(_) => {
             model.chat.pending_message_id = None;
@@ -100,13 +113,11 @@ fn handle_key(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg>
     if let KeyCode::Char('c') = key.code
         && key.modifiers.contains(KeyModifiers::CONTROL)
     {
-        return Some(Msg::Quit);
+        model.input.clear();
+        return None;
     }
 
     match key.code {
-        KeyCode::Char('q') if !model.is_command_picker_active() && model.input.value.is_empty() => {
-            Some(Msg::Quit)
-        }
         KeyCode::Esc => handle_esc(model),
         KeyCode::Enter => handle_enter(model, key.modifiers),
         KeyCode::Char(c) => {
@@ -133,6 +144,10 @@ fn handle_key(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg>
             if model.is_command_picker_active() {
                 model.move_command_selection_up();
                 update_input_from_selection(model);
+            } else {
+                let max = model.chat.render_state.max_scroll;
+                model.chat.scroll_offset = model.chat.scroll_offset.saturating_add(1).min(max);
+                model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
             }
             None
         }
@@ -140,7 +155,21 @@ fn handle_key(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg>
             if model.is_command_picker_active() {
                 model.move_command_selection_down();
                 update_input_from_selection(model);
+            } else {
+                model.chat.scroll_offset = model.chat.scroll_offset.saturating_sub(1);
+                model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
             }
+            None
+        }
+        KeyCode::PageUp => {
+            let max = model.chat.render_state.max_scroll;
+            model.chat.scroll_offset = model.chat.scroll_offset.saturating_add(10).min(max);
+            model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
+            None
+        }
+        KeyCode::PageDown => {
+            model.chat.scroll_offset = model.chat.scroll_offset.saturating_sub(10);
+            model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
             None
         }
         _ => None,
@@ -203,6 +232,8 @@ fn handle_enter(model: &mut Model, modifiers: KeyModifiers) -> Option<Msg> {
     model.input.clear();
     model.chat.add_user_message(input.clone());
     model.chat.start_streaming_message();
+    model.chat.scroll_offset = 0;
+    model.chat.user_is_scrolling = false;
     Some(Msg::SendMessage(input))
 }
 

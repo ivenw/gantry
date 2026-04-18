@@ -9,8 +9,8 @@ mod views;
 use anyhow::{Result, anyhow};
 use crossterm::{
     event::{
-        DisableBracketedPaste, EnableBracketedPaste, KeyboardEnhancementFlags,
-        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
 };
@@ -57,7 +57,7 @@ impl TerminalGuard {
     fn enter() -> Result<(Self, Terminal<CrosstermBackend<io::Stdout>>)> {
         execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
         crossterm::terminal::enable_raw_mode()?;
-        execute!(io::stdout(), EnableBracketedPaste)?;
+        execute!(io::stdout(), EnableBracketedPaste, EnableMouseCapture)?;
 
         let keyboard_enhancement_enabled = matches!(
             crossterm::terminal::supports_keyboard_enhancement(),
@@ -93,7 +93,7 @@ impl Drop for TerminalGuard {
             let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
         }
         let _ = crossterm::terminal::disable_raw_mode();
-        let _ = execute!(io::stdout(), DisableBracketedPaste);
+        let _ = execute!(io::stdout(), DisableBracketedPaste, DisableMouseCapture);
         let _ = execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen);
     }
 }

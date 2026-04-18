@@ -36,6 +36,9 @@ pub enum Msg {
         event_rx: Receiver<WsConnectionEvent>,
     },
 
+    // Scroll the chat window (positive = up, negative = down)
+    ScrollChat(i32),
+
     // Side-effect signals intercepted by Runtime before update()
     SendMessage(String),
     InterruptStream,
