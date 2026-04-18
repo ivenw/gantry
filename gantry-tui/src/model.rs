@@ -33,10 +33,11 @@ pub struct CommandPicker {
     pub selected_idx: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct CommandEntry {
     pub name: String,
     pub description: String,
+    pub command: std::sync::Arc<dyn crate::commands::Command>,
 }
 
 impl Model {

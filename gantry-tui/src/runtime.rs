@@ -156,8 +156,8 @@ impl Runtime {
                     },
                 );
             }
-            Msg::ExecuteCommand(ref name) => {
-                self.execute_command(name.clone());
+            Msg::ExecuteCommand(ref cmd) => {
+                self.execute_command(cmd.clone());
                 return None;
             }
             Msg::InterruptStream => {
@@ -270,19 +270,14 @@ impl Runtime {
         });
     }
 
-    fn execute_command(&mut self, name: String) {
+    fn execute_command(&mut self, cmd: std::sync::Arc<dyn crate::commands::Command>) {
         let ctx = crate::commands::CommandContext {
             client: self.client.clone(),
             project_path: self.project_path.clone(),
             msg_tx: self.msg_tx.clone(),
             rt_handle: self.rt.handle().clone(),
         };
-        if let Some(cmd) = crate::commands::all_commands()
-            .into_iter()
-            .find(|c| c.name() == name)
-        {
-            cmd.execute(ctx);
-        }
+        cmd.execute(ctx);
     }
 }
 

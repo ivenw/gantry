@@ -39,6 +39,6 @@ pub enum Msg {
     // Side-effect signals intercepted by Runtime before update()
     SendMessage(String),
     InterruptStream,
-    ExecuteCommand(String),
+    ExecuteCommand(std::sync::Arc<dyn crate::commands::Command>),
     Quit,
 }

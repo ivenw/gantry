@@ -163,7 +163,7 @@ fn handle_enter(model: &mut Model, modifiers: KeyModifiers) -> Option<Msg> {
         let selected = model.selected_command();
         model.input.value.clear();
         model.deactivate_command_picker();
-        return selected.map(|cmd| Msg::ExecuteCommand(cmd.name));
+        return selected.map(|cmd| Msg::ExecuteCommand(cmd.command));
     }
 
     if modifiers.contains(KeyModifiers::SHIFT) {
@@ -247,10 +247,14 @@ fn input_filter(input: &str) -> String {
 
 pub fn available_command_entries() -> Vec<CommandEntry> {
     crate::commands::all_commands()
-        .iter()
-        .map(|c| CommandEntry {
-            name: c.name().to_string(),
-            description: c.description().to_string(),
+        .into_iter()
+        .map(|c| {
+            let c: std::sync::Arc<dyn crate::commands::Command> = c.into();
+            CommandEntry {
+                name: c.name().to_string(),
+                description: c.description().to_string(),
+                command: c,
+            }
         })
         .collect()
 }
