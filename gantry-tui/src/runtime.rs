@@ -80,12 +80,6 @@ impl Runtime {
             if crossterm::event::poll(Duration::from_millis(10))? {
                 match crossterm::event::read()? {
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
-                        use crossterm::event::{KeyCode, KeyModifiers};
-                        if key.code == KeyCode::Char('c')
-                            && key.modifiers.contains(KeyModifiers::CONTROL)
-                        {
-                            return Ok(());
-                        }
                         let _ = self.msg_tx.try_send(Msg::Key(key));
                     }
                     Event::Mouse(mouse) => {
