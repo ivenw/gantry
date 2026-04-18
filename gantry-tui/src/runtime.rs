@@ -81,6 +81,12 @@ impl Runtime {
                 && let Event::Key(key) = crossterm::event::read()?
                 && key.kind == KeyEventKind::Press
             {
+                use crossterm::event::{KeyCode, KeyModifiers};
+                if key.code == KeyCode::Char('c')
+                    && key.modifiers.contains(KeyModifiers::CONTROL)
+                {
+                    return Ok(());
+                }
                 let _ = self.msg_tx.try_send(Msg::Key(key));
             }
 
