@@ -20,6 +20,8 @@ pub struct ChatModel {
     pub streaming_content: Option<String>,
     pub streaming_message_idx: Option<usize>,
     pub streaming_buffer: String,
+    /// False until the first content is flushed — delays the assistant message from appearing.
+    pub streaming_message_pushed: bool,
     pub show_form: bool,
     /// Number of lines scrolled up from the bottom (0 = pinned to bottom).
     pub scroll_offset: u16,
@@ -119,6 +121,7 @@ impl ChatModel {
             streaming_content: None,
             streaming_message_idx: None,
             streaming_buffer: String::new(),
+            streaming_message_pushed: false,
             show_form: false,
             scroll_offset: 0,
             user_is_scrolling: false,
@@ -136,18 +139,25 @@ impl ChatModel {
     pub fn start_streaming_message(&mut self) {
         self.streaming_content = Some(String::new());
         self.streaming_message_idx = Some(self.messages.len());
-        self.messages
-            .push(Message::new(Role::Assistant, String::new()));
+        self.streaming_message_pushed = false;
+        // The actual message is not pushed until the first content is flushed,
+        // so the assistant prefix doesn't appear before any text arrives.
     }
 
     pub fn append_to_streaming(&mut self, content: &str) {
-        if let Some(ref mut streaming) = self.streaming_content {
-            self.streaming_buffer.push_str(content);
-            while let Some(newline_idx) = self.streaming_buffer.find('\n') {
-                let line = self
-                    .streaming_buffer
-                    .drain(..=newline_idx)
-                    .collect::<String>();
+        if self.streaming_content.is_none() {
+            return;
+        }
+        self.streaming_buffer.push_str(content);
+        while let Some(newline_idx) = self.streaming_buffer.find('\n') {
+            let line: String = self.streaming_buffer.drain(..=newline_idx).collect();
+            if let Some(ref mut streaming) = self.streaming_content {
+                // Push the message on first flush.
+                if !self.streaming_message_pushed {
+                    self.messages
+                        .push(Message::new(Role::Assistant, String::new()));
+                    self.streaming_message_pushed = true;
+                }
                 streaming.push_str(&line);
                 if let Some(idx) = self.streaming_message_idx
                     && idx < self.messages.len()
@@ -162,6 +172,11 @@ impl ChatModel {
         if !self.streaming_buffer.is_empty()
             && let Some(ref mut streaming) = self.streaming_content
         {
+            if !self.streaming_message_pushed {
+                self.messages
+                    .push(Message::new(Role::Assistant, String::new()));
+                self.streaming_message_pushed = true;
+            }
             streaming.push_str(&self.streaming_buffer);
             if let Some(idx) = self.streaming_message_idx
                 && idx < self.messages.len()
@@ -172,6 +187,7 @@ impl ChatModel {
         self.streaming_content = None;
         self.streaming_message_idx = None;
         self.streaming_buffer.clear();
+        self.streaming_message_pushed = false;
         self.pending_message_id = None;
     }
 
@@ -180,6 +196,7 @@ impl ChatModel {
         self.streaming_content = None;
         self.streaming_message_idx = None;
         self.streaming_buffer.clear();
+        self.streaming_message_pushed = false;
         self.pending_message_id = None;
         self.show_form = false;
         self.scroll_offset = 0;

@@ -70,7 +70,8 @@ fn handle_app_event(model: &mut Model, event: AppEvent) -> Option<Msg> {
         AppEvent::Init(ev) => {
             // Don't overwrite state if a message send is already in flight (e.g. Init
             // arriving from a reconnect subscribe while the user already sent a message).
-            if model.chat.pending_message_id.is_none() && model.chat.streaming_message_idx.is_none() {
+            if model.chat.pending_message_id.is_none() && model.chat.streaming_message_idx.is_none()
+            {
                 model.chat.messages = ev.messages;
                 if let Some(pending) = ev.pending_message {
                     model.chat.add_user_message(pending.content.clone());
