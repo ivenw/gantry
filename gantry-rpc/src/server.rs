@@ -1,8 +1,5 @@
 use anyhow::Result;
-use gantry_core::{
-    AppEvent, AppService, Message, PendingMessage, SelectFormRequest, SelectFormResponse,
-    SessionInfo, StreamMessageRequest,
-};
+use gantry_core::{AppEvent, AppService, Message, PendingMessage, SessionInfo, StreamMessageRequest};
 use jsonrpsee::RpcModule;
 use jsonrpsee::core::{RpcResult, SubscriptionResult, async_trait};
 use jsonrpsee::server::{
@@ -209,26 +206,6 @@ impl GantryRpcServer for RpcApp {
         }
         dbg!("rpc.subscribe_events.ended");
         Ok(())
-    }
-
-    async fn select_form(&self, req: SelectFormRequest) -> RpcResult<SelectFormResponse> {
-        dbg!("rpc.select_form.request", &req.form_id, &req.selection);
-        let (session_id, project_path) = self
-            .session
-            .lock()
-            .await
-            .clone()
-            .ok_or_else(|| invalid_request("no session selected; call bind_session first"))?;
-
-        let session = self
-            .app
-            .get_or_load_session(&project_path, &session_id)
-            .await
-            .map_err(|e| internal_error(e.to_string()))?;
-
-        let response = session.select_form(req.form_id, req.selection).await;
-        dbg!("rpc.select_form.response", &response);
-        Ok(response)
     }
 
     async fn get_messages(&self) -> RpcResult<Vec<Message>> {

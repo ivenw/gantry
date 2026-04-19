@@ -1,86 +1,23 @@
 use crate::agent_factory::RigAgentFactory;
+use crate::chat::events::{AppEvent, InitEvent, StreamMessageRequest};
+use crate::chat::stream::{interrupt_stream, stream_message, to_rig_messages};
+use crate::chat::{Message, PendingMessage, Role};
 use crate::event_bus::EventBus;
 use crate::project_registry::ProjectRegistry;
 use crate::resource_loader::discover_agents_md;
 use crate::session::manager::SessionManager;
-use crate::session::store::{SessionEntry, SessionStore};
-use crate::state::ConversationState;
+use crate::session::state::ConversationState;
+use crate::session::store::SessionStore;
+use crate::session::tree::{build_branch, SessionTree};
 use crate::system_prompt::build_system_prompt;
-use crate::types::{Branch, BranchNode, SessionTree};
-use crate::{
-    AppEvent, ErrorEvent, FormHiddenEvent, FormShownEvent, InitEvent, Message,
-    MessageReceivedEvent, ModelId, ModelSelection, PendingClearedEvent, PendingMessage, ProviderId,
-    Role, SelectFormResponse, SessionInfo, StreamEndEvent, StreamMessageRequest, StreamStartEvent,
-    TokenEvent,
-};
+use crate::{ModelId, ModelSelection, ProviderId, SessionInfo};
 use anyhow::Result;
-use rig::message::Message as RigMessage;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::mpsc;
-use tokio::sync::{Mutex, broadcast, oneshot};
+use tokio::sync::{broadcast, Mutex, oneshot};
 use uuid::Uuid;
-
-/// Builds a `Branch` from `start_id` forward, forking into sub-branches when a node has multiple
-/// children.
-///
-/// `depth` is the nesting level of this branch and is stored on the returned `Branch`.
-fn build_branch(
-    entries: &HashMap<String, crate::session::store::SessionEntry>,
-    start_id: Option<String>,
-    depth: usize,
-) -> Branch {
-    let mut nodes = Vec::new();
-    let mut cursor = start_id;
-    while let Some(ref id) = cursor {
-        let node_id = id.clone();
-        let Some(SessionEntry::Message(m)) = entries.get(&node_id) else {
-            break;
-        };
-        let mut children: Vec<&SessionEntry> = entries
-            .values()
-            .filter(|e| e.parent_id() == Some(node_id.as_str()))
-            .collect();
-        children.sort_by_key(|e| e.id());
-        match children.len() {
-            0 => {
-                nodes.push(BranchNode {
-                    id: m.base.id.clone(),
-                    role: m.role,
-                    content: m.content.clone(),
-                    branches: vec![],
-                });
-                break;
-            }
-            1 => {
-                let next_id = children[0].id().to_string();
-                nodes.push(BranchNode {
-                    id: m.base.id.clone(),
-                    role: m.role,
-                    content: m.content.clone(),
-                    branches: vec![],
-                });
-                cursor = Some(next_id);
-            }
-            _ => {
-                let sub_branches = children
-                    .iter()
-                    .map(|c| build_branch(entries, Some(c.id().to_string()), depth + 1))
-                    .collect();
-                nodes.push(BranchNode {
-                    id: m.base.id.clone(),
-                    role: m.role,
-                    content: m.content.clone(),
-                    branches: sub_branches,
-                });
-                break;
-            }
-        }
-    }
-    Branch { depth, nodes }
-}
 
 pub struct ActiveSession {
     pub project_path: PathBuf,
@@ -130,7 +67,6 @@ impl ActiveSession {
             client_id: Uuid::new_v4().to_string(),
             messages: state.messages.clone(),
             pending_message: state.pending_message.clone(),
-            form: state.active_form.clone(),
         })
     }
 
@@ -219,7 +155,7 @@ impl ActiveSession {
         };
         let selection = self.get_active_selection().await;
         let system_prompt = build_system_prompt(&discover_agents_md(&self.project_path));
-        let mut rig_messages = Self::to_rig_messages(context);
+        let mut rig_messages = to_rig_messages(context);
         dbg!("session.send_message.snapshot_len", rig_messages.len());
         let response = match rig_messages.pop() {
             Some(prompt) => match self
@@ -262,293 +198,28 @@ impl ActiveSession {
     }
 
     pub async fn stream_message(&self, req: StreamMessageRequest) -> Result<PendingMessage> {
-        dbg!("session.stream_message.request", &req.content);
-        if self
-            .is_streaming
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
-        {
-            return Err(anyhow::anyhow!("a stream is already in progress"));
-        }
-        let _streaming_guard = StreamingGuard {
-            is_streaming: self.is_streaming.clone(),
-        };
-
-        let pending = PendingMessage::new(req.content.clone());
-
-        {
-            let mut mgr = self.session_manager.lock().await;
-            let msg = mgr
-                .append(Role::User, req.content)
-                .map(|e| e.to_message())
-                .unwrap_or_else(|_| Message::new(Role::Error, "failed to persist message"));
-            let mut state = self.state.lock().await;
-            state.messages.push(msg);
-            state.pending_message = Some(pending.clone());
-        }
-
-        self.event_bus
-            .publish(AppEvent::MessageReceived(MessageReceivedEvent {
-                id: pending.id.clone(),
-                content: pending.content.clone(),
-            }));
-        dbg!("session.stream_message.pending_published", &pending.id);
-
-        let snapshot = self.get_messages().await;
-        let selection = self.get_active_selection().await;
-        let system_prompt = build_system_prompt(&discover_agents_md(&self.project_path));
-        let mut rig_messages = Self::to_rig_messages(snapshot);
-        let Some(prompt) = rig_messages.pop() else {
-            self.clear_pending(&pending.id).await;
-            self.event_bus.publish(AppEvent::Error(ErrorEvent {
-                message: "cannot generate tokens with empty message history".to_string(),
-            }));
-            return Ok(pending);
-        };
-
-        dbg!(
-            "session.stream_message.snapshot_len",
-            rig_messages.len() + 1
-        );
-        let message_id = Uuid::new_v4().to_string();
-        self.event_bus
-            .publish(AppEvent::StreamStart(StreamStartEvent {
-                message_id: message_id.clone(),
-                pending_of: pending.id.clone(),
-            }));
-
-        let (token_tx, mut token_rx) = mpsc::channel(128);
-        let (cancel_tx, mut cancel_rx) = oneshot::channel();
-        *self.cancel_tx.lock().await = Some(cancel_tx);
-
-        let agent = self
-            .agent_factory
-            .agent(&selection, Some(&system_prompt))
-            .await;
-        let llm_task = tokio::spawn(async move {
-            let agent = agent?;
-            agent.stream_chat(prompt, rig_messages, token_tx).await
-        });
-
-        let mut accumulated = String::new();
-        let mut token_count = 0usize;
-        let mut cancelled = false;
-        let mut line_buffer = String::new();
-        loop {
-            tokio::select! {
-                _ = &mut cancel_rx => {
-                    dbg!("session.stream_message.cancelled");
-                    cancelled = true;
-                    break;
-                }
-                token_opt = token_rx.recv() => {
-                    match token_opt {
-                        Some(token) => {
-                            accumulated.push_str(&token);
-                            token_count += 1;
-                            line_buffer.push_str(&token);
-
-                            while let Some(newline_idx) = line_buffer.find('\n') {
-                                let line = line_buffer.drain(..=newline_idx).collect::<String>();
-                                self.event_bus.publish(AppEvent::Token(TokenEvent {
-                                    message_id: message_id.clone(),
-                                    delta: line,
-                                }));
-                            }
-                        }
-                        None => break,
-                    }
-                }
-            }
-        }
-
-        if !line_buffer.is_empty() {
-            self.event_bus.publish(AppEvent::Token(TokenEvent {
-                message_id: message_id.clone(),
-                delta: line_buffer,
-            }));
-        }
-
-        if cancelled {
-            dbg!("session.stream_message.was_cancelled");
-            dbg!("session.stream_message.accumulated_len", accumulated.len());
-            if !accumulated.is_empty() {
-                let mut mgr = self.session_manager.lock().await;
-                mgr.append(Role::Assistant, accumulated).ok();
-            }
-            self.is_streaming.store(false, Ordering::SeqCst);
-            return Ok(pending);
-        }
-
-        match llm_task.await {
-            Ok(Ok(())) => {}
-            Ok(Err(err)) => {
-                dbg!("session.stream_message.llm_err", err.to_string());
-                self.clear_pending(&pending.id).await;
-                self.event_bus.publish(AppEvent::Error(ErrorEvent {
-                    message: err.to_string(),
-                }));
-                return Ok(pending);
-            }
-            Err(err) => {
-                dbg!("session.stream_message.llm_join_err", err.to_string());
-                self.clear_pending(&pending.id).await;
-                self.event_bus.publish(AppEvent::Error(ErrorEvent {
-                    message: format!("llm task failed: {}", err),
-                }));
-                return Ok(pending);
-            }
-        }
-
-        dbg!("session.stream_message.tokens_received", token_count);
-        dbg!("session.stream_message.accumulated_len", accumulated.len());
-
-        self.event_bus.publish(AppEvent::StreamEnd(StreamEndEvent {
-            message_id,
-            content: accumulated.clone(),
-        }));
-        dbg!("session.stream_message.end_published");
-
-        {
-            let mut mgr = self.session_manager.lock().await;
-            let msg = mgr
-                .append(Role::Assistant, accumulated)
-                .map(|e| e.to_message())
-                .unwrap_or_else(|_| Message::new(Role::Error, "failed to persist message"));
-            let mut state = self.state.lock().await;
-            state.messages.push(msg);
-        }
-
-        self.clear_pending(&pending.id).await;
-        dbg!("session.stream_message.done", &pending.id);
-        Ok(pending)
-    }
-
-    pub async fn select_form(&self, form_id: String, selection: String) -> SelectFormResponse {
-        let maybe_form = { self.state.lock().await.active_form.clone() };
-
-        if let Some(form) = maybe_form {
-            if form.id == form_id {
-                self.hide_form(form.id.clone(), "client".to_string(), selection.clone())
-                    .await;
-                return SelectFormResponse {
-                    success: true,
-                    selected_by: Some("client".to_string()),
-                    message: Some(format!("Selected: {}", selection)),
-                };
-            }
-
-            return SelectFormResponse {
-                success: false,
-                selected_by: None,
-                message: Some("Form not found".to_string()),
-            };
-        }
-
-        SelectFormResponse {
-            success: false,
-            selected_by: None,
-            message: Some("No active form".to_string()),
-        }
+        stream_message(
+            req,
+            &self.project_path,
+            &self.session_manager,
+            &self.state,
+            &self.event_bus,
+            &self.agent_factory,
+            &self.is_streaming,
+            &self.cancel_tx,
+        )
+        .await
     }
 
     pub async fn interrupt_stream(&self, message_id: String) -> bool {
-        dbg!("session.interrupt_stream", &message_id);
-
-        if let Some(cancel_tx) = self.cancel_tx.lock().await.take() {
-            let _ = cancel_tx.send(());
-            dbg!("session.interrupt_stream.sent_cancel");
-        }
-
-        let state = self.state.lock().await;
-        let pending = state.pending_message.clone();
-        let accumulated = state
-            .messages
-            .last()
-            .filter(|m| m.role == Role::Assistant)
-            .map(|m| m.content.clone())
-            .unwrap_or_default();
-
-        if let Some(pending) = pending {
-            drop(state);
-            dbg!(
-                "session.interrupt_stream.accumulated_len",
-                accumulated.len()
-            );
-
-            if !accumulated.is_empty() {
-                self.event_bus.publish(AppEvent::StreamEnd(StreamEndEvent {
-                    message_id: message_id.clone(),
-                    content: accumulated.clone(),
-                }));
-            }
-
-            self.clear_pending(&pending.id).await;
-        }
-
-        self.is_streaming.store(false, Ordering::SeqCst);
-        dbg!("session.interrupt_stream.done");
-        true
-    }
-
-    pub async fn show_form(&self, options: Vec<String>) {
-        let form = crate::FormState::new(options);
-        {
-            let mut state = self.state.lock().await;
-            state.active_form = Some(form.clone());
-        }
-        self.event_bus.publish(AppEvent::FormShown(FormShownEvent {
-            id: form.id,
-            options: form.options,
-        }));
-    }
-
-    pub async fn hide_form(&self, form_id: String, selected_by: String, selected: String) {
-        {
-            let mut state = self.state.lock().await;
-            state.active_form = None;
-        }
-
-        self.event_bus
-            .publish(AppEvent::FormHidden(FormHiddenEvent {
-                id: form_id,
-                selected_by,
-                selected,
-            }));
-    }
-
-    async fn clear_pending(&self, pending_id: &str) {
-        dbg!("session.clear_pending", pending_id);
-        {
-            let mut state = self.state.lock().await;
-            state.pending_message = None;
-        }
-
-        self.event_bus
-            .publish(AppEvent::PendingCleared(PendingClearedEvent {
-                pending_id: pending_id.to_string(),
-            }));
-    }
-
-    fn to_rig_messages(messages: Vec<Message>) -> Vec<RigMessage> {
-        messages
-            .into_iter()
-            .map(|msg| match msg.role {
-                Role::User => RigMessage::user(msg.content),
-                Role::Assistant => RigMessage::assistant(msg.content),
-                Role::Error => RigMessage::user(format!("[Error]: {}", msg.content)),
-            })
-            .collect()
-    }
-}
-
-struct StreamingGuard {
-    is_streaming: Arc<AtomicBool>,
-}
-
-impl Drop for StreamingGuard {
-    fn drop(&mut self) {
-        self.is_streaming.store(false, Ordering::SeqCst);
+        interrupt_stream(
+            message_id,
+            &self.state,
+            &self.event_bus,
+            &self.is_streaming,
+            &self.cancel_tx,
+        )
+        .await
     }
 }
 
@@ -664,6 +335,7 @@ mod tests {
     use super::*;
     use crate::session::manager::SessionManager;
     use crate::session::store::SessionEntry;
+    use crate::session::tree::Branch;
     use tempfile::TempDir;
 
     fn project_dir() -> TempDir {

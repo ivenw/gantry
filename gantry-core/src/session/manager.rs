@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::session::store::{MessageEntry, SessionEntry, SessionStore};
-use crate::types::{Message, Role};
+use crate::chat::{Message, Role};
 
 /// In-memory session state for a single conversation tree.
 ///

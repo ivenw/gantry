@@ -31,7 +31,6 @@ pub struct ChatModel {
     pub streaming_buffer: String,
     /// False until the first content is flushed — delays the assistant message from appearing.
     pub streaming_message_pushed: bool,
-    pub show_form: bool,
     /// Number of lines scrolled up from the bottom (0 = pinned to bottom).
     pub scroll_offset: u16,
     /// True while the user has manually scrolled up; suppresses auto-scroll-to-bottom.
@@ -188,7 +187,6 @@ impl ChatModel {
             streaming_message_idx: None,
             streaming_buffer: String::new(),
             streaming_message_pushed: false,
-            show_form: false,
             scroll_offset: 0,
             user_is_scrolling: false,
         }
@@ -264,7 +262,6 @@ impl ChatModel {
         self.streaming_buffer.clear();
         self.streaming_message_pushed = false;
         self.pending_message_id = None;
-        self.show_form = false;
         self.scroll_offset = 0;
         self.user_is_scrolling = false;
     }

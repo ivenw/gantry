@@ -103,9 +103,6 @@ fn handle_app_event(model: &mut Model, event: AppEvent) -> Option<Msg> {
                     model.chat.start_streaming_message();
                     model.chat.pending_message_id = Some(pending.id);
                 }
-                if ev.form.is_some() {
-                    model.chat.show_form = true;
-                }
             }
         }
         AppEvent::MessageReceived(ev) => {
@@ -126,12 +123,6 @@ fn handle_app_event(model: &mut Model, event: AppEvent) -> Option<Msg> {
         }
         AppEvent::PendingCleared(_) => {
             model.chat.pending_message_id = None;
-        }
-        AppEvent::FormShown(_) => {
-            model.chat.show_form = true;
-        }
-        AppEvent::FormHidden(_) => {
-            model.chat.show_form = false;
         }
         AppEvent::Error(ev) => {
             model.chat.add_error_message(ev.message);

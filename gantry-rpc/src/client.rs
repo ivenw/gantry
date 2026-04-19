@@ -1,8 +1,5 @@
 use anyhow::Result;
-use gantry_core::{
-    AppEvent, Message, PendingMessage, SelectFormRequest, SelectFormResponse, SessionInfo,
-    StreamMessageRequest,
-};
+use gantry_core::{AppEvent, Message, PendingMessage, SessionInfo, StreamMessageRequest};
 use jsonrpsee::core::client::Subscription;
 use jsonrpsee::ws_client::{WsClient, WsClientBuilder};
 use std::path::PathBuf;
@@ -109,15 +106,6 @@ impl JsonRpcClient {
 
     pub async fn interrupt_stream(&self, message_id: String) -> Result<bool> {
         Ok(self.inner.interrupt_stream(message_id).await?)
-    }
-
-    pub async fn select_form(
-        &self,
-        form_id: String,
-        selection: String,
-    ) -> Result<SelectFormResponse> {
-        let req = SelectFormRequest { form_id, selection };
-        Ok(self.inner.select_form(req).await?)
     }
 
     pub async fn ping(&self) -> Result<()> {
