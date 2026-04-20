@@ -1,3 +1,5 @@
+pub mod agent_factory;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 

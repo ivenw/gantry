@@ -1,9 +1,10 @@
 use anyhow::{Context, Result};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use uuid::Uuid;
 
-use crate::session::store::{MessageEntry, SessionEntry, SessionStore};
 use crate::chat::{Message, Role};
+use crate::session::log::{LogEntry, MessageEntry, SessionLog, SessionRegistry};
 
 /// In-memory session state for a single conversation tree.
 ///
@@ -16,20 +17,20 @@ pub struct SessionManager {
     /// `None` only when the session has no entries yet.
     pub current_leaf_id: Option<String>,
     /// All entries in the tree, keyed by entry ID.
-    entries: HashMap<String, SessionEntry>,
-    /// Retained so disk writes don't need the caller to pass it every time.
-    project_path: PathBuf,
+    entries: HashMap<String, LogEntry>,
+    message_store: SessionLog,
 }
 
 impl SessionManager {
     /// Create a fresh session on disk and return an empty manager.
     pub fn create(project_path: &Path) -> Result<Self> {
-        let session_id = SessionStore::create(project_path)?;
+        let session_id = Uuid::new_v4().to_string();
+        let message_store = SessionRegistry::new(project_path)?.session_log(&session_id)?;
         Ok(Self {
             session_id,
             current_leaf_id: None,
             entries: HashMap::new(),
-            project_path: project_path.to_path_buf(),
+            message_store,
         })
     }
 
@@ -38,10 +39,12 @@ impl SessionManager {
     /// `current_leaf_id` is initialised to the most recently created entry
     /// that has no children (i.e. a leaf node with the latest `created_at`).
     pub fn load(project_path: &Path, session_id: &str) -> Result<Self> {
-        let entries_vec = SessionStore::load_entries(project_path, session_id)
+        let message_store = SessionRegistry::new(project_path)?.session_log(session_id)?;
+        let entries_vec = message_store
+            .load_entries()
             .with_context(|| format!("failed to load session {}", session_id))?;
 
-        let entries: HashMap<String, SessionEntry> = entries_vec
+        let entries: HashMap<String, LogEntry> = entries_vec
             .into_iter()
             .map(|e| (e.id().to_string(), e))
             .collect();
@@ -59,29 +62,30 @@ impl SessionManager {
             session_id: session_id.to_string(),
             current_leaf_id,
             entries,
-            project_path: project_path.to_path_buf(),
+            message_store,
         })
     }
 
     /// Append a new message entry as a child of the current leaf.
     ///
-    /// Writes to disk via `SessionStore`, updates the in-memory map, and
+    /// Writes to disk via `SessionLog`, updates the in-memory map, and
     /// advances `current_leaf_id` to the new entry.
     pub fn append(&mut self, role: Role, content: String) -> Result<&MessageEntry> {
-        let entry = SessionEntry::Message(MessageEntry::new(
+        let entry = LogEntry::Message(MessageEntry::new(
             role,
             content,
             self.current_leaf_id.clone(),
         ));
 
-        SessionStore::append_entry(&self.project_path, &self.session_id, &entry)
+        self.message_store
+            .append_entry(&entry)
             .with_context(|| format!("failed to persist entry to session {}", self.session_id))?;
 
         let id = entry.id().to_string();
         self.current_leaf_id = Some(id.clone());
         self.entries.insert(id.clone(), entry);
 
-        let SessionEntry::Message(ref msg) = self.entries[&id];
+        let LogEntry::Message(ref msg) = self.entries[&id];
         Ok(msg)
     }
 
@@ -108,7 +112,7 @@ impl SessionManager {
             return vec![];
         };
 
-        let mut chain: Vec<&SessionEntry> = vec![];
+        let mut chain: Vec<&LogEntry> = vec![];
         let mut current_id = leaf_id.as_str();
         loop {
             let Some(entry) = self.entries.get(current_id) else {
@@ -125,13 +129,13 @@ impl SessionManager {
         chain
             .into_iter()
             .map(|e| match e {
-                SessionEntry::Message(m) => m.to_message(),
+                LogEntry::Message(m) => m.to_message(),
             })
             .collect()
     }
 
     /// All entries in the tree (order not guaranteed).
-    pub fn all_entries(&self) -> impl Iterator<Item = &SessionEntry> {
+    pub fn all_entries(&self) -> impl Iterator<Item = &LogEntry> {
         self.entries.values()
     }
 }
@@ -186,7 +190,7 @@ mod tests {
 
         // The second entry should reference the first as parent
         let leaf_id = mgr.current_leaf_id.clone().unwrap();
-        let SessionEntry::Message(ref leaf) = mgr.entries[&leaf_id];
+        let LogEntry::Message(ref leaf) = mgr.entries[&leaf_id];
         assert_eq!(leaf.base.parent_id.as_deref(), Some(first_id.as_str()));
     }
 

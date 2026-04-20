@@ -1,3 +1,6 @@
+pub mod resource_loader;
+pub mod system_prompt;
+
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};

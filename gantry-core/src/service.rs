@@ -1,22 +1,23 @@
-use crate::agent_factory::RigAgentFactory;
+use crate::SessionInfo;
 use crate::chat::events::{AppEvent, InitEvent, StreamMessageRequest};
 use crate::chat::stream::{interrupt_stream, stream_message, to_rig_messages};
 use crate::chat::{Message, PendingMessage, Role};
 use crate::event_bus::EventBus;
-use crate::project_registry::ProjectRegistry;
-use crate::resource_loader::discover_agents_md;
+use crate::project::ProjectRegistry;
+use crate::project::resource_loader::discover_agents_md;
+use crate::project::system_prompt::build_system_prompt;
+use crate::provider::agent_factory::RigAgentFactory;
+use crate::provider::{ModelId, ModelSelection, ProviderId};
+use crate::session::log::SessionRegistry;
 use crate::session::manager::SessionManager;
 use crate::session::state::ConversationState;
-use crate::session::store::SessionStore;
-use crate::session::tree::{build_branch, SessionTree};
-use crate::system_prompt::build_system_prompt;
-use crate::{ModelId, ModelSelection, ProviderId, SessionInfo};
+use crate::session::tree::{SessionTree, build_branch};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::{broadcast, Mutex, oneshot};
+use tokio::sync::{Mutex, broadcast, oneshot};
 use uuid::Uuid;
 
 pub struct ActiveSession {
@@ -81,7 +82,7 @@ impl ActiveSession {
     pub async fn get_tree(&self) -> SessionTree {
         let mgr = self.session_manager.lock().await;
         let current_leaf_id = mgr.current_leaf_id.clone();
-        let entries: HashMap<String, crate::session::store::SessionEntry> = mgr
+        let entries: HashMap<String, crate::session::log::LogEntry> = mgr
             .all_entries()
             .map(|e| (e.id().to_string(), e.clone()))
             .collect();
@@ -239,8 +240,6 @@ impl AppService {
         }
     }
 
-    // --- project management ---
-
     pub fn register_project(&self, path: &std::path::Path) -> Result<()> {
         self.registry.register(path)
     }
@@ -253,8 +252,6 @@ impl AppService {
         self.registry.unregister(path)
     }
 
-    // --- session management ---
-
     pub fn create_session(&self, project_path: &std::path::Path) -> Result<String> {
         // Verify the project is registered
         let abs = project_path.canonicalize().map_err(|_| {
@@ -264,14 +261,16 @@ impl AppService {
         if !projects.contains(&abs) {
             return Err(anyhow::anyhow!("project not registered: {}", abs.display()));
         }
-        SessionStore::create(&abs)
+        let id = Uuid::new_v4().to_string();
+        SessionRegistry::new(&abs)?.session_log(&id)?;
+        Ok(id)
     }
 
     pub fn list_sessions(&self, project_path: &std::path::Path) -> Result<Vec<SessionInfo>> {
         let abs = project_path.canonicalize().map_err(|_| {
             anyhow::anyhow!("project path does not exist: {}", project_path.display())
         })?;
-        SessionStore::list(&abs)
+        SessionRegistry::new(&abs)?.list()
     }
 
     /// Returns an `Arc<ActiveSession>`, creating it in memory if needed.
@@ -285,10 +284,6 @@ impl AppService {
         let abs = project_path
             .canonicalize()
             .map_err(|_| anyhow::anyhow!("project path does not exist: {}", project_path_str))?;
-
-        if !SessionStore::exists(&abs, session_id) {
-            return Err(anyhow::anyhow!("session not found: {}", session_id));
-        }
 
         let mut sessions = self.sessions.lock().await;
         if let Some(session) = sessions.get(session_id) {
@@ -333,8 +328,8 @@ impl AppService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::log::LogEntry;
     use crate::session::manager::SessionManager;
-    use crate::session::store::SessionEntry;
     use crate::session::tree::Branch;
     use tempfile::TempDir;
 
@@ -344,15 +339,13 @@ mod tests {
         tmp
     }
 
-    fn entries_from_mgr(mgr: &SessionManager) -> HashMap<String, SessionEntry> {
+    fn entries_from_mgr(mgr: &SessionManager) -> HashMap<String, LogEntry> {
         mgr.all_entries()
             .map(|e| (e.id().to_string(), e.clone()))
             .collect()
     }
 
-    fn build_branch_for_test(
-        mgr: &SessionManager,
-    ) -> (Branch, HashMap<String, SessionEntry>) {
+    fn build_branch_for_test(mgr: &SessionManager) -> (Branch, HashMap<String, LogEntry>) {
         let entries = entries_from_mgr(mgr);
         let root_id = entries
             .values()

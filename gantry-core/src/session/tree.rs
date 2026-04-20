@@ -1,5 +1,5 @@
-use crate::session::store::SessionEntry;
 use crate::chat::Role;
+use crate::session::log::LogEntry;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -35,7 +35,7 @@ pub struct BranchNode {
 ///
 /// `depth` is the nesting level of this branch and is stored on the returned `Branch`.
 pub fn build_branch(
-    entries: &HashMap<String, SessionEntry>,
+    entries: &HashMap<String, LogEntry>,
     start_id: Option<String>,
     depth: usize,
 ) -> Branch {
@@ -43,10 +43,10 @@ pub fn build_branch(
     let mut cursor = start_id;
     while let Some(ref id) = cursor {
         let node_id = id.clone();
-        let Some(SessionEntry::Message(m)) = entries.get(&node_id) else {
+        let Some(LogEntry::Message(m)) = entries.get(&node_id) else {
             break;
         };
-        let mut children: Vec<&SessionEntry> = entries
+        let mut children: Vec<&LogEntry> = entries
             .values()
             .filter(|e| e.parent_id() == Some(node_id.as_str()))
             .collect();

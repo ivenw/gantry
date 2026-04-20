@@ -9,7 +9,7 @@ use rig::streaming::StreamingChat;
 use rig::{agent::MultiTurnStreamItem, streaming::StreamedAssistantContent};
 use tokio::sync::mpsc;
 
-use crate::{ModelSelection, ProviderConfig, ProviderConfigCatalog};
+use crate::provider::{ModelSelection, ProviderConfig, ProviderConfigCatalog};
 
 // TODO: Skeptical if we need this as a struct. A factory function seems better
 #[derive(Clone)]

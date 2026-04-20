@@ -1,15 +1,15 @@
-use crate::agent_factory::RigAgentFactory;
 use crate::chat::events::{
     AppEvent, ErrorEvent, MessageReceivedEvent, PendingClearedEvent, StreamEndEvent,
     StreamMessageRequest, StreamStartEvent, TokenEvent,
 };
 use crate::chat::{Message, PendingMessage, Role};
 use crate::event_bus::EventBus;
-use crate::resource_loader::discover_agents_md;
+use crate::project::resource_loader::discover_agents_md;
+use crate::project::system_prompt::build_system_prompt;
+use crate::provider::agent_factory::RigAgentFactory;
+use crate::provider::ModelSelection;
 use crate::session::manager::SessionManager;
 use crate::session::state::ConversationState;
-use crate::system_prompt::build_system_prompt;
-use crate::ModelSelection;
 use anyhow::Result;
 use rig::message::Message as RigMessage;
 use std::path::Path;
@@ -55,6 +55,7 @@ pub async fn clear_pending(
     }));
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn stream_message(
     req: StreamMessageRequest,
     project_path: &Path,
