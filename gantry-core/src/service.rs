@@ -8,7 +8,7 @@ use crate::project::resource_loader::discover_agents_md;
 use crate::project::system_prompt::build_system_prompt;
 use crate::provider::agent_factory::RigAgentFactory;
 use crate::provider::{ModelId, ModelSelection, ProviderId};
-use crate::session::log::SessionRegistry;
+use crate::session::registry::SessionRegistry;
 use crate::session::manager::SessionManager;
 use crate::session::state::ConversationState;
 use crate::session::tree::{SessionTree, build_branch};

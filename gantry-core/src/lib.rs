@@ -18,5 +18,5 @@ pub use provider::{
 };
 pub use service::AppService;
 pub use session::manager::SessionManager;
-pub use session::log::SessionInfo;
+pub use session::registry::SessionInfo;
 pub use session::tree::{Branch, BranchNode, SessionTree};

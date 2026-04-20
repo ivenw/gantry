@@ -4,7 +4,8 @@ use std::path::Path;
 use uuid::Uuid;
 
 use crate::chat::{Message, Role};
-use crate::session::log::{LogEntry, MessageEntry, SessionLog, SessionRegistry};
+use crate::session::log::{LogEntry, MessageEntry, SessionLog};
+use crate::session::registry::SessionRegistry;
 
 /// In-memory session state for a single conversation tree.
 ///
