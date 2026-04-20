@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct InitEvent {
     pub client_id: String,
     pub messages: Vec<super::Message>,
@@ -9,47 +8,40 @@ pub struct InitEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct MessageReceivedEvent {
     pub id: String,
     pub content: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct StreamStartEvent {
     pub message_id: String,
     pub pending_of: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct TokenEvent {
     pub message_id: String,
     pub delta: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct StreamEndEvent {
     pub message_id: String,
     pub content: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct PendingClearedEvent {
     pub pending_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ErrorEvent {
     pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", content = "payload", rename_all = "snake_case")]
 pub enum AppEvent {
     Init(InitEvent),
     MessageReceived(MessageReceivedEvent),
@@ -75,7 +67,6 @@ impl AppEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct StreamMessageRequest {
     pub content: String,
 }

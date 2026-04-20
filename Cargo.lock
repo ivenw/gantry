@@ -888,6 +888,7 @@ dependencies = [
  "anyhow",
  "gantry-core",
  "jsonrpsee",
+ "serde",
  "serde_json",
  "tokio",
 ]

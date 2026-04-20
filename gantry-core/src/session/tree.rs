@@ -5,7 +5,6 @@ use std::collections::HashMap;
 
 /// The full message tree for a session, including which node is the active conversation tip.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SessionTree {
     pub current_leaf_id: Option<String>,
     pub stem: Branch,
@@ -14,7 +13,6 @@ pub struct SessionTree {
 /// An ordered sequence of nodes at a given nesting depth, with sub-branches forking off nodes
 /// that have multiple children.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct Branch {
     pub depth: usize,
     pub nodes: Vec<BranchNode>,
@@ -22,7 +20,6 @@ pub struct Branch {
 
 /// A single message node in the tree, carrying any sub-branches that fork from it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct BranchNode {
     pub id: String,
     pub role: Role,

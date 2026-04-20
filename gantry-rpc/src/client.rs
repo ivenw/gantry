@@ -54,15 +54,16 @@ impl JsonRpcClient {
     pub async fn subscribe_events(
         &self,
     ) -> Result<(JoinHandle<()>, mpsc::Receiver<WsConnectionEvent>)> {
-        let mut sub: Subscription<AppEvent> = self.inner.subscribe_events().await?;
+        let mut sub: Subscription<crate::wire::WireAppEvent> =
+            self.inner.subscribe_events().await?;
 
         let (event_tx, event_rx) = mpsc::channel(100);
         let handle = tokio::spawn(async move {
             while let Some(next) = sub.next().await {
                 match next {
-                    Ok(event) => {
+                    Ok(wire_event) => {
                         if event_tx
-                            .send(WsConnectionEvent::Event(event))
+                            .send(WsConnectionEvent::Event(AppEvent::from(wire_event)))
                             .await
                             .is_err()
                         {

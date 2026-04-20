@@ -288,8 +288,7 @@ impl GantryRpcServer for RpcApp {
             .await
             .map_err(|e| internal_error(e.to_string()))?;
 
-        let branch = session.get_tree().await;
-        Ok(branch)
+        Ok(session.get_tree().await)
     }
 
     async fn branch(&self, entry_id: String) -> RpcResult<()> {
@@ -339,7 +338,8 @@ pub async fn start_app_rpc_server(addr: &str, port: u16, app: AppService) -> Res
 }
 
 async fn send_event(sink: &SubscriptionSink, event: &AppEvent) -> SubscriptionResult {
-    let Ok(payload) = serde_json::value::to_raw_value(event) else {
+    let wire = crate::wire::WireAppEvent::from(event);
+    let Ok(payload) = serde_json::value::to_raw_value(&wire) else {
         dbg!("rpc.send_event.serialize_failed");
         return Err("failed to serialize event".into());
     };

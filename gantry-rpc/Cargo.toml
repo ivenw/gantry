@@ -7,5 +7,6 @@ edition.workspace = true
 anyhow.workspace = true
 gantry-core = { path = "../gantry-core" }
 jsonrpsee.workspace = true
+serde.workspace = true
 serde_json = "1.0"
 tokio.workspace = true

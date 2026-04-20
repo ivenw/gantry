@@ -1,5 +1,6 @@
 mod client;
 pub mod server;
+pub mod wire;
 
 pub use gantry_core::{
     AppEvent, Branch, BranchNode, Message, PendingMessage, SessionInfo, SessionTree,
@@ -10,6 +11,7 @@ use jsonrpsee::proc_macros::rpc;
 use std::path::PathBuf;
 
 pub use client::{JsonRpcClient, WsConnectionEvent};
+pub use wire::WireAppEvent;
 
 #[rpc(client, server)]
 pub trait GantryRpc {
@@ -45,7 +47,7 @@ pub trait GantryRpc {
     #[subscription(
         name = "subscribe_events" => "events",
         unsubscribe = "unsubscribe_events",
-        item = AppEvent
+        item = WireAppEvent
     )]
     async fn subscribe_events(&self) -> SubscriptionResult;
 
