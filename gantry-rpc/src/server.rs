@@ -243,7 +243,7 @@ impl GantryRpcServer for RpcApp {
             .await
             .map_err(|e| internal_error(e.to_string()))?;
 
-        session.clear_messages().await;
+        let _ = session;
         dbg!("rpc.clear_messages.done");
         Ok(())
     }

@@ -11,7 +11,7 @@ pub struct SessionInfo {
 }
 
 /// Manages session files under `{project_path}/.gantry/sessions/`.
-pub struct SessionRegistry {
+pub(crate) struct SessionRegistry {
     sessions_dir: PathBuf,
 }
 

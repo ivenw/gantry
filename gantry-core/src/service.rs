@@ -8,10 +8,7 @@ use crate::project::resource_loader::discover_agents_md;
 use crate::project::system_prompt::build_system_prompt;
 use crate::provider::agent_factory::RigAgentFactory;
 use crate::provider::{ModelId, ModelSelection, ProviderId};
-use crate::session::registry::SessionRegistry;
-use crate::session::manager::SessionManager;
-use crate::session::state::ConversationState;
-use crate::session::tree::{SessionTree, build_branch};
+use crate::session::Session;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -20,33 +17,32 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{Mutex, broadcast, oneshot};
 use uuid::Uuid;
 
-pub struct ActiveSession {
+pub struct SessionHandle {
     pub project_path: PathBuf,
     pub session_id: String,
-    session_manager: Arc<Mutex<SessionManager>>,
-    state: Arc<Mutex<ConversationState>>,
+    session: Arc<Mutex<Session>>,
+    pending_message: Arc<Mutex<Option<PendingMessage>>>,
+    active_selection: Arc<Mutex<ModelSelection>>,
     event_bus: EventBus,
     agent_factory: RigAgentFactory,
     is_streaming: Arc<AtomicBool>,
     cancel_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
 }
 
-impl ActiveSession {
+impl SessionHandle {
     fn new(
         project_path: PathBuf,
-        session_manager: SessionManager,
-        initial_messages: Vec<Message>,
+        session: Session,
         agent_factory: RigAgentFactory,
         default_selection: ModelSelection,
     ) -> Self {
-        let session_id = session_manager.session_id.clone();
-        let mut state = ConversationState::new(default_selection);
-        state.messages = initial_messages;
+        let session_id = session.session_id.clone();
         Self {
             project_path,
             session_id,
-            session_manager: Arc::new(Mutex::new(session_manager)),
-            state: Arc::new(Mutex::new(state)),
+            session: Arc::new(Mutex::new(session)),
+            pending_message: Arc::new(Mutex::new(None)),
+            active_selection: Arc::new(Mutex::new(default_selection)),
             event_bus: EventBus::new(1000),
             agent_factory,
             is_streaming: Arc::new(AtomicBool::new(false)),
@@ -63,51 +59,29 @@ impl ActiveSession {
     }
 
     pub async fn init_event(&self) -> AppEvent {
-        let state = self.state.lock().await;
+        let messages = self.session.lock().await.context_messages();
+        let pending_message = self.pending_message.lock().await.clone();
         AppEvent::Init(InitEvent {
             client_id: Uuid::new_v4().to_string(),
-            messages: state.messages.clone(),
-            pending_message: state.pending_message.clone(),
+            messages,
+            pending_message,
         })
     }
 
     pub async fn get_messages(&self) -> Vec<Message> {
-        self.state.lock().await.messages.clone()
+        self.session.lock().await.context_messages()
     }
 
-    pub async fn clear_messages(&self) {
-        self.state.lock().await.messages.clear();
-    }
-
-    pub async fn get_tree(&self) -> SessionTree {
-        let mgr = self.session_manager.lock().await;
-        let current_leaf_id = mgr.current_leaf_id.clone();
-        let entries: HashMap<String, crate::session::log::LogEntry> = mgr
-            .all_entries()
-            .map(|e| (e.id().to_string(), e.clone()))
-            .collect();
-        let root_id = entries
-            .values()
-            .find(|e| e.parent_id().is_none())
-            .map(|e| e.id().to_string());
-        SessionTree {
-            current_leaf_id,
-            stem: build_branch(&entries, root_id, 0),
-        }
+    pub async fn get_tree(&self) -> crate::session::SessionTree {
+        self.session.lock().await.session_tree()
     }
 
     pub async fn branch(&self, entry_id: String) -> Result<()> {
-        let messages = {
-            let mut mgr = self.session_manager.lock().await;
-            mgr.branch(&entry_id)?;
-            mgr.context_messages()
-        };
-        self.state.lock().await.messages = messages;
-        Ok(())
+        self.session.lock().await.branch(&entry_id)
     }
 
     pub async fn get_active_selection(&self) -> ModelSelection {
-        self.state.lock().await.active_selection.clone()
+        self.active_selection.lock().await.clone()
     }
 
     pub async fn set_active_provider(&self, provider_id: ProviderId) -> Result<()> {
@@ -134,26 +108,19 @@ impl ActiveSession {
 
     pub async fn set_active_selection(&self, selection: ModelSelection) -> Result<()> {
         self.agent_factory.catalog().selection(&selection)?;
-        self.state.lock().await.active_selection = selection;
+        *self.active_selection.lock().await = selection;
         Ok(())
     }
 
     pub async fn send_message(&self, content: String) -> Vec<Message> {
         dbg!("session.send_message.request", &content);
         {
-            let mut mgr = self.session_manager.lock().await;
-            let msg = mgr
-                .append(Role::User, content)
-                .map(|e| e.to_message())
-                .unwrap_or_else(|_| Message::new(Role::Error, "failed to persist message"));
-            let mut state = self.state.lock().await;
-            state.messages.push(msg);
+            let mut sess = self.session.lock().await;
+            sess.append(Role::User, content)
+                .unwrap_or_else(|_| panic!("failed to persist message"));
         }
 
-        let context = {
-            let mgr = self.session_manager.lock().await;
-            mgr.context_messages()
-        };
+        let context = self.session.lock().await.context_messages();
         let selection = self.get_active_selection().await;
         let system_prompt = build_system_prompt(&discover_agents_md(&self.project_path));
         let mut rig_messages = to_rig_messages(context);
@@ -186,24 +153,22 @@ impl ActiveSession {
         };
 
         {
-            let mut mgr = self.session_manager.lock().await;
-            let _ = mgr.append(response.role, response.content.clone());
+            let mut sess = self.session.lock().await;
+            let _ = sess.append(response.role, response.content.clone());
         }
-        let mut state = self.state.lock().await;
-        state.messages.push(response);
-        dbg!(
-            "session.send_message.response_messages_len",
-            state.messages.len()
-        );
-        state.messages.clone()
+
+        let messages = self.session.lock().await.context_messages();
+        dbg!("session.send_message.response_messages_len", messages.len());
+        messages
     }
 
     pub async fn stream_message(&self, req: StreamMessageRequest) -> Result<PendingMessage> {
         stream_message(
             req,
             &self.project_path,
-            &self.session_manager,
-            &self.state,
+            &self.session,
+            &self.pending_message,
+            &self.active_selection,
             &self.event_bus,
             &self.agent_factory,
             &self.is_streaming,
@@ -215,7 +180,7 @@ impl ActiveSession {
     pub async fn interrupt_stream(&self, message_id: String) -> bool {
         interrupt_stream(
             message_id,
-            &self.state,
+            &self.pending_message,
             &self.event_bus,
             &self.is_streaming,
             &self.cancel_tx,
@@ -227,7 +192,7 @@ impl ActiveSession {
 #[derive(Clone)]
 pub struct AppService {
     registry: Arc<ProjectRegistry>,
-    sessions: Arc<Mutex<HashMap<String, Arc<ActiveSession>>>>,
+    sessions: Arc<Mutex<HashMap<String, Arc<SessionHandle>>>>,
     agent_factory: RigAgentFactory,
 }
 
@@ -253,7 +218,6 @@ impl AppService {
     }
 
     pub fn create_session(&self, project_path: &std::path::Path) -> Result<String> {
-        // Verify the project is registered
         let abs = project_path.canonicalize().map_err(|_| {
             anyhow::anyhow!("project path does not exist: {}", project_path.display())
         })?;
@@ -261,25 +225,24 @@ impl AppService {
         if !projects.contains(&abs) {
             return Err(anyhow::anyhow!("project not registered: {}", abs.display()));
         }
-        let id = Uuid::new_v4().to_string();
-        SessionRegistry::new(&abs)?.session_log(&id)?;
-        Ok(id)
+        let session = Session::create(&abs)?;
+        Ok(session.session_id)
     }
 
     pub fn list_sessions(&self, project_path: &std::path::Path) -> Result<Vec<SessionInfo>> {
         let abs = project_path.canonicalize().map_err(|_| {
             anyhow::anyhow!("project path does not exist: {}", project_path.display())
         })?;
-        SessionRegistry::new(&abs)?.list()
+        Session::list(&abs)
     }
 
-    /// Returns an `Arc<ActiveSession>`, creating it in memory if needed.
+    /// Returns an `Arc<SessionHandle>`, creating it in memory if needed.
     /// Returns an error if the session does not exist on disk.
     pub async fn get_or_load_session(
         &self,
         project_path_str: &str,
         session_id: &str,
-    ) -> Result<Arc<ActiveSession>> {
+    ) -> Result<Arc<SessionHandle>> {
         let project_path = std::path::Path::new(project_path_str);
         let abs = project_path
             .canonicalize()
@@ -290,23 +253,21 @@ impl AppService {
             return Ok(session.clone());
         }
 
-        let session_manager = SessionManager::load(&abs, session_id)?;
-        let messages = session_manager.context_messages();
+        let session = Session::load(&abs, session_id)?;
         let default_selection = self
             .agent_factory
             .catalog()
             .default_selection()
             .expect("provider catalog must be valid");
 
-        let session = Arc::new(ActiveSession::new(
+        let handle = Arc::new(SessionHandle::new(
             abs,
-            session_manager,
-            messages,
+            session,
             self.agent_factory.clone(),
             default_selection,
         ));
-        sessions.insert(session_id.to_string(), session.clone());
-        Ok(session)
+        sessions.insert(session_id.to_string(), handle.clone());
+        Ok(handle)
     }
 
     /// Called when a client disconnects. Removes the session from the in-memory map
@@ -314,9 +275,6 @@ impl AppService {
     pub async fn release_session(&self, session_id: &str) {
         let mut sessions = self.sessions.lock().await;
         if let Some(session) = sessions.get(session_id) {
-            // Arc::strong_count: map holds 1, caller holds 1 while checking.
-            // After this function returns the caller's ref will be dropped.
-            // If count is 2, no other client holds it → safe to evict.
             if Arc::strong_count(session) <= 2 {
                 sessions.remove(session_id);
                 dbg!("app.release_session.evicted", session_id);
@@ -329,8 +287,7 @@ impl AppService {
 mod tests {
     use super::*;
     use crate::session::log::LogEntry;
-    use crate::session::manager::SessionManager;
-    use crate::session::tree::Branch;
+    use crate::session::tree::{Branch, build_branch};
     use tempfile::TempDir;
 
     fn project_dir() -> TempDir {
@@ -339,14 +296,15 @@ mod tests {
         tmp
     }
 
-    fn entries_from_mgr(mgr: &SessionManager) -> HashMap<String, LogEntry> {
-        mgr.all_entries()
+    fn entries_from_session(session: &Session) -> HashMap<String, LogEntry> {
+        session
+            .all_entries()
             .map(|e| (e.id().to_string(), e.clone()))
             .collect()
     }
 
-    fn build_branch_for_test(mgr: &SessionManager) -> (Branch, HashMap<String, LogEntry>) {
-        let entries = entries_from_mgr(mgr);
+    fn build_branch_for_test(session: &Session) -> (Branch, HashMap<String, LogEntry>) {
+        let entries = entries_from_session(session);
         let root_id = entries
             .values()
             .find(|e| e.parent_id().is_none())
@@ -365,12 +323,12 @@ mod tests {
     #[test]
     fn build_branch_linear() {
         let tmp = project_dir();
-        let mut mgr = SessionManager::create(tmp.path()).unwrap();
-        mgr.append(Role::User, "root".into()).unwrap();
-        mgr.append(Role::Assistant, "mid".into()).unwrap();
-        mgr.append(Role::User, "leaf".into()).unwrap();
+        let mut session = Session::create(tmp.path()).unwrap();
+        session.append(Role::User, "root".into()).unwrap();
+        session.append(Role::Assistant, "mid".into()).unwrap();
+        session.append(Role::User, "leaf".into()).unwrap();
 
-        let (branch, _) = build_branch_for_test(&mgr);
+        let (branch, _) = build_branch_for_test(&session);
 
         assert_eq!(branch.depth, 0);
         assert_eq!(branch.nodes.len(), 3);
@@ -380,18 +338,18 @@ mod tests {
     #[test]
     fn build_branch_two_children() {
         let tmp = project_dir();
-        let mut mgr = SessionManager::create(tmp.path()).unwrap();
-        let root_id = mgr
+        let mut session = Session::create(tmp.path()).unwrap();
+        let root_id = session
             .append(Role::User, "root".into())
             .unwrap()
             .base
             .id
             .clone();
-        mgr.append(Role::Assistant, "child A".into()).unwrap();
-        mgr.branch(&root_id).unwrap();
-        mgr.append(Role::Assistant, "child B".into()).unwrap();
+        session.append(Role::Assistant, "child A".into()).unwrap();
+        session.branch(&root_id).unwrap();
+        session.append(Role::Assistant, "child B".into()).unwrap();
 
-        let (branch, _) = build_branch_for_test(&mgr);
+        let (branch, _) = build_branch_for_test(&session);
 
         assert_eq!(branch.depth, 0);
         assert_eq!(branch.nodes.len(), 1);
@@ -406,19 +364,19 @@ mod tests {
     #[test]
     fn build_branch_linear_then_fork() {
         let tmp = project_dir();
-        let mut mgr = SessionManager::create(tmp.path()).unwrap();
-        mgr.append(Role::User, "root".into()).unwrap();
-        let mid_id = mgr
+        let mut session = Session::create(tmp.path()).unwrap();
+        session.append(Role::User, "root".into()).unwrap();
+        let mid_id = session
             .append(Role::Assistant, "mid".into())
             .unwrap()
             .base
             .id
             .clone();
-        mgr.append(Role::User, "child A".into()).unwrap();
-        mgr.branch(&mid_id).unwrap();
-        mgr.append(Role::User, "child B".into()).unwrap();
+        session.append(Role::User, "child A".into()).unwrap();
+        session.branch(&mid_id).unwrap();
+        session.append(Role::User, "child B".into()).unwrap();
 
-        let (branch, _) = build_branch_for_test(&mgr);
+        let (branch, _) = build_branch_for_test(&session);
 
         assert_eq!(branch.depth, 0);
         assert_eq!(branch.nodes.len(), 2);
@@ -433,30 +391,26 @@ mod tests {
     #[test]
     fn build_branch_deep_nest() {
         let tmp = project_dir();
-        let mut mgr = SessionManager::create(tmp.path()).unwrap();
-        let root_id = mgr
+        let mut session = Session::create(tmp.path()).unwrap();
+        let root_id = session
             .append(Role::User, "root".into())
             .unwrap()
             .base
             .id
             .clone();
-        // Branch 1: root -> A -> fork(B, C)
-        mgr.append(Role::Assistant, "A".into()).unwrap();
-        let a_id = mgr.current_leaf_id.clone().unwrap();
-        mgr.append(Role::User, "B".into()).unwrap();
-        mgr.branch(&a_id).unwrap();
-        mgr.append(Role::User, "C".into()).unwrap();
-        // Branch 2: root -> D
-        mgr.branch(&root_id).unwrap();
-        mgr.append(Role::Assistant, "D".into()).unwrap();
+        session.append(Role::Assistant, "A".into()).unwrap();
+        let a_id = session.current_leaf_id.clone().unwrap();
+        session.append(Role::User, "B".into()).unwrap();
+        session.branch(&a_id).unwrap();
+        session.append(Role::User, "C".into()).unwrap();
+        session.branch(&root_id).unwrap();
+        session.append(Role::Assistant, "D".into()).unwrap();
 
-        let (branch, _) = build_branch_for_test(&mgr);
+        let (branch, _) = build_branch_for_test(&session);
 
-        // root has 2 children (A and D) → branches list of 2
         assert_eq!(branch.nodes.len(), 1);
         assert_eq!(branch.nodes[0].branches.len(), 2);
 
-        // One sub-branch contains A (depth=1) which itself forks into B and C
         let sub_with_a = branch.nodes[0]
             .branches
             .iter()
@@ -466,7 +420,6 @@ mod tests {
         assert_eq!(sub_with_a.nodes[0].branches.len(), 2);
         assert_eq!(sub_with_a.nodes[0].branches[0].depth, 2);
 
-        // Other sub-branch contains D (depth=1) with no children
         let sub_with_d = branch.nodes[0]
             .branches
             .iter()

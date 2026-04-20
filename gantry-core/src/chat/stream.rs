@@ -8,8 +8,7 @@ use crate::project::resource_loader::discover_agents_md;
 use crate::project::system_prompt::build_system_prompt;
 use crate::provider::agent_factory::RigAgentFactory;
 use crate::provider::ModelSelection;
-use crate::session::manager::SessionManager;
-use crate::session::state::ConversationState;
+use crate::session::Session;
 use anyhow::Result;
 use rig::message::Message as RigMessage;
 use std::path::Path;
@@ -40,27 +39,24 @@ pub fn to_rig_messages(messages: Vec<Message>) -> Vec<RigMessage> {
         .collect()
 }
 
-pub async fn clear_pending(
+pub(crate) async fn clear_pending(
     pending_id: &str,
-    state: &Arc<Mutex<ConversationState>>,
+    pending_message: &Arc<Mutex<Option<PendingMessage>>>,
     event_bus: &EventBus,
 ) {
     dbg!("session.clear_pending", pending_id);
-    {
-        let mut state = state.lock().await;
-        state.pending_message = None;
-    }
+    *pending_message.lock().await = None;
     event_bus.publish(AppEvent::PendingCleared(PendingClearedEvent {
         pending_id: pending_id.to_string(),
     }));
 }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn stream_message(
+pub(crate) async fn stream_message(
     req: StreamMessageRequest,
     project_path: &Path,
-    session_manager: &Arc<Mutex<SessionManager>>,
-    state: &Arc<Mutex<ConversationState>>,
+    session: &Arc<Mutex<Session>>,
+    pending_message: &Arc<Mutex<Option<PendingMessage>>>,
+    active_selection: &Arc<Mutex<ModelSelection>>,
     event_bus: &EventBus,
     agent_factory: &RigAgentFactory,
     is_streaming: &Arc<AtomicBool>,
@@ -80,14 +76,10 @@ pub async fn stream_message(
     let pending = PendingMessage::new(req.content.clone());
 
     {
-        let mut mgr = session_manager.lock().await;
-        let msg = mgr
-            .append(Role::User, req.content)
-            .map(|e| e.to_message())
-            .unwrap_or_else(|_| Message::new(Role::Error, "failed to persist message"));
-        let mut state = state.lock().await;
-        state.messages.push(msg);
-        state.pending_message = Some(pending.clone());
+        let mut sess = session.lock().await;
+        sess.append(Role::User, req.content)
+            .unwrap_or_else(|_| panic!("failed to persist message"));
+        *pending_message.lock().await = Some(pending.clone());
     }
 
     event_bus.publish(AppEvent::MessageReceived(MessageReceivedEvent {
@@ -96,12 +88,12 @@ pub async fn stream_message(
     }));
     dbg!("session.stream_message.pending_published", &pending.id);
 
-    let snapshot = state.lock().await.messages.clone();
-    let selection: ModelSelection = state.lock().await.active_selection.clone();
+    let snapshot = session.lock().await.context_messages();
+    let selection = active_selection.lock().await.clone();
     let system_prompt = build_system_prompt(&discover_agents_md(project_path));
     let mut rig_messages = to_rig_messages(snapshot);
     let Some(prompt) = rig_messages.pop() else {
-        clear_pending(&pending.id, state, event_bus).await;
+        clear_pending(&pending.id, pending_message, event_bus).await;
         event_bus.publish(AppEvent::Error(ErrorEvent {
             message: "cannot generate tokens with empty message history".to_string(),
         }));
@@ -171,8 +163,11 @@ pub async fn stream_message(
         dbg!("session.stream_message.was_cancelled");
         dbg!("session.stream_message.accumulated_len", accumulated.len());
         if !accumulated.is_empty() {
-            let mut mgr = session_manager.lock().await;
-            mgr.append(Role::Assistant, accumulated).ok();
+            session
+                .lock()
+                .await
+                .append(Role::Assistant, accumulated)
+                .ok();
         }
         is_streaming.store(false, Ordering::SeqCst);
         return Ok(pending);
@@ -182,7 +177,7 @@ pub async fn stream_message(
         Ok(Ok(())) => {}
         Ok(Err(err)) => {
             dbg!("session.stream_message.llm_err", err.to_string());
-            clear_pending(&pending.id, state, event_bus).await;
+            clear_pending(&pending.id, pending_message, event_bus).await;
             event_bus.publish(AppEvent::Error(ErrorEvent {
                 message: err.to_string(),
             }));
@@ -190,7 +185,7 @@ pub async fn stream_message(
         }
         Err(err) => {
             dbg!("session.stream_message.llm_join_err", err.to_string());
-            clear_pending(&pending.id, state, event_bus).await;
+            clear_pending(&pending.id, pending_message, event_bus).await;
             event_bus.publish(AppEvent::Error(ErrorEvent {
                 message: format!("llm task failed: {}", err),
             }));
@@ -208,23 +203,21 @@ pub async fn stream_message(
     dbg!("session.stream_message.end_published");
 
     {
-        let mut mgr = session_manager.lock().await;
-        let msg = mgr
+        session
+            .lock()
+            .await
             .append(Role::Assistant, accumulated)
-            .map(|e| e.to_message())
-            .unwrap_or_else(|_| Message::new(Role::Error, "failed to persist message"));
-        let mut state = state.lock().await;
-        state.messages.push(msg);
+            .ok();
     }
 
-    clear_pending(&pending.id, state, event_bus).await;
+    clear_pending(&pending.id, pending_message, event_bus).await;
     dbg!("session.stream_message.done", &pending.id);
     Ok(pending)
 }
 
-pub async fn interrupt_stream(
+pub(crate) async fn interrupt_stream(
     message_id: String,
-    state: &Arc<Mutex<ConversationState>>,
+    pending_message: &Arc<Mutex<Option<PendingMessage>>>,
     event_bus: &EventBus,
     is_streaming: &Arc<AtomicBool>,
     cancel_tx: &Arc<Mutex<Option<oneshot::Sender<()>>>>,
@@ -236,30 +229,17 @@ pub async fn interrupt_stream(
         dbg!("session.interrupt_stream.sent_cancel");
     }
 
-    let state_guard = state.lock().await;
-    let pending = state_guard.pending_message.clone();
-    let accumulated = state_guard
-        .messages
-        .last()
-        .filter(|m| m.role == Role::Assistant)
-        .map(|m| m.content.clone())
-        .unwrap_or_default();
+    let pending = pending_message.lock().await.clone();
 
     if let Some(pending) = pending {
-        drop(state_guard);
-        dbg!(
-            "session.interrupt_stream.accumulated_len",
-            accumulated.len()
-        );
+        dbg!("session.interrupt_stream.clearing_pending");
 
-        if !accumulated.is_empty() {
-            event_bus.publish(AppEvent::StreamEnd(StreamEndEvent {
-                message_id: message_id.clone(),
-                content: accumulated.clone(),
-            }));
-        }
+        event_bus.publish(AppEvent::StreamEnd(StreamEndEvent {
+            message_id: message_id.clone(),
+            content: String::new(),
+        }));
 
-        clear_pending(&pending.id, state, event_bus).await;
+        clear_pending(&pending.id, pending_message, event_bus).await;
     }
 
     is_streaming.store(false, Ordering::SeqCst);
