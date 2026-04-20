@@ -69,8 +69,8 @@ impl SessionRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
     use tempfile::TempDir;
+    use uuid::Uuid;
 
     fn registry() -> (TempDir, SessionRegistry) {
         let tmp = TempDir::new().unwrap();

@@ -1,8 +1,7 @@
 use crate::SessionInfo;
-use crate::chat::events::{AppEvent, InitEvent, StreamMessageRequest};
-use crate::chat::stream::{interrupt_stream, stream_message, to_rig_messages};
+use crate::chat::events::StreamMessageRequest;
+use crate::chat::stream::{StreamEvent, stream_message, to_rig_messages};
 use crate::chat::{Message, PendingMessage, Role};
-use crate::event_bus::EventBus;
 use crate::project::ProjectRegistry;
 use crate::project::resource_loader::discover_agents_md;
 use crate::project::system_prompt::build_system_prompt;
@@ -13,20 +12,14 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::{Mutex, broadcast, oneshot};
-use uuid::Uuid;
+use tokio::sync::{Mutex, mpsc, oneshot};
 
 pub struct SessionHandle {
     pub project_path: PathBuf,
     pub session_id: String,
     session: Arc<Mutex<Session>>,
-    pending_message: Arc<Mutex<Option<PendingMessage>>>,
     active_selection: Arc<Mutex<ModelSelection>>,
-    event_bus: EventBus,
     agent_factory: RigAgentFactory,
-    is_streaming: Arc<AtomicBool>,
-    cancel_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
 }
 
 impl SessionHandle {
@@ -41,31 +34,9 @@ impl SessionHandle {
             project_path,
             session_id,
             session: Arc::new(Mutex::new(session)),
-            pending_message: Arc::new(Mutex::new(None)),
             active_selection: Arc::new(Mutex::new(default_selection)),
-            event_bus: EventBus::new(1000),
             agent_factory,
-            is_streaming: Arc::new(AtomicBool::new(false)),
-            cancel_tx: Arc::new(Mutex::new(None)),
         }
-    }
-
-    pub fn subscribe_events(&self) -> broadcast::Receiver<AppEvent> {
-        self.event_bus.subscribe()
-    }
-
-    pub fn is_streaming(&self) -> bool {
-        self.is_streaming.load(Ordering::SeqCst)
-    }
-
-    pub async fn init_event(&self) -> AppEvent {
-        let messages = self.session.lock().await.context_messages();
-        let pending_message = self.pending_message.lock().await.clone();
-        AppEvent::Init(InitEvent {
-            client_id: Uuid::new_v4().to_string(),
-            messages,
-            pending_message,
-        })
     }
 
     pub async fn get_messages(&self) -> Vec<Message> {
@@ -162,28 +133,23 @@ impl SessionHandle {
         messages
     }
 
-    pub async fn stream_message(&self, req: StreamMessageRequest) -> Result<PendingMessage> {
+    /// Starts streaming a message. Returns the pending message placeholder, a cancel sender,
+    /// and a receiver of stream events. The caller is responsible for driving the event receiver
+    /// and handling cancellation via the cancel sender.
+    pub async fn stream_message(
+        &self,
+        req: StreamMessageRequest,
+    ) -> Result<(
+        PendingMessage,
+        oneshot::Sender<()>,
+        mpsc::Receiver<StreamEvent>,
+    )> {
         stream_message(
             req,
             &self.project_path,
             &self.session,
-            &self.pending_message,
             &self.active_selection,
-            &self.event_bus,
             &self.agent_factory,
-            &self.is_streaming,
-            &self.cancel_tx,
-        )
-        .await
-    }
-
-    pub async fn interrupt_stream(&self, message_id: String) -> bool {
-        interrupt_stream(
-            message_id,
-            &self.pending_message,
-            &self.event_bus,
-            &self.is_streaming,
-            &self.cancel_tx,
         )
         .await
     }

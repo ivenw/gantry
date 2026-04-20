@@ -215,9 +215,7 @@ mod tests {
             .unwrap();
 
         session.branch(&root_id).unwrap();
-        session
-            .append(Role::User, "branch B".to_string())
-            .unwrap();
+        session.append(Role::User, "branch B".to_string()).unwrap();
 
         let ctx = session.context_messages();
         assert_eq!(ctx.len(), 2);
