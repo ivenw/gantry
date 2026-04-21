@@ -1,7 +1,8 @@
-use gantry_core::{Branch, BranchNode, Message, Role, SessionTree};
+use gantry_core::{Branch, SessionId, SessionTree};
+use gantry_rpc::WireMessage;
 
 pub struct Model {
-    pub session_id: String,
+    pub session_id: Option<SessionId>,
     pub connection_state: ConnectionState,
     pub chat: ChatModel,
     pub input: InputModel,
@@ -24,7 +25,7 @@ pub enum ConnectionState {
 }
 
 pub struct ChatModel {
-    pub messages: Vec<Message>,
+    pub messages: Vec<WireMessage>,
     pub pending_message_id: Option<String>,
     pub streaming_content: Option<String>,
     pub streaming_message_idx: Option<usize>,
@@ -58,7 +59,7 @@ pub struct CommandEntry {
 impl Model {
     pub fn new() -> Self {
         Self {
-            session_id: String::new(),
+            session_id: None,
             connection_state: ConnectionState::Disconnected,
             chat: ChatModel::new(),
             input: InputModel::new(),
@@ -128,9 +129,9 @@ impl Model {
     }
 
     pub fn activate_tree_view(&mut self, tree: SessionTree) {
-        let selected_idx = branch_rows(&tree.stem)
+        let selected_idx = branch_rows(&tree.stem, 0)
             .iter()
-            .position(|(n, _)| Some(&n.id) == tree.current_leaf_id.as_ref())
+            .position(|(b, _)| b.node.id == tree.current_leaf_id)
             .unwrap_or(0);
         self.tree_view = Some(TreeView {
             tree,
@@ -151,29 +152,30 @@ impl Model {
 
     pub fn move_tree_selection_down(&mut self) {
         if let Some(ref mut tv) = self.tree_view {
-            let count = branch_rows(&tv.tree.stem).len();
+            let count = branch_rows(&tv.tree.stem, 0).len();
             if count > 0 {
                 tv.selected_idx = (tv.selected_idx + 1).min(count - 1);
             }
         }
     }
 
-    pub fn selected_tree_node(&self) -> Option<&BranchNode> {
+    pub fn selected_tree_node(&self) -> Option<&Branch> {
         self.tree_view
             .as_ref()
-            .and_then(|tv| branch_rows(&tv.tree.stem).into_iter().nth(tv.selected_idx))
+            .and_then(|tv| {
+                branch_rows(&tv.tree.stem, 0)
+                    .into_iter()
+                    .nth(tv.selected_idx)
+            })
             .map(|(n, _)| n)
     }
 }
 
-/// Flatten a `Branch` into a DFS-ordered list of `(node, depth)` pairs for row-indexed access.
-pub fn branch_rows(branch: &Branch) -> Vec<(&BranchNode, usize)> {
-    let mut rows = Vec::new();
-    for node in &branch.nodes {
-        rows.push((node, branch.depth));
-        for sub in &node.branches {
-            rows.extend(branch_rows(sub));
-        }
+/// Flattens a `Branch` tree into a DFS-ordered list of `(branch, depth)` pairs for row-indexed access.
+pub fn branch_rows(branch: &Branch, depth: usize) -> Vec<(&Branch, usize)> {
+    let mut rows = vec![(branch, depth)];
+    for sub in &branch.branches {
+        rows.extend(branch_rows(sub, depth + 1));
     }
     rows
 }
@@ -193,11 +195,7 @@ impl ChatModel {
     }
 
     pub fn add_user_message(&mut self, content: String) {
-        self.messages.push(Message::new(Role::User, content));
-    }
-
-    pub fn add_error_message(&mut self, content: String) {
-        self.messages.push(Message::new(Role::Error, content));
+        self.messages.push(WireMessage::User { content });
     }
 
     pub fn start_streaming_message(&mut self) {
@@ -218,15 +216,17 @@ impl ChatModel {
             if let Some(ref mut streaming) = self.streaming_content {
                 // Push the message on first flush.
                 if !self.streaming_message_pushed {
-                    self.messages
-                        .push(Message::new(Role::Assistant, String::new()));
+                    self.messages.push(WireMessage::Assistant {
+                        content: String::new(),
+                    });
                     self.streaming_message_pushed = true;
                 }
                 streaming.push_str(&line);
                 if let Some(idx) = self.streaming_message_idx
                     && idx < self.messages.len()
+                    && let WireMessage::Assistant { ref mut content } = self.messages[idx]
                 {
-                    self.messages[idx].content.push_str(&line);
+                    content.push_str(&line);
                 }
             }
         }
@@ -237,15 +237,17 @@ impl ChatModel {
             && let Some(ref mut streaming) = self.streaming_content
         {
             if !self.streaming_message_pushed {
-                self.messages
-                    .push(Message::new(Role::Assistant, String::new()));
+                self.messages.push(WireMessage::Assistant {
+                    content: String::new(),
+                });
                 self.streaming_message_pushed = true;
             }
             streaming.push_str(&self.streaming_buffer);
             if let Some(idx) = self.streaming_message_idx
                 && idx < self.messages.len()
+                && let WireMessage::Assistant { ref mut content } = self.messages[idx]
             {
-                self.messages[idx].content.push_str(&self.streaming_buffer);
+                content.push_str(&self.streaming_buffer);
             }
         }
         self.streaming_content = None;

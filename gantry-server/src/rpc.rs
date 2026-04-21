@@ -1,23 +1,25 @@
 use anyhow::Result;
+use gantry_core::dirs::{ProjectConfigDir, ProjectRootDir};
+use gantry_core::project::ProjectRegistry;
+use gantry_core::provider::agent_factory::RigAgentFactory;
+use gantry_core::session::registry::{FsSessionRegistry, SessionRegistry};
 use gantry_core::{
-    AppEvent, AppService, ErrorEvent, InitEvent, Message, MessageReceivedEvent,
-    PendingClearedEvent, PendingMessage, SessionInfo, StreamEndEvent, StreamEvent,
-    StreamMessageRequest, StreamStartEvent, TokenEvent,
+    AppEvent, ChatService, ErrorEvent, InitEvent, MessageReceivedEvent, PendingClearedEvent,
+    ProviderConfig, SessionId, SessionInfo, StreamEndEvent, StreamEvent, StreamMessageRequest,
+    StreamStartEvent, TokenEvent, ToolCallStartedEvent, ToolResultReceivedEvent,
 };
-use jsonrpsee::RpcModule;
+use gantry_rpc::wire::EventBus;
+use gantry_rpc::wire::message::to_wire;
+use gantry_rpc::{GantryRpcServer, WireMessage};
+use gantry_rpc::{SessionHandle, SessionManager};
 use jsonrpsee::core::{RpcResult, SubscriptionResult, async_trait};
-use jsonrpsee::server::{
-    PendingSubscriptionSink, ServerBuilder, ServerConfig, ServerHandle, SubscriptionSink,
-};
+use jsonrpsee::server::{PendingSubscriptionSink, SubscriptionSink};
 use jsonrpsee::types::ErrorObjectOwned;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{Mutex, broadcast, oneshot};
 use uuid::Uuid;
-
-use crate::GantryRpcServer;
-use crate::wire::EventBus;
 
 fn internal_error(details: impl Into<String>) -> ErrorObjectOwned {
     ErrorObjectOwned::owned(-32603, "Internal error", Some(details.into()))
@@ -29,31 +31,43 @@ fn invalid_request(msg: impl Into<String>) -> ErrorObjectOwned {
 
 /// Per-connection transport state wrapping a domain SessionHandle.
 struct RpcSession {
-    handle: Arc<gantry_core::service::SessionHandle>,
-    pending_message: Arc<Mutex<Option<PendingMessage>>>,
+    handle: Arc<SessionHandle>,
+    chat_service: Arc<ChatService>,
+    pending_id: Arc<Mutex<Option<String>>>,
     event_bus: EventBus,
     is_streaming: Arc<AtomicBool>,
     cancel_tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
 }
 
 impl RpcSession {
-    fn new(handle: Arc<gantry_core::service::SessionHandle>) -> Self {
+    /// Creates a new RPC session wrapping the given domain session handle and chat service.
+    fn new(handle: Arc<SessionHandle>, chat_service: Arc<ChatService>) -> Self {
         Self {
             handle,
-            pending_message: Arc::new(Mutex::new(None)),
+            chat_service,
+            pending_id: Arc::new(Mutex::new(None)),
             event_bus: EventBus::new(1000),
             is_streaming: Arc::new(AtomicBool::new(false)),
             cancel_tx: Arc::new(Mutex::new(None)),
         }
     }
 
+    /// Subscribes to the event bus for this session.
     fn subscribe_events(&self) -> broadcast::Receiver<AppEvent> {
         self.event_bus.subscribe()
     }
 
+    /// Builds the init event with current messages and pending state.
     async fn init_event(&self) -> AppEvent {
         let messages = self.handle.get_messages().await;
-        let pending_message = self.pending_message.lock().await.clone();
+        // pending_message on the wire is the user turn currently being streamed; we synthesize
+        // a minimal wire-compatible message from the stored content if a stream is active.
+        let pending_message = self
+            .pending_id
+            .lock()
+            .await
+            .clone()
+            .map(|_| rig::message::Message::user(String::new()));
         AppEvent::Init(InitEvent {
             client_id: Uuid::new_v4().to_string(),
             messages,
@@ -61,7 +75,8 @@ impl RpcSession {
         })
     }
 
-    async fn stream_message(&self, req: StreamMessageRequest) -> Result<PendingMessage> {
+    /// Starts streaming a message and spawns a task to forward stream events to the event bus.
+    async fn stream_message(&self, req: StreamMessageRequest) -> Result<String> {
         if self
             .is_streaming
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -70,21 +85,24 @@ impl RpcSession {
             return Err(anyhow::anyhow!("a stream is already in progress"));
         }
 
-        let (pending, cancel_tx, mut event_rx) = self.handle.stream_message(req).await?;
+        let (pending_id, cancel_tx, mut event_rx) = self
+            .chat_service
+            .stream_message(self.handle.clone(), req)
+            .await?;
 
-        *self.pending_message.lock().await = Some(pending.clone());
+        *self.pending_id.lock().await = Some(pending_id.clone());
         *self.cancel_tx.lock().await = Some(cancel_tx);
 
         let event_bus = self.event_bus.clone();
-        let pending_message = self.pending_message.clone();
+        let pending_id_state = self.pending_id.clone();
         let is_streaming = self.is_streaming.clone();
 
         tokio::spawn(async move {
             while let Some(ev) = event_rx.recv().await {
                 match ev {
                     StreamEvent::MessageReceived {
-                        pending_id,
                         content,
+                        pending_id,
                     } => {
                         event_bus.publish(AppEvent::MessageReceived(MessageReceivedEvent {
                             id: pending_id,
@@ -113,9 +131,29 @@ impl RpcSession {
                         }));
                     }
                     StreamEvent::PendingCleared { pending_id } => {
-                        *pending_message.lock().await = None;
+                        *pending_id_state.lock().await = None;
                         event_bus
                             .publish(AppEvent::PendingCleared(PendingClearedEvent { pending_id }));
+                    }
+                    StreamEvent::ToolCallStarted {
+                        tool_call_id,
+                        tool_name,
+                    } => {
+                        event_bus.publish(AppEvent::ToolCallStarted(ToolCallStartedEvent {
+                            tool_call_id,
+                            tool_name,
+                        }));
+                    }
+                    StreamEvent::ToolResultReceived {
+                        tool_call_id,
+                        tool_name,
+                        content,
+                    } => {
+                        event_bus.publish(AppEvent::ToolResultReceived(ToolResultReceivedEvent {
+                            tool_call_id,
+                            tool_name,
+                            content,
+                        }));
                     }
                     StreamEvent::Error { message } => {
                         event_bus.publish(AppEvent::Error(ErrorEvent { message }));
@@ -125,23 +163,21 @@ impl RpcSession {
             is_streaming.store(false, Ordering::SeqCst);
         });
 
-        Ok(pending)
+        Ok(pending_id)
     }
 
+    /// Cancels the active stream and publishes terminal events to subscribers.
     async fn interrupt_stream(&self, message_id: String) -> bool {
         if let Some(tx) = self.cancel_tx.lock().await.take() {
             let _ = tx.send(());
             dbg!("rpc_session.interrupt_stream.sent_cancel");
         }
 
-        let pending = self.pending_message.lock().await.clone();
-        if let Some(pending) = pending {
+        let pending = self.pending_id.lock().await.take();
+        if let Some(pending_id) = pending {
             event_bus_publish_stream_end(&self.event_bus, message_id);
-            *self.pending_message.lock().await = None;
             self.event_bus
-                .publish(AppEvent::PendingCleared(PendingClearedEvent {
-                    pending_id: pending.id,
-                }));
+                .publish(AppEvent::PendingCleared(PendingClearedEvent { pending_id }));
         }
 
         self.is_streaming.store(false, Ordering::SeqCst);
@@ -156,19 +192,30 @@ fn event_bus_publish_stream_end(event_bus: &EventBus, message_id: String) {
     }));
 }
 
-// Per-connection state. `RpcApp` is cloned per connection by jsonrpsee.
+/// Per-connection RPC state. Cloned per connection by jsonrpsee.
 #[derive(Clone)]
-pub struct RpcApp {
-    app: AppService,
-    /// Bound RpcSession — set by bind_session, keyed on session_id for lookup.
-    session: Arc<Mutex<Option<(String, String)>>>,
+pub struct RpcApp<P> {
+    projects: Arc<P>,
+    sessions: Arc<SessionManager>,
+    agent_factory: RigAgentFactory,
+    chat_service: Arc<ChatService>,
+    session: Arc<Mutex<Option<(SessionId, String)>>>,
     rpc_session: Arc<Mutex<Option<Arc<RpcSession>>>>,
 }
 
-impl RpcApp {
-    fn new(app: AppService) -> Self {
+impl<P: ProjectRegistry> RpcApp<P> {
+    /// Creates a new RPC application binding the given domain dependencies.
+    pub fn new(
+        projects: Arc<P>,
+        sessions: Arc<SessionManager>,
+        agent_factory: RigAgentFactory,
+    ) -> Self {
+        let chat_service = Arc::new(ChatService::new(agent_factory.clone()));
         Self {
-            app,
+            projects,
+            sessions,
+            agent_factory,
+            chat_service,
             session: Arc::new(Mutex::new(None)),
             rpc_session: Arc::new(Mutex::new(None)),
         }
@@ -184,11 +231,11 @@ impl RpcApp {
 }
 
 #[async_trait]
-impl GantryRpcServer for RpcApp {
+impl<P: ProjectRegistry + Send + Sync + 'static> GantryRpcServer for RpcApp<P> {
     async fn register_project(&self, path: PathBuf) -> RpcResult<()> {
         dbg!("rpc.register_project.request", &path);
-        self.app
-            .register_project(&path)
+        self.projects
+            .register(&path)
             .map_err(|e| internal_error(e.to_string()))?;
         dbg!("rpc.register_project.done", &path);
         Ok(())
@@ -197,8 +244,8 @@ impl GantryRpcServer for RpcApp {
     async fn list_projects(&self) -> RpcResult<Vec<PathBuf>> {
         dbg!("rpc.list_projects.request");
         let projects = self
-            .app
-            .list_projects()
+            .projects
+            .list()
             .map_err(|e| internal_error(e.to_string()))?;
         dbg!("rpc.list_projects.count", projects.len());
         Ok(projects)
@@ -206,18 +253,24 @@ impl GantryRpcServer for RpcApp {
 
     async fn unregister_project(&self, path: PathBuf) -> RpcResult<()> {
         dbg!("rpc.unregister_project.request", &path);
-        self.app
-            .unregister_project(&path)
+        self.projects
+            .unregister(&path)
             .map_err(|e| internal_error(e.to_string()))?;
         dbg!("rpc.unregister_project.done", &path);
         Ok(())
     }
 
-    async fn create_session(&self, project_path: PathBuf) -> RpcResult<String> {
+    async fn create_session(&self, project_path: PathBuf) -> RpcResult<SessionId> {
         dbg!("rpc.create_session.request", &project_path);
+        let default_selection = self
+            .agent_factory
+            .catalog()
+            .default_selection()
+            .expect("provider catalog must be valid");
         let id = self
-            .app
-            .create_session(&project_path)
+            .sessions
+            .create_session(&project_path, &*self.projects, default_selection)
+            .await
             .map_err(|e| internal_error(e.to_string()))?;
         dbg!("rpc.create_session.created", &id);
         Ok(id)
@@ -225,50 +278,57 @@ impl GantryRpcServer for RpcApp {
 
     async fn list_sessions(&self, project_path: PathBuf) -> RpcResult<Vec<SessionInfo>> {
         dbg!("rpc.list_sessions.request", &project_path);
-        let sessions = self
-            .app
-            .list_sessions(&project_path)
+        let sessions = ProjectRootDir::new(&project_path)
+            .and_then(|root| ProjectConfigDir::new(&root))
+            .and_then(|config_dir| FsSessionRegistry::new(&config_dir))
+            .and_then(|r| r.list())
             .map_err(|e| internal_error(e.to_string()))?;
         dbg!("rpc.list_sessions.count", sessions.len());
         Ok(sessions)
     }
 
-    async fn bind_session(&self, session_id: String, project_path: PathBuf) -> RpcResult<()> {
+    async fn bind_session(&self, session_id: SessionId, project_path: PathBuf) -> RpcResult<()> {
         dbg!("rpc.bind_session.request", &session_id, &project_path);
         let project_path_str = project_path.to_string_lossy().into_owned();
+        let default_selection = self
+            .agent_factory
+            .catalog()
+            .default_selection()
+            .expect("provider catalog must be valid");
         let handle = self
-            .app
-            .get_or_load_session(&project_path_str, &session_id)
+            .sessions
+            .get_or_load(&project_path_str, &session_id, default_selection)
             .await
             .map_err(|e| invalid_request(e.to_string()))?;
 
         *self.session.lock().await = Some((session_id.clone(), project_path_str));
-        *self.rpc_session.lock().await = Some(Arc::new(RpcSession::new(handle)));
+        *self.rpc_session.lock().await =
+            Some(Arc::new(RpcSession::new(handle, self.chat_service.clone())));
         dbg!("rpc.bind_session.done", &session_id);
         Ok(())
     }
 
-    async fn send_message(&self, content: String) -> RpcResult<Vec<Message>> {
+    async fn send_message(&self, content: String) -> RpcResult<Vec<WireMessage>> {
         dbg!("rpc.send_message.request", &content);
         let session = self.bound_session().await?;
-        let messages = session.handle.send_message(content).await;
+        let messages = session
+            .chat_service
+            .send_message(session.handle.clone(), content)
+            .await
+            .map_err(|e| jsonrpsee::types::ErrorObject::owned(-32000, e.to_string(), None::<()>))?;
         dbg!("rpc.send_message.response_count", messages.len());
-        Ok(messages)
+        Ok(messages.iter().filter_map(to_wire).collect())
     }
 
-    async fn stream_message(&self, req: StreamMessageRequest) -> RpcResult<PendingMessage> {
+    async fn stream_message(&self, req: StreamMessageRequest) -> RpcResult<String> {
         dbg!("rpc.stream_message.request.content", &req.content);
         let session = self.bound_session().await?;
-        let pending = session
+        let pending_id = session
             .stream_message(req)
             .await
             .map_err(|e| internal_error(e.to_string()))?;
-        dbg!(
-            "rpc.stream_message.response.pending",
-            &pending.id,
-            &pending.content
-        );
-        Ok(pending)
+        dbg!("rpc.stream_message.response.pending", &pending_id);
+        Ok(pending_id)
     }
 
     async fn subscribe_events(&self, pending: PendingSubscriptionSink) -> SubscriptionResult {
@@ -324,12 +384,12 @@ impl GantryRpcServer for RpcApp {
         Ok(())
     }
 
-    async fn get_messages(&self) -> RpcResult<Vec<Message>> {
+    async fn get_messages(&self) -> RpcResult<Vec<WireMessage>> {
         dbg!("rpc.get_messages.request");
         let session = self.bound_session().await?;
         let messages = session.handle.get_messages().await;
         dbg!("rpc.get_messages.response_count", messages.len());
-        Ok(messages)
+        Ok(messages.iter().filter_map(to_wire).collect())
     }
 
     async fn clear_messages(&self) -> RpcResult<()> {
@@ -347,12 +407,35 @@ impl GantryRpcServer for RpcApp {
         Ok(result)
     }
 
+    async fn list_providers(&self) -> RpcResult<Vec<ProviderConfig>> {
+        dbg!("rpc.list_providers.request");
+        Ok(self.chat_service.list_providers())
+    }
+
+    async fn set_active_provider(&self, provider_id: gantry_core::ProviderId) -> RpcResult<()> {
+        dbg!("rpc.set_active_provider.request", &provider_id);
+        let session = self.bound_session().await?;
+        self.chat_service
+            .set_active_provider(&session.handle, provider_id)
+            .await
+            .map_err(|e| internal_error(e.to_string()))
+    }
+
+    async fn set_active_model(&self, model_id: gantry_core::ModelId) -> RpcResult<()> {
+        dbg!("rpc.set_active_model.request", &model_id);
+        let session = self.bound_session().await?;
+        self.chat_service
+            .set_active_model(&session.handle, model_id)
+            .await
+            .map_err(|e| internal_error(e.to_string()))
+    }
+
     async fn ping(&self) -> RpcResult<()> {
         dbg!("rpc.ping.request");
         Ok(())
     }
 
-    async fn get_tree(&self) -> RpcResult<gantry_core::SessionTree> {
+    async fn get_tree(&self) -> RpcResult<Option<gantry_core::SessionTree>> {
         dbg!("rpc.get_tree.request");
         let session = self.bound_session().await?;
         Ok(session.handle.get_tree().await)
@@ -371,30 +454,8 @@ impl GantryRpcServer for RpcApp {
     }
 }
 
-pub async fn start_rpc_server<Context>(
-    addr: &str,
-    port: u16,
-    module: RpcModule<Context>,
-) -> Result<ServerHandle>
-where
-    Context: Send + Sync + 'static,
-{
-    dbg!("rpc.start_server", addr, port);
-    let config = ServerConfig::builder().ws_only().build();
-    let rpc_server = ServerBuilder::new()
-        .set_config(config)
-        .build((addr, port))
-        .await?;
-    dbg!("rpc.server_listening", addr, port);
-    Ok(rpc_server.start(module))
-}
-
-pub async fn start_app_rpc_server(addr: &str, port: u16, app: AppService) -> Result<ServerHandle> {
-    start_rpc_server(addr, port, RpcApp::new(app).into_rpc().remove_context()).await
-}
-
 async fn send_event(sink: &SubscriptionSink, event: &AppEvent) -> SubscriptionResult {
-    let wire = crate::wire::WireAppEvent::from(event);
+    let wire = gantry_rpc::WireAppEvent::from(event);
     let Ok(payload) = serde_json::value::to_raw_value(&wire) else {
         dbg!("rpc.send_event.serialize_failed");
         return Err("failed to serialize event".into());

@@ -44,7 +44,7 @@ impl Runtime {
             rt.block_on(connection::try_connect_async(&addr, port, &project_path))
         {
             model.connection_state = ConnectionState::Connected;
-            model.session_id = session_id;
+            model.session_id = Some(session_id);
             let client = Arc::new(client);
             let event_task = spawn_ws_forwarder_inner(&rt, event_rx, msg_tx.clone());
             drop(event_handle);
@@ -260,7 +260,9 @@ impl Runtime {
         };
         let addr = self.addr.clone();
         let port = self.port;
-        let session_id = self.model.session_id.clone();
+        let Some(session_id) = self.model.session_id.clone() else {
+            return;
+        };
         let project_path = self.project_path.clone();
 
         self.rt.spawn(async move {
@@ -367,7 +369,7 @@ fn spawn_ws_forwarder_inner(
     rt.spawn(async move {
         while let Some(ev) = event_rx.recv().await {
             let msg = match ev {
-                WsConnectionEvent::Event(e) => Msg::AppEvent(e),
+                WsConnectionEvent::Event(e) => Msg::AppEvent(*e),
                 WsConnectionEvent::Disconnected => Msg::WsDisconnected,
                 WsConnectionEvent::Error(e) => Msg::WsError(e),
             };

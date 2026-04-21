@@ -1,3 +1,4 @@
+use gantry_core::SessionId;
 use gantry_rpc::{JsonRpcClient, WsConnectionEvent};
 use std::path::Path;
 use tokio::sync::mpsc::Receiver;
@@ -9,7 +10,7 @@ pub async fn try_connect_async(
     project_path: &Path,
 ) -> Option<(
     JsonRpcClient,
-    String,
+    SessionId,
     JoinHandle<()>,
     Receiver<WsConnectionEvent>,
 )> {

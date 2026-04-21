@@ -15,7 +15,7 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             None
         }
         Msg::WsError(e) => {
-            model.chat.add_error_message(e);
+            model.status_message = Some(e);
             None
         }
         Msg::StreamResult(Ok(())) => None,
@@ -25,7 +25,7 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
                 model.connection_state = ConnectionState::Disconnected;
                 model.status_message = Some("Disconnected \u{2014} reconnecting...".into());
             } else {
-                model.chat.add_error_message(e);
+                model.status_message = Some(e);
             }
             None
         }
@@ -39,7 +39,7 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             ..
         } => {
             model.connection_state = ConnectionState::Connected;
-            model.session_id = session_id;
+            model.session_id = Some(session_id);
             model.status_message = None;
             if clear_messages {
                 model.chat.reset();
@@ -47,7 +47,7 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             None
         }
         Msg::NewSession { session_id, .. } => {
-            model.session_id = session_id;
+            model.session_id = Some(session_id);
             model.chat.reset();
             model.connection_state = ConnectionState::Connected;
             model.status_message = None;
@@ -97,11 +97,15 @@ fn handle_app_event(model: &mut Model, event: AppEvent) -> Option<Msg> {
             // arriving from a reconnect subscribe while the user already sent a message).
             if model.chat.pending_message_id.is_none() && model.chat.streaming_message_idx.is_none()
             {
-                model.chat.messages = ev.messages;
-                if let Some(pending) = ev.pending_message {
-                    model.chat.add_user_message(pending.content.clone());
+                model.chat.messages = ev
+                    .messages
+                    .into_iter()
+                    .map(gantry_rpc::WireMessage::from)
+                    .collect();
+                let pending_wire = ev.pending_message.map(gantry_rpc::WireMessage::from);
+                if let Some(gantry_rpc::WireMessage::User { ref content }) = pending_wire {
+                    model.chat.add_user_message(content.clone());
                     model.chat.start_streaming_message();
-                    model.chat.pending_message_id = Some(pending.id);
                 }
             }
         }
@@ -124,8 +128,14 @@ fn handle_app_event(model: &mut Model, event: AppEvent) -> Option<Msg> {
         AppEvent::PendingCleared(_) => {
             model.chat.pending_message_id = None;
         }
+        AppEvent::ToolCallStarted(_) => {
+            // Future: show a spinner in the chat view keyed on tool_call_id.
+        }
+        AppEvent::ToolResultReceived(_) => {
+            // Future: replace spinner with result when it arrives.
+        }
         AppEvent::Error(ev) => {
-            model.chat.add_error_message(ev.message);
+            model.status_message = Some(ev.message);
         }
     }
     None
@@ -239,20 +249,20 @@ fn handle_esc(model: &mut Model) -> Option<Msg> {
 fn handle_enter(model: &mut Model, modifiers: KeyModifiers) -> Option<Msg> {
     if model.is_tree_view_active() {
         let node = model.selected_tree_node()?;
-        let msg = if node.role == gantry_core::Role::User {
-            let input = node.content.clone();
+        let msg = if matches!(node.node.message, gantry_core::Message::User { .. }) {
+            let input = gantry_core::message_text(&node.node.message);
             let tv = model.tree_view.as_ref()?;
-            let rows = branch_rows(&tv.tree.stem);
+            let rows = branch_rows(&tv.tree.stem, 0);
             let preceding = rows[..tv.selected_idx]
                 .iter()
-                .rfind(|(n, _)| n.role != gantry_core::Role::User)
-                .map(|(n, _)| n.id.clone())?;
+                .rfind(|(n, _)| !matches!(n.node.message, gantry_core::Message::User { .. }))
+                .map(|(n, _)| n.node.id.to_string())?;
             Msg::BranchToWithInput {
                 branch_id: preceding,
                 input,
             }
         } else {
-            Msg::BranchTo(node.id.clone())
+            Msg::BranchTo(node.node.id.to_string())
         };
         return Some(msg);
     }

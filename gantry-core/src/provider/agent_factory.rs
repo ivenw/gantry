@@ -11,6 +11,24 @@ use tokio::sync::mpsc;
 
 use crate::provider::{ModelSelection, ProviderConfig, ProviderConfigCatalog};
 
+/// Events emitted by [`ConfiguredAgent::stream_chat`] to the caller.
+#[derive(Debug)]
+pub enum AgentStreamEvent {
+    /// A text delta from the assistant.
+    Token(String),
+    /// A tool call has started; the tool is now executing.
+    ToolCallStarted {
+        tool_call_id: String,
+        tool_name: String,
+    },
+    /// A tool result is available.
+    ToolResultReceived {
+        tool_call_id: String,
+        tool_name: String,
+        content: String,
+    },
+}
+
 // TODO: Skeptical if we need this as a struct. A factory function seems better
 #[derive(Clone)]
 pub struct RigAgentFactory {
@@ -29,8 +47,6 @@ impl RigAgentFactory {
     }
 
     // TODO: Why is this async? We are not awaiting anything inside of it.
-    // TODO: We actually wanted to return a AgentBuilder here. Since that has to be wrapped, we
-    // probably still need the ConfiguredAgent wrapper too.
     pub async fn agent(
         &self,
         selection: &ModelSelection,
@@ -64,7 +80,6 @@ impl RigAgentFactory {
         }
     }
 
-    // TODO: Skeptical if this warrants it's own helper
     fn provider_config(&self, selection: &ModelSelection) -> Result<ProviderConfig> {
         self.catalog
             .provider(&selection.provider_id)
@@ -93,19 +108,22 @@ impl ConfiguredAgent {
         }
     }
 
-    // TODO: Change this interface to match rigs 1:1
+    /// Sends a single-turn chat and returns the assistant's response text.
     pub async fn chat(&self, prompt: Message, history: Vec<Message>) -> Result<String> {
         match &self.inner {
             ConfiguredAgentKind::Ollama(agent) => Ok(agent.chat(prompt, history).await?),
         }
     }
 
-    // TODO: Change this interface to match rigs 1:1
+    /// Streams a multi-turn chat, forwarding events to `event_tx`.
+    ///
+    /// Text deltas, tool-call starts, and tool results are all emitted as [`AgentStreamEvent`]s.
+    /// Returns an error if the stream yields zero tokens.
     pub async fn stream_chat(
         &self,
         prompt: Message,
         history: Vec<Message>,
-        token_tx: mpsc::Sender<String>,
+        event_tx: mpsc::Sender<AgentStreamEvent>,
     ) -> Result<()> {
         match &self.inner {
             ConfiguredAgentKind::Ollama(agent) => {
@@ -117,11 +135,50 @@ impl ConfiguredAgent {
                         Ok(MultiTurnStreamItem::StreamAssistantItem(
                             StreamedAssistantContent::Text(text),
                         )) => {
-                            token_tx
-                                .send(text.text)
+                            event_tx
+                                .send(AgentStreamEvent::Token(text.text))
                                 .await
-                                .map_err(|_| anyhow::anyhow!("token channel closed"))?;
+                                .map_err(|_| anyhow::anyhow!("event channel closed"))?;
                             token_count += 1;
+                        }
+                        Ok(MultiTurnStreamItem::StreamAssistantItem(
+                            StreamedAssistantContent::ToolCall {
+                                tool_call,
+                                internal_call_id: _,
+                            },
+                        )) => {
+                            event_tx
+                                .send(AgentStreamEvent::ToolCallStarted {
+                                    tool_call_id: tool_call.id.clone(),
+                                    tool_name: tool_call.function.name.clone(),
+                                })
+                                .await
+                                .map_err(|_| anyhow::anyhow!("event channel closed"))?;
+                        }
+                        Ok(MultiTurnStreamItem::StreamUserItem(
+                            rig::streaming::StreamedUserContent::ToolResult { tool_result, .. },
+                        )) => {
+                            let content = tool_result
+                                .content
+                                .iter()
+                                .map(|c| match c {
+                                    rig::message::ToolResultContent::Text(t) => t.text.clone(),
+                                    rig::message::ToolResultContent::Image(_) => String::new(),
+                                })
+                                .collect::<Vec<_>>()
+                                .join("\n");
+                            let tool_call_id = tool_result
+                                .call_id
+                                .clone()
+                                .unwrap_or_else(|| tool_result.id.clone());
+                            event_tx
+                                .send(AgentStreamEvent::ToolResultReceived {
+                                    tool_call_id,
+                                    tool_name: tool_result.id.clone(),
+                                    content,
+                                })
+                                .await
+                                .map_err(|_| anyhow::anyhow!("event channel closed"))?;
                         }
                         Ok(_) => {}
                         Err(err) => {

@@ -1,5 +1,5 @@
 [package]
-name = "gantry-cli"
+name = "gantry-app"
 version.workspace = true
 edition.workspace = true
 

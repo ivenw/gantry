@@ -1,6 +1,8 @@
 pub mod events;
+pub mod message;
 
 pub use events::WireAppEvent;
+pub use message::WireMessage;
 
 use gantry_core::AppEvent;
 use tokio::sync::broadcast;

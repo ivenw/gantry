@@ -1,20 +1,49 @@
 pub mod chat;
+pub mod dirs;
+pub mod fs;
 pub mod project;
 pub mod provider;
-pub mod service;
 pub mod session;
 pub mod tools;
 
 pub use chat::events::{
     AppEvent, ErrorEvent, InitEvent, MessageReceivedEvent, PendingClearedEvent, StreamEndEvent,
-    StreamMessageRequest, StreamStartEvent, TokenEvent,
+    StreamMessageRequest, StreamStartEvent, TokenEvent, ToolCallStartedEvent,
+    ToolResultReceivedEvent,
 };
+pub use chat::service::ChatService;
 pub use chat::stream::StreamEvent;
-pub use chat::{Message, PendingMessage, Role};
 pub use provider::agent_factory::RigAgentFactory;
 pub use provider::{
     ConfiguredModel, ModelId, ModelSelection, OllamaProviderConfig, ProviderConfig,
     ProviderConfigCatalog, ProviderId,
 };
-pub use service::{AppService, SessionHandle};
-pub use session::{Branch, BranchNode, Session, SessionInfo, SessionTree};
+pub use rig::message::Message;
+
+/// Extracts the first text string from a rig [`Message`] for display purposes.
+pub fn message_text(message: &Message) -> String {
+    use rig::message::{AssistantContent, UserContent};
+    match message {
+        Message::User { content } => content
+            .iter()
+            .find_map(|c| match c {
+                UserContent::Text(t) => Some(t.text.clone()),
+                _ => None,
+            })
+            .unwrap_or_default(),
+        Message::Assistant { content, .. } => content
+            .iter()
+            .find_map(|c| match c {
+                AssistantContent::Text(t) => Some(t.text.clone()),
+                _ => None,
+            })
+            .unwrap_or_default(),
+        Message::System { content } => content.clone(),
+    }
+}
+
+pub use fs::FsSessionRegistry;
+pub use session::{
+    Branch, NodeId, Session, SessionHandle, SessionId, SessionInfo, SessionManager, SessionRegistry,
+    SessionTree,
+};

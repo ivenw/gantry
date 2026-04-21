@@ -1,22 +1,19 @@
 use crate::chat::events::StreamMessageRequest;
-use crate::chat::{Message, PendingMessage, Role};
+use crate::chat::system_prompt::build_system_prompt;
 use crate::project::resource_loader::discover_agents_md;
-use crate::project::system_prompt::build_system_prompt;
-use crate::provider::ModelSelection;
 use crate::provider::agent_factory::RigAgentFactory;
-use crate::session::Session;
+use crate::session::SessionHandle;
 use anyhow::Result;
-use rig::message::Message as RigMessage;
-use std::path::Path;
+use rig::message::Message;
 use std::sync::Arc;
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub enum StreamEvent {
     MessageReceived {
-        pending_id: String,
         content: String,
+        pending_id: String,
     },
     StreamStart {
         message_id: String,
@@ -33,62 +30,52 @@ pub enum StreamEvent {
     PendingCleared {
         pending_id: String,
     },
+    ToolCallStarted {
+        tool_call_id: String,
+        tool_name: String,
+    },
+    ToolResultReceived {
+        tool_call_id: String,
+        tool_name: String,
+        content: String,
+    },
     Error {
         message: String,
     },
 }
 
-pub fn to_rig_messages(messages: Vec<Message>) -> Vec<RigMessage> {
-    messages
-        .into_iter()
-        .map(|msg| match msg.role {
-            Role::User => RigMessage::user(msg.content),
-            Role::Assistant => RigMessage::assistant(msg.content),
-            Role::Error => RigMessage::user(format!("[Error]: {}", msg.content)),
-        })
-        .collect()
-}
-
-pub(crate) async fn stream_message(
+pub(crate) async fn stream_message_with_factory(
     req: StreamMessageRequest,
-    project_path: &Path,
-    session: &Arc<Mutex<Session>>,
-    active_selection: &Arc<Mutex<ModelSelection>>,
+    handle: Arc<SessionHandle>,
     agent_factory: &RigAgentFactory,
-) -> Result<(
-    PendingMessage,
-    oneshot::Sender<()>,
-    mpsc::Receiver<StreamEvent>,
-)> {
+) -> Result<(String, oneshot::Sender<()>, mpsc::Receiver<StreamEvent>)> {
     dbg!("session.stream_message.request", &req.content);
 
-    let pending = PendingMessage::new(req.content.clone());
+    let pending_id = Uuid::new_v4().to_string();
+    let pending_content = req.content.clone();
 
-    {
-        let mut sess = session.lock().await;
-        sess.append(Role::User, req.content)
-            .unwrap_or_else(|_| panic!("failed to persist message"));
-    }
+    handle
+        .append_message(Message::user(req.content))
+        .await
+        .unwrap_or_else(|_| panic!("failed to persist message"));
 
-    let snapshot = session.lock().await.context_messages();
-    let selection = active_selection.lock().await.clone();
-    let system_prompt = build_system_prompt(&discover_agents_md(project_path));
-    let mut rig_messages = to_rig_messages(snapshot);
+    let (mut rig_messages, selection) = handle.snapshot().await;
+    let system_prompt = build_system_prompt(&discover_agents_md(&handle.project_path));
 
     let (event_tx, event_rx) = mpsc::channel(256);
     let (cancel_tx, cancel_rx) = oneshot::channel();
 
     let _ = event_tx
         .send(StreamEvent::MessageReceived {
-            pending_id: pending.id.clone(),
-            content: pending.content.clone(),
+            content: pending_content,
+            pending_id: pending_id.clone(),
         })
         .await;
 
     let Some(prompt) = rig_messages.pop() else {
         let _ = event_tx
             .send(StreamEvent::PendingCleared {
-                pending_id: pending.id.clone(),
+                pending_id: pending_id.clone(),
             })
             .await;
         let _ = event_tx
@@ -96,7 +83,7 @@ pub(crate) async fn stream_message(
                 message: "cannot generate tokens with empty message history".to_string(),
             })
             .await;
-        return Ok((pending, cancel_tx, event_rx));
+        return Ok((pending_id, cancel_tx, event_rx));
     };
 
     dbg!(
@@ -108,27 +95,31 @@ pub(crate) async fn stream_message(
     let _ = event_tx
         .send(StreamEvent::StreamStart {
             message_id: message_id.clone(),
-            pending_id: pending.id.clone(),
+            pending_id: pending_id.clone(),
         })
         .await;
 
-    let (token_tx, mut token_rx) = mpsc::channel(128);
+    let (stream_event_tx, mut stream_event_rx) = mpsc::channel(128);
     let agent = agent_factory.agent(&selection, Some(&system_prompt)).await;
     let llm_task = tokio::spawn(async move {
         let agent = agent?;
-        agent.stream_chat(prompt, rig_messages, token_tx).await
+        agent
+            .stream_chat(prompt, rig_messages, stream_event_tx)
+            .await
     });
 
-    let session_clone = session.clone();
-    let pending_id = pending.id.clone();
+    let handle_clone = handle.clone();
     let message_id_clone = message_id.clone();
+    let pending_id_clone = pending_id.clone();
 
     tokio::spawn(async move {
+        let pending_id = pending_id_clone;
         let mut accumulated = String::new();
         let mut token_count = 0usize;
         let mut cancelled = false;
         let mut line_buffer = String::new();
         let mut cancel_rx = cancel_rx;
+        let mut tool_turns: Vec<Message> = Vec::new();
 
         loop {
             tokio::select! {
@@ -137,9 +128,9 @@ pub(crate) async fn stream_message(
                     cancelled = true;
                     break;
                 }
-                token_opt = token_rx.recv() => {
-                    match token_opt {
-                        Some(token) => {
+                ev_opt = stream_event_rx.recv() => {
+                    match ev_opt {
+                        Some(crate::provider::agent_factory::AgentStreamEvent::Token(token)) => {
                             accumulated.push_str(&token);
                             token_count += 1;
                             line_buffer.push_str(&token);
@@ -151,6 +142,49 @@ pub(crate) async fn stream_message(
                                     delta: line,
                                 }).await;
                             }
+                        }
+                        Some(crate::provider::agent_factory::AgentStreamEvent::ToolCallStarted { tool_call_id, tool_name }) => {
+                            let tc = rig::message::ToolCall {
+                                id: tool_call_id.clone(),
+                                call_id: None,
+                                function: rig::message::ToolFunction {
+                                    name: tool_name.clone(),
+                                    arguments: serde_json::Value::Null,
+                                },
+                                signature: None,
+                                additional_params: None,
+                            };
+                            tool_turns.push(Message::Assistant {
+                                id: None,
+                                content: rig::one_or_many::OneOrMany::one(
+                                    rig::message::AssistantContent::ToolCall(tc),
+                                ),
+                            });
+                            let _ = event_tx.send(StreamEvent::ToolCallStarted {
+                                tool_call_id,
+                                tool_name,
+                            }).await;
+                        }
+                        Some(crate::provider::agent_factory::AgentStreamEvent::ToolResultReceived { tool_call_id, tool_name, content }) => {
+                            let tr = rig::message::ToolResult {
+                                id: tool_name.clone(),
+                                call_id: Some(tool_call_id.clone()),
+                                content: rig::one_or_many::OneOrMany::one(
+                                    rig::message::ToolResultContent::Text(rig::message::Text {
+                                        text: content.clone(),
+                                    }),
+                                ),
+                            };
+                            tool_turns.push(Message::User {
+                                content: rig::one_or_many::OneOrMany::one(
+                                    rig::message::UserContent::ToolResult(tr),
+                                ),
+                            });
+                            let _ = event_tx.send(StreamEvent::ToolResultReceived {
+                                tool_call_id,
+                                tool_name,
+                                content,
+                            }).await;
                         }
                         None => break,
                     }
@@ -171,10 +205,9 @@ pub(crate) async fn stream_message(
             dbg!("session.stream_message.was_cancelled");
             dbg!("session.stream_message.accumulated_len", accumulated.len());
             if !accumulated.is_empty() {
-                session_clone
-                    .lock()
+                handle_clone
+                    .append_message(Message::assistant(accumulated))
                     .await
-                    .append(Role::Assistant, accumulated)
                     .ok();
             }
             return;
@@ -222,10 +255,12 @@ pub(crate) async fn stream_message(
             })
             .await;
 
-        session_clone
-            .lock()
+        for turn in tool_turns {
+            handle_clone.append_message(turn).await.ok();
+        }
+        handle_clone
+            .append_message(Message::assistant(accumulated))
             .await
-            .append(Role::Assistant, accumulated)
             .ok();
 
         let _ = event_tx
@@ -234,5 +269,5 @@ pub(crate) async fn stream_message(
         dbg!("session.stream_message.done");
     });
 
-    Ok((pending, cancel_tx, event_rx))
+    Ok((pending_id, cancel_tx, event_rx))
 }

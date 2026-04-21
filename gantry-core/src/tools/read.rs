@@ -4,14 +4,18 @@ use std::path::PathBuf;
 use gantry_tools::read::ReadError;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
+use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 
 pub struct ReadTool;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct ReadArgs {
+    /// Path to the file to read.
     pub path: PathBuf,
+    /// 1-indexed line number to start reading from. Defaults to the beginning of the file.
     pub offset: Option<usize>,
+    /// Maximum number of lines to return.
     pub limit: Option<usize>,
 }
 
@@ -58,24 +62,7 @@ impl Tool for ReadTool {
                 Each line is prefixed with 'N#XX| ' where N is the 1-indexed line number and XX is \
                 a 2-character hash used to identify lines for subsequent edits."
                     .to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to the file to read."
-                    },
-                    "offset": {
-                        "type": "integer",
-                        "description": "1-indexed line number to start reading from. Defaults to the beginning of the file."
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of lines to return."
-                    }
-                },
-                "required": ["path"]
-            }),
+            parameters: schema_for!(ReadArgs).into(),
         }
     }
 

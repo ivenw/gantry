@@ -1,4 +1,4 @@
-use gantry_core::{AppEvent, SessionTree};
+use gantry_core::{AppEvent, SessionId, SessionTree};
 use gantry_rpc::{JsonRpcClient, WsConnectionEvent};
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
@@ -21,7 +21,7 @@ pub enum Msg {
     // Connection lifecycle
     ReconnectSuccess {
         client: JsonRpcClient,
-        session_id: String,
+        session_id: SessionId,
         event_handle: JoinHandle<()>,
         event_rx: Receiver<WsConnectionEvent>,
         clear_messages: bool,
@@ -31,7 +31,7 @@ pub enum Msg {
     SetStatus(String),
     NewSession {
         client: Arc<JsonRpcClient>,
-        session_id: String,
+        session_id: SessionId,
         event_handle: JoinHandle<()>,
         event_rx: Receiver<WsConnectionEvent>,
     },
@@ -46,8 +46,8 @@ pub enum Msg {
         branch_id: String,
         input: String,
     },
-    ReloadMessages(Vec<gantry_core::Message>),
-    ReloadMessagesWithInput(Vec<gantry_core::Message>, String),
+    ReloadMessages(Vec<gantry_rpc::WireMessage>),
+    ReloadMessagesWithInput(Vec<gantry_rpc::WireMessage>, String),
 
     // Side-effect signals intercepted by Runtime before update()
     SendMessage(String),

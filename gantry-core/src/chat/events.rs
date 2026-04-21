@@ -1,8 +1,8 @@
 #[derive(Debug, Clone)]
 pub struct InitEvent {
     pub client_id: String,
-    pub messages: Vec<super::Message>,
-    pub pending_message: Option<super::PendingMessage>,
+    pub messages: Vec<rig::message::Message>,
+    pub pending_message: Option<rig::message::Message>,
 }
 
 #[derive(Debug, Clone)]
@@ -35,6 +35,19 @@ pub struct PendingClearedEvent {
 }
 
 #[derive(Debug, Clone)]
+pub struct ToolCallStartedEvent {
+    pub tool_call_id: String,
+    pub tool_name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolResultReceivedEvent {
+    pub tool_call_id: String,
+    pub tool_name: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct ErrorEvent {
     pub message: String,
 }
@@ -47,6 +60,8 @@ pub enum AppEvent {
     Token(TokenEvent),
     StreamEnd(StreamEndEvent),
     PendingCleared(PendingClearedEvent),
+    ToolCallStarted(ToolCallStartedEvent),
+    ToolResultReceived(ToolResultReceivedEvent),
     Error(ErrorEvent),
 }
 

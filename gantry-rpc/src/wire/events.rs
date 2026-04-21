@@ -1,11 +1,15 @@
-use gantry_core::{AppEvent, Message, PendingMessage};
+use gantry_core::AppEvent;
+use rig::message::Message;
 use serde::{Deserialize, Serialize};
+
+use super::WireMessage;
+use super::message::to_wire;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WireInitEvent {
     pub client_id: String,
-    pub messages: Vec<Message>,
-    pub pending_message: Option<PendingMessage>,
+    pub messages: Vec<WireMessage>,
+    pub pending_message: Option<WireMessage>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +42,19 @@ pub struct WirePendingClearedEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WireToolCallStartedEvent {
+    pub tool_call_id: String,
+    pub tool_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WireToolResultReceivedEvent {
+    pub tool_call_id: String,
+    pub tool_name: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WireErrorEvent {
     pub message: String,
 }
@@ -51,6 +68,8 @@ pub enum WireAppEvent {
     Token(WireTokenEvent),
     StreamEnd(WireStreamEndEvent),
     PendingCleared(WirePendingClearedEvent),
+    ToolCallStarted(WireToolCallStartedEvent),
+    ToolResultReceived(WireToolResultReceivedEvent),
     Error(WireErrorEvent),
 }
 
@@ -59,8 +78,8 @@ impl From<&AppEvent> for WireAppEvent {
         match ev {
             AppEvent::Init(e) => WireAppEvent::Init(WireInitEvent {
                 client_id: e.client_id.clone(),
-                messages: e.messages.clone(),
-                pending_message: e.pending_message.clone(),
+                messages: e.messages.iter().filter_map(to_wire).collect(),
+                pending_message: e.pending_message.as_ref().and_then(to_wire),
             }),
             AppEvent::MessageReceived(e) => {
                 WireAppEvent::MessageReceived(WireMessageReceivedEvent {
@@ -83,6 +102,19 @@ impl From<&AppEvent> for WireAppEvent {
             AppEvent::PendingCleared(e) => WireAppEvent::PendingCleared(WirePendingClearedEvent {
                 pending_id: e.pending_id.clone(),
             }),
+            AppEvent::ToolCallStarted(e) => {
+                WireAppEvent::ToolCallStarted(WireToolCallStartedEvent {
+                    tool_call_id: e.tool_call_id.clone(),
+                    tool_name: e.tool_name.clone(),
+                })
+            }
+            AppEvent::ToolResultReceived(e) => {
+                WireAppEvent::ToolResultReceived(WireToolResultReceivedEvent {
+                    tool_call_id: e.tool_call_id.clone(),
+                    tool_name: e.tool_name.clone(),
+                    content: e.content.clone(),
+                })
+            }
             AppEvent::Error(e) => WireAppEvent::Error(WireErrorEvent {
                 message: e.message.clone(),
             }),
@@ -95,8 +127,8 @@ impl From<WireAppEvent> for AppEvent {
         match ev {
             WireAppEvent::Init(e) => AppEvent::Init(gantry_core::InitEvent {
                 client_id: e.client_id,
-                messages: e.messages,
-                pending_message: e.pending_message,
+                messages: e.messages.into_iter().map(Message::from).collect(),
+                pending_message: e.pending_message.map(Message::from),
             }),
             WireAppEvent::MessageReceived(e) => {
                 AppEvent::MessageReceived(gantry_core::MessageReceivedEvent {
@@ -119,6 +151,19 @@ impl From<WireAppEvent> for AppEvent {
             WireAppEvent::PendingCleared(e) => {
                 AppEvent::PendingCleared(gantry_core::PendingClearedEvent {
                     pending_id: e.pending_id,
+                })
+            }
+            WireAppEvent::ToolCallStarted(e) => {
+                AppEvent::ToolCallStarted(gantry_core::ToolCallStartedEvent {
+                    tool_call_id: e.tool_call_id,
+                    tool_name: e.tool_name,
+                })
+            }
+            WireAppEvent::ToolResultReceived(e) => {
+                AppEvent::ToolResultReceived(gantry_core::ToolResultReceivedEvent {
+                    tool_call_id: e.tool_call_id,
+                    tool_name: e.tool_name,
+                    content: e.content,
                 })
             }
             WireAppEvent::Error(e) => {

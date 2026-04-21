@@ -1,21 +1,24 @@
-use std::path::PathBuf;
+use crate::project::resource_loader::AgentFile;
 
 const BASE_PROMPT: &str = "You are an expert coding assistant operating inside a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files. DON'T use emojis.";
 
-/// Constructs the system prompt. If `agents_md_files` is empty, returns only the base prompt.
+/// Constructs the system prompt. If `agent_files` is empty, returns only the base prompt.
 /// Otherwise appends a `# Context` section with each file's contents under a `## <path>` heading.
-pub fn build_system_prompt(agents_md_files: &[(PathBuf, String)]) -> String {
-    if agents_md_files.is_empty() {
+pub fn build_system_prompt(agent_files: &[AgentFile]) -> String {
+    if agent_files.is_empty() {
         return BASE_PROMPT.to_string();
     }
 
     let mut prompt = String::from(BASE_PROMPT);
     prompt.push_str("\n\n# Context");
 
-    for (path, contents) in agents_md_files {
-        prompt.push_str(&format!("\n\n## {}\n\n{}", path.display(), contents));
+    for file in agent_files {
+        prompt.push_str(&format!(
+            "\n\n## {}\n\n{}",
+            file.path.display(),
+            file.contents
+        ));
     }
 
-    dbg!("system_prompt.built", &prompt);
     prompt
 }

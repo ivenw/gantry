@@ -1,25 +1,30 @@
 use std::path::{Path, PathBuf};
 
+/// A discovered context file with its resolved path and raw contents.
+pub struct AgentFile {
+    pub path: PathBuf,
+    pub contents: String,
+}
+
 /// Discovers and loads AGENTS.md files for a given project path.
 ///
 /// Final insertion order: global first (`~/.gantry/AGENTS.md`), then files found
 /// walking up from `project_path` toward the filesystem root, reversed so the
 /// most-root file comes before the project-level file.
-pub fn discover_agents_md(project_path: &Path) -> Vec<(PathBuf, String)> {
-    let mut results: Vec<(PathBuf, String)> = Vec::new();
+pub fn discover_agents_md(project_path: &Path) -> Vec<AgentFile> {
+    let mut results: Vec<AgentFile> = Vec::new();
 
     if let Some(global_path) = global_agents_md_path()
         && let Ok(contents) = std::fs::read_to_string(&global_path)
     {
-        results.push((global_path, contents));
+        results.push(AgentFile { path: global_path, contents });
     }
 
-    let mut walk_results: Vec<(PathBuf, String)> = Vec::new();
+    let mut walk_results: Vec<AgentFile> = Vec::new();
     let mut current = project_path.to_path_buf();
     loop {
-        let candidate = find_context_file(&current);
-        if let Some((path, contents)) = candidate {
-            walk_results.push((path, contents));
+        if let Some(file) = find_context_file(&current) {
+            walk_results.push(file);
         }
         match current.parent() {
             Some(parent) => current = parent.to_path_buf(),
@@ -34,20 +39,19 @@ pub fn discover_agents_md(project_path: &Path) -> Vec<(PathBuf, String)> {
 
 const CONTEXT_FILE_CANDIDATES: &[&str] = &["AGENTS.md", "CLAUDE.md"];
 
-/// Returns `(path, contents)` for the first context file found in `dir`.
+/// Returns an [`AgentFile`] for the first context file found in `dir`.
 /// Prefers `AGENTS.md`, falls back to `CLAUDE.md`.
-fn find_context_file(dir: &Path) -> Option<(PathBuf, String)> {
+fn find_context_file(dir: &Path) -> Option<AgentFile> {
     for name in CONTEXT_FILE_CANDIDATES {
         let candidate = dir.join(name);
         if let Ok(contents) = std::fs::read_to_string(&candidate) {
-            let display_path = candidate.canonicalize().unwrap_or(candidate);
-            return Some((display_path, contents));
+            let path = candidate.canonicalize().unwrap_or(candidate);
+            return Some(AgentFile { path, contents });
         }
     }
     None
 }
 
 fn global_agents_md_path() -> Option<PathBuf> {
-    let home = std::env::var("HOME").ok()?;
-    Some(PathBuf::from(home).join(".gantry").join("AGENTS.md"))
+    dirs::home_dir().map(|home| home.join(".gantry").join("AGENTS.md"))
 }

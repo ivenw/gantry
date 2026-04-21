@@ -45,7 +45,7 @@ impl Widget for TreeViewWidget<'_> {
         let footer_area = chunks[1];
 
         let viewport_height = list_area.height as usize;
-        let rows = branch_rows(&self.state.tree.stem);
+        let rows = branch_rows(&self.state.tree.stem, 0);
         let selected = self.state.selected_idx;
 
         let scroll = compute_scroll(self.state.scroll_offset, selected, viewport_height);
@@ -77,23 +77,22 @@ impl Widget for TreeViewWidget<'_> {
                 *depth,
             );
 
-            let leaf_marker = if self.state.tree.current_leaf_id.as_deref() == Some(&node.id) {
+            let leaf_marker = if node.node.id == self.state.tree.current_leaf_id {
                 CURRENT_LEAF_MARKER
             } else {
                 " "
             };
-            let role_label = match node.role {
-                gantry_core::Role::User => "USER",
-                gantry_core::Role::Assistant => "GNTR",
-                gantry_core::Role::Error => "ERR",
+            let role_label = match node.node.message {
+                gantry_core::Message::User { .. } => "USER",
+                gantry_core::Message::Assistant { .. } => "GNTR",
+                gantry_core::Message::System { .. } => "SYS ",
             };
             // Col 0 is reserved for the leaf marker; connector and role start at col 1.
             let body = format!(" {}[{}]: ", connector, role_label);
             let body_width = body.chars().count();
             let max_width = list_area.width as usize;
             let content_budget = max_width.saturating_sub(body_width);
-            let single_line: String = node
-                .content
+            let single_line: String = gantry_core::message_text(&node.node.message)
                 .chars()
                 .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
                 .collect();
@@ -155,7 +154,7 @@ fn compute_scroll(current_scroll: usize, selected: usize, viewport: usize) -> us
     }
 }
 
-type Row<'a> = (&'a gantry_core::BranchNode, usize);
+type Row<'a> = (&'a gantry_core::Branch, usize);
 
 fn build_child_counts(rows: &[Row<'_>]) -> Vec<usize> {
     let mut counts = vec![0usize; rows.len()];

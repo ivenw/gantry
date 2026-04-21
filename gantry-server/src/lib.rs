@@ -1,15 +1,22 @@
+mod rpc;
+
 use anyhow::Result;
+use gantry_core::fs::FsProjectRegistry;
 use gantry_core::{
-    AppService, ConfiguredModel, ModelId, OllamaProviderConfig, ProviderConfig,
-    ProviderConfigCatalog, ProviderId, RigAgentFactory,
+    ConfiguredModel, ModelId, OllamaProviderConfig, ProviderConfig, ProviderConfigCatalog,
+    ProviderId, RigAgentFactory, SessionManager, dirs::GlobalConfigDir,
 };
-use gantry_rpc::server::start_app_rpc_server;
+use gantry_rpc::GantryRpcServer;
+use jsonrpsee::server::{ServerBuilder, ServerConfig};
+use rpc::RpcApp;
+use std::sync::Arc;
 
 const DEFAULT_ADDR: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 3444;
 const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 const DEFAULT_OLLAMA_MODEL: &str = "ministral-3:3b";
 
+/// Reads server configuration from environment variables and starts the server.
 pub async fn run_from_env() -> Result<()> {
     let addr = std::env::var("GANTRY_ADDR").unwrap_or_else(|_| DEFAULT_ADDR.to_string());
     let port: u16 = std::env::var("GANTRY_PORT")
@@ -20,6 +27,7 @@ pub async fn run_from_env() -> Result<()> {
     run_server(&addr, port).await
 }
 
+/// Builds domain state, starts the JSON-RPC server, and blocks until Ctrl-C.
 pub async fn run_server(addr: &str, port: u16) -> Result<()> {
     println!("Starting Gantry server...");
     println!("WS RPC Address: {}:{}", addr, port);
@@ -41,14 +49,20 @@ pub async fn run_server(addr: &str, port: u16) -> Result<()> {
         default_provider: ProviderId::new("ollama"),
     };
 
+    let data_dir = GlobalConfigDir::new()?;
+    let projects = Arc::new(FsProjectRegistry::new(&data_dir)?);
+    let sessions = Arc::new(SessionManager::new());
     let agent_factory = RigAgentFactory::new(catalog)?;
-    let home = std::env::var("HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let registry_path = home.join(".gantry").join("projects.json");
-    let app = AppService::new(agent_factory, registry_path);
 
-    let rpc_handle = start_app_rpc_server(addr, port, app.clone()).await?;
+    let rpc_app = RpcApp::new(projects, sessions, agent_factory);
+    let module = rpc_app.into_rpc().remove_context();
+
+    let config = ServerConfig::builder().ws_only().build();
+    let rpc_server = ServerBuilder::new()
+        .set_config(config)
+        .build((addr, port))
+        .await?;
+    let rpc_handle = rpc_server.start(module);
 
     println!("Server ready. Press Ctrl+C to stop.");
     tokio::signal::ctrl_c().await?;

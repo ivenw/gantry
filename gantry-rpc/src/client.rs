@@ -1,9 +1,13 @@
 use anyhow::Result;
-use gantry_core::{AppEvent, Message, PendingMessage, SessionInfo, StreamMessageRequest};
+use gantry_core::{
+    AppEvent, ModelId, ProviderConfig, ProviderId, SessionId, SessionInfo, StreamMessageRequest,
+};
 use jsonrpsee::core::client::Subscription;
 use jsonrpsee::ws_client::{WsClient, WsClientBuilder};
 use std::path::PathBuf;
 use tokio::{sync::mpsc, task::JoinHandle};
+
+use crate::WireMessage;
 
 use crate::GantryRpcClient;
 
@@ -37,7 +41,7 @@ impl JsonRpcClient {
         Ok(self.inner.unregister_project(path).await?)
     }
 
-    pub async fn create_session(&self, project_path: PathBuf) -> Result<String> {
+    pub async fn create_session(&self, project_path: PathBuf) -> Result<SessionId> {
         Ok(self.inner.create_session(project_path).await?)
     }
 
@@ -45,7 +49,7 @@ impl JsonRpcClient {
         Ok(self.inner.list_sessions(project_path).await?)
     }
 
-    pub async fn bind_session(&self, session_id: String, project_path: PathBuf) -> Result<()> {
+    pub async fn bind_session(&self, session_id: SessionId, project_path: PathBuf) -> Result<()> {
         Ok(self.inner.bind_session(session_id, project_path).await?)
     }
 
@@ -63,7 +67,9 @@ impl JsonRpcClient {
                 match next {
                     Ok(wire_event) => {
                         if event_tx
-                            .send(WsConnectionEvent::Event(AppEvent::from(wire_event)))
+                            .send(WsConnectionEvent::Event(Box::new(AppEvent::from(
+                                wire_event,
+                            ))))
                             .await
                             .is_err()
                         {
@@ -88,16 +94,16 @@ impl JsonRpcClient {
         Ok((handle, event_rx))
     }
 
-    pub async fn send_message(&self, content: String) -> Result<Vec<Message>> {
+    pub async fn send_message(&self, content: String) -> Result<Vec<WireMessage>> {
         Ok(self.inner.send_message(content).await?)
     }
 
-    pub async fn stream_message(&self, content: String) -> Result<PendingMessage> {
+    pub async fn stream_message(&self, content: String) -> Result<String> {
         let req = StreamMessageRequest { content };
         Ok(self.inner.stream_message(req).await?)
     }
 
-    pub async fn get_messages(&self) -> Result<Vec<Message>> {
+    pub async fn get_messages(&self) -> Result<Vec<WireMessage>> {
         Ok(self.inner.get_messages().await?)
     }
 
@@ -109,11 +115,26 @@ impl JsonRpcClient {
         Ok(self.inner.interrupt_stream(message_id).await?)
     }
 
+    /// Returns all configured providers with their available models.
+    pub async fn list_providers(&self) -> Result<Vec<ProviderConfig>> {
+        Ok(self.inner.list_providers().await?)
+    }
+
+    /// Switches to the given provider, using its default model.
+    pub async fn set_active_provider(&self, provider_id: ProviderId) -> Result<()> {
+        Ok(self.inner.set_active_provider(provider_id).await?)
+    }
+
+    /// Switches the model while keeping the current provider.
+    pub async fn set_active_model(&self, model_id: ModelId) -> Result<()> {
+        Ok(self.inner.set_active_model(model_id).await?)
+    }
+
     pub async fn ping(&self) -> Result<()> {
         Ok(self.inner.ping().await?)
     }
 
-    pub async fn get_tree(&self) -> Result<gantry_core::SessionTree> {
+    pub async fn get_tree(&self) -> Result<Option<gantry_core::SessionTree>> {
         Ok(self.inner.get_tree().await?)
     }
 
@@ -131,7 +152,9 @@ impl Clone for JsonRpcClient {
 }
 
 pub enum WsConnectionEvent {
-    Event(AppEvent),
+    // TODO: Investigate if the size of AppEvent could be meaningfully reduced.
+    // Boxed to reduce enum size: AppEvent is 256 bytes vs 24 bytes for other variants.
+    Event(Box<AppEvent>),
     Disconnected,
     Error(String),
 }
