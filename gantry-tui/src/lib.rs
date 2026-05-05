@@ -15,15 +15,13 @@ use crossterm::{
     execute,
 };
 use gantry_core::{
-    ChatService, ConfiguredModel, ModelId, OllamaProviderConfig, ProviderConfig,
-    ProviderConfigCatalog, ProviderId, RigAgentFactory, SessionManager,
-    dirs::{ProjectConfigDir, ProjectRootDir},
-    fs::FsSessionRegistry,
-    session::registry::SessionRegistry,
+    App, ConfiguredModel, ModelId, OllamaProviderConfig, ProviderConfig, ProviderConfigCatalog,
+    ProviderId, RigAgentFactory,
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 const DEFAULT_OLLAMA_MODEL: &str = "ministral-3:3b";
@@ -69,36 +67,11 @@ pub fn run() -> Result<()> {
         .default_selection()
         .expect("provider catalog must have a default selection");
 
-    let chat_service = Arc::new(ChatService::new(agent_factory));
-    let session_manager = Arc::new(SessionManager::new());
-
-    // Find or create a session for this project.
-    let handle = {
-        let rt = tokio::runtime::Runtime::new()?;
-        let root = ProjectRootDir::new(&project_path)?;
-        let config_dir = ProjectConfigDir::new(&root)?;
-        let fs_registry = FsSessionRegistry::new(&config_dir)?;
-        let sessions = fs_registry.list()?;
-
-        rt.block_on(async {
-            if let Some(last) = sessions.last() {
-                session_manager
-                    .get_or_load(&project_path, &last.id, default_selection.clone())
-                    .await
-            } else {
-                let session_id = session_manager
-                    .create_session(&project_path, default_selection.clone())
-                    .await?;
-                session_manager
-                    .get_or_load(&project_path, &session_id, default_selection)
-                    .await
-            }
-        })?
-    };
+    let app = App::new(&project_path, default_selection, agent_factory)?;
+    let app = Arc::new(Mutex::new(app));
 
     let (_terminal_guard, mut terminal) = TerminalGuard::enter()?;
-    let mut runtime =
-        runtime::Runtime::new(handle, chat_service, session_manager, project_path)?;
+    let mut runtime = runtime::Runtime::new(app)?;
     runtime.run(&mut terminal)
 }
 

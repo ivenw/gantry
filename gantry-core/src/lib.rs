@@ -1,3 +1,4 @@
+pub mod app;
 pub mod chat;
 pub mod dirs;
 pub mod fs;
@@ -6,12 +7,12 @@ pub mod provider;
 pub mod session;
 pub mod tools;
 
+pub use app::App;
 pub use chat::events::{
     AppEvent, ErrorEvent, InitEvent, MessageReceivedEvent, PendingClearedEvent, StreamEndEvent,
     StreamMessageRequest, StreamStartEvent, TokenEvent, ToolCallStartedEvent,
     ToolResultReceivedEvent,
 };
-pub use chat::service::ChatService;
 pub use chat::stream::StreamEvent;
 pub use provider::agent_factory::RigAgentFactory;
 pub use provider::{
@@ -43,7 +44,4 @@ pub fn message_text(message: &Message) -> String {
 }
 
 pub use fs::FsSessionRegistry;
-pub use session::{
-    Branch, NodeId, Session, SessionHandle, SessionId, SessionInfo, SessionManager, SessionRegistry,
-    SessionTree,
-};
+pub use session::{Branch, NodeId, Session, SessionId, SessionInfo, SessionRegistry, SessionTree};

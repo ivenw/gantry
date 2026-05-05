@@ -1,4 +1,4 @@
-use gantry_core::{AppEvent, SessionId, SessionTree};
+use gantry_core::{AppEvent, SessionTree};
 
 use crate::model::ChatMessage;
 
@@ -14,7 +14,7 @@ pub enum Msg {
 
     // Command results
     SetStatus(String),
-    NewSession(SessionId),
+    NewSession,
 
     // Scroll the chat window (positive = up, negative = down)
     ScrollChat(i32),

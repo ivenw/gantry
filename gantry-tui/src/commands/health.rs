@@ -13,9 +13,11 @@ impl Command for Health {
     }
 
     fn execute(&self, ctx: CommandContext) {
-        let session_id = ctx.handle.project_path.display().to_string();
+        let project_path = ctx.rt_handle.block_on(async {
+            ctx.app.lock().await.project_path.display().to_string()
+        });
         let _ = ctx
             .msg_tx
-            .try_send(Msg::SetStatus(format!("Session active: {}", session_id)));
+            .try_send(Msg::SetStatus(format!("Session active: {}", project_path)));
     }
 }

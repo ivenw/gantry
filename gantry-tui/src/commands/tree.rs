@@ -14,9 +14,9 @@ impl Command for Tree {
 
     fn execute(&self, ctx: CommandContext) {
         let tx = ctx.msg_tx;
-        let handle = ctx.handle.clone();
+        let app = ctx.app.clone();
         ctx.rt_handle.spawn(async move {
-            match handle.get_tree().await {
+            match app.lock().await.get_tree() {
                 Some(tree) => {
                     let _ = tx.send(Msg::OpenTreeView(tree)).await;
                 }

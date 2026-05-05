@@ -1,12 +1,12 @@
+use crate::app::App;
 use crate::chat::events::StreamMessageRequest;
 use crate::chat::system_prompt::build_system_prompt;
 use crate::project::resource_loader::discover_agents_md;
 use crate::provider::agent_factory::RigAgentFactory;
-use crate::session::SessionHandle;
 use anyhow::Result;
 use rig::message::Message;
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{Mutex, mpsc, oneshot};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -44,23 +44,24 @@ pub enum StreamEvent {
     },
 }
 
-pub(crate) async fn stream_message_with_factory(
+pub(crate) async fn stream_message_with_app(
     req: StreamMessageRequest,
-    handle: Arc<SessionHandle>,
-    agent_factory: &RigAgentFactory,
+    app: Arc<Mutex<App>>,
 ) -> Result<(String, oneshot::Sender<()>, mpsc::Receiver<StreamEvent>)> {
     dbg!("session.stream_message.request", &req.content);
 
     let pending_id = Uuid::new_v4().to_string();
     let pending_content = req.content.clone();
 
-    handle
-        .append_message(Message::user(req.content))
-        .await
-        .unwrap_or_else(|_| panic!("failed to persist message"));
-
-    let (mut rig_messages, selection) = handle.snapshot().await;
-    let system_prompt = build_system_prompt(&discover_agents_md(&handle.project_path));
+    let (rig_messages, selection, system_prompt) = {
+        let mut app = app.lock().await;
+        app.append_message(Message::user(req.content))
+            .unwrap_or_else(|_| panic!("failed to persist message"));
+        let msgs = app.context_messages();
+        let selection = app.selection().clone();
+        let system_prompt = build_system_prompt(&discover_agents_md(&app.project_path));
+        (msgs, selection, system_prompt)
+    };
 
     let (event_tx, event_rx) = mpsc::channel(256);
     let (cancel_tx, cancel_rx) = oneshot::channel();
@@ -72,6 +73,7 @@ pub(crate) async fn stream_message_with_factory(
         })
         .await;
 
+    let mut rig_messages = rig_messages;
     let Some(prompt) = rig_messages.pop() else {
         let _ = event_tx
             .send(StreamEvent::PendingCleared {
@@ -100,6 +102,13 @@ pub(crate) async fn stream_message_with_factory(
         .await;
 
     let (stream_event_tx, mut stream_event_rx) = mpsc::channel(128);
+
+    // Clone the factory out of the lock so the spawned task doesn't hold the mutex.
+    let agent_factory = {
+        let app = app.lock().await;
+        get_factory_clone(&app)
+    };
+
     let agent = agent_factory.agent(&selection, Some(&system_prompt)).await;
     let llm_task = tokio::spawn(async move {
         let agent = agent?;
@@ -108,7 +117,7 @@ pub(crate) async fn stream_message_with_factory(
             .await
     });
 
-    let handle_clone = handle.clone();
+    let app_clone = app.clone();
     let message_id_clone = message_id.clone();
     let pending_id_clone = pending_id.clone();
 
@@ -205,9 +214,10 @@ pub(crate) async fn stream_message_with_factory(
             dbg!("session.stream_message.was_cancelled");
             dbg!("session.stream_message.accumulated_len", accumulated.len());
             if !accumulated.is_empty() {
-                handle_clone
-                    .append_message(Message::assistant(accumulated))
+                app_clone
+                    .lock()
                     .await
+                    .append_message(Message::assistant(accumulated))
                     .ok();
             }
             return;
@@ -255,13 +265,11 @@ pub(crate) async fn stream_message_with_factory(
             })
             .await;
 
+        let mut app = app_clone.lock().await;
         for turn in tool_turns {
-            handle_clone.append_message(turn).await.ok();
+            app.append_message(turn).ok();
         }
-        handle_clone
-            .append_message(Message::assistant(accumulated))
-            .await
-            .ok();
+        app.append_message(Message::assistant(accumulated)).ok();
 
         let _ = event_tx
             .send(StreamEvent::PendingCleared { pending_id })
@@ -270,4 +278,9 @@ pub(crate) async fn stream_message_with_factory(
     });
 
     Ok((pending_id, cancel_tx, event_rx))
+}
+
+/// Clones the agent factory out of the app for use in spawned tasks.
+fn get_factory_clone(app: &App) -> RigAgentFactory {
+    app.agent_factory().clone()
 }

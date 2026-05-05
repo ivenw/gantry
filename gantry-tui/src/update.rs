@@ -18,8 +18,7 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             model.status_message = Some(s);
             None
         }
-        Msg::NewSession(session_id) => {
-            model.session_id = Some(session_id);
+        Msg::NewSession => {
             model.chat.reset();
             model.status_message = None;
             None

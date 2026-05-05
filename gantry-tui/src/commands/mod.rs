@@ -4,17 +4,14 @@ pub mod quit;
 pub mod tree;
 
 use crate::message::Msg;
-use gantry_core::{ChatService, SessionHandle, SessionManager};
-use std::path::PathBuf;
+use gantry_core::App;
 use std::sync::Arc;
 use tokio::runtime::Handle;
+use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 
 pub struct CommandContext {
-    pub handle: Arc<SessionHandle>,
-    pub chat_service: Arc<ChatService>,
-    pub session_manager: Arc<SessionManager>,
-    pub project_path: PathBuf,
+    pub app: Arc<Mutex<App>>,
     pub msg_tx: Sender<Msg>,
     pub rt_handle: Handle,
 }
