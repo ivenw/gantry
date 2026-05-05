@@ -195,7 +195,7 @@ fn handle_enter(model: &mut Model, modifiers: KeyModifiers) -> Option<Msg> {
     if model.is_tree_view_active() {
         let node = model.selected_tree_node()?;
         let msg = if matches!(node.node.message, gantry_core::Message::User { .. }) {
-            let input = gantry_core::message_text(&node.node.message);
+            let input = node.node.message.text();
             let tv = model.tree_view.as_ref()?;
             let rows = branch_rows(&tv.tree.stem, 0);
             let preceding = rows[..tv.selected_idx]

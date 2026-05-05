@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
-use rig::message::Message;
+use crate::message::Message;
 use tokio::sync::Mutex;
 
 use crate::dirs::{ProjectConfigDir, ProjectRootDir};
@@ -74,8 +74,8 @@ impl App {
     }
 
     /// Returns the ordered messages on the active branch.
-    pub fn context_messages(&self) -> Vec<Message> {
-        self.session.context_messages()
+    pub fn history(&self) -> Vec<Message> {
+        self.session.history()
     }
 
     /// Builds and returns the session tree, or `None` if the session has no nodes.
@@ -139,7 +139,8 @@ impl App {
     ) -> Result<ChatStream> {
         let mut app = app.lock().await;
         app.append_message(Message::user(content))?;
-        let history = app.context_messages();
+        let history: Vec<rig::message::Message> =
+            app.history().into_iter().map(Into::into).collect();
         let system_prompt = build_system_prompt(&discover_agents_md(&app.project_path));
         let agent = app.agent_factory.agent(&app.selection, Some(&system_prompt)).await?;
         let Some(prompt) = history.last().cloned() else {

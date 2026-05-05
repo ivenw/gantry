@@ -1,4 +1,4 @@
-use gantry_core::{Branch, SessionId, SessionTree};
+use gantry_core::{Branch, SessionId, SessionTree, UserId};
 
 pub struct Model {
     pub session_id: Option<SessionId>,
@@ -20,24 +20,32 @@ pub struct TreeView {
 /// A simplified message representation used for rendering in the TUI.
 #[derive(Debug, Clone)]
 pub enum ChatMessage {
-    User { content: String },
-    Assistant { content: String },
-    ToolResult { tool_name: String, content: String },
+    User {
+        sender: Option<UserId>,
+        content: String,
+    },
+    Assistant {
+        content: String,
+    },
+    ToolResult {
+        tool_name: String,
+        content: String,
+    },
 }
 
 impl ChatMessage {
-    /// Converts a list of rig messages into `ChatMessage`s, skipping system messages.
-    pub fn messages_from_rig(msgs: Vec<gantry_core::Message>) -> Vec<Self> {
-        use gantry_core::message_text;
+    /// Converts a list of gantry messages into `ChatMessage`s for rendering.
+    pub fn messages_from(msgs: Vec<gantry_core::Message>) -> Vec<Self> {
         msgs.into_iter()
-            .filter_map(|msg| match &msg {
-                gantry_core::Message::User { .. } => Some(Self::User {
-                    content: message_text(&msg),
-                }),
-                gantry_core::Message::Assistant { .. } => Some(Self::Assistant {
-                    content: message_text(&msg),
-                }),
-                gantry_core::Message::System { .. } => None,
+            .map(|msg| {
+                let text = msg.text();
+                match msg {
+                    gantry_core::Message::User { sender, .. } => Self::User {
+                        sender,
+                        content: text,
+                    },
+                    gantry_core::Message::Assistant { .. } => Self::Assistant { content: text },
+                }
             })
             .collect()
     }
@@ -208,8 +216,12 @@ impl ChatModel {
         }
     }
 
+    /// Adds a user message with no sender (single-user session).
     pub fn add_user_message(&mut self, content: String) {
-        self.messages.push(ChatMessage::User { content });
+        self.messages.push(ChatMessage::User {
+            sender: None,
+            content,
+        });
     }
 
     pub fn start_streaming_message(&mut self) {

@@ -38,7 +38,7 @@ impl Runtime {
 
         let existing_messages: Vec<ChatMessage> = {
             let app = rt.block_on(app.lock());
-            ChatMessage::messages_from_rig(app.context_messages())
+            ChatMessage::messages_from(app.history())
         };
         model.chat.messages = existing_messages;
 
@@ -194,7 +194,7 @@ impl Runtime {
                     .await;
                 return;
             }
-            let messages = ChatMessage::messages_from_rig(app.lock().await.context_messages());
+            let messages = ChatMessage::messages_from(app.lock().await.history());
             let _ = tx.send(Msg::ReloadMessages(messages)).await;
         });
     }
@@ -209,7 +209,7 @@ impl Runtime {
                     .await;
                 return;
             }
-            let messages = ChatMessage::messages_from_rig(app.lock().await.context_messages());
+            let messages = ChatMessage::messages_from(app.lock().await.history());
             let _ = tx
                 .send(Msg::ReloadMessagesWithInput(messages, input))
                 .await;

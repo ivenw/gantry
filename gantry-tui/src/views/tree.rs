@@ -85,14 +85,13 @@ impl Widget for TreeViewWidget<'_> {
             let role_label = match node.node.message {
                 gantry_core::Message::User { .. } => "USER",
                 gantry_core::Message::Assistant { .. } => "GNTR",
-                gantry_core::Message::System { .. } => "SYS ",
             };
             // Col 0 is reserved for the leaf marker; connector and role start at col 1.
             let body = format!(" {}[{}]: ", connector, role_label);
             let body_width = body.chars().count();
             let max_width = list_area.width as usize;
             let content_budget = max_width.saturating_sub(body_width);
-            let single_line: String = gantry_core::message_text(&node.node.message)
+            let single_line: String = node.node.message.text()
                 .chars()
                 .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
                 .collect();

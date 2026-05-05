@@ -62,9 +62,9 @@ mod tests {
     use super::*;
     use crate::dirs::{ProjectConfigDir, ProjectRootDir};
     use crate::fs::FsSessionRegistry;
+    use crate::message::Message;
     use crate::session::registry::SessionRegistry;
     use crate::session::{Session, SessionHistory};
-    use rig::message::Message;
     use std::collections::HashMap;
     use tempfile::TempDir;
 
@@ -190,6 +190,7 @@ mod tests {
                 })
             })
             .unwrap();
+
         assert!(sub_with_d.branches.is_empty());
     }
 }

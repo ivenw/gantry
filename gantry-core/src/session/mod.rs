@@ -11,9 +11,10 @@ use std::str::FromStr;
 
 use anyhow::{Context, Result};
 use jiff::Timestamp;
-use rig::message::Message;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use crate::message::Message;
 
 use crate::session::tree::build_branch;
 
@@ -128,12 +129,8 @@ impl<H: SessionHistory> Session<H> {
         })
     }
 
-    /// Appends a rig [`Message`] to the session as a new node, persisting it to history.
+    /// Appends a [`Message`] to the session as a new node, persisting it to history.
     pub fn append_message(&mut self, message: Message) -> Result<()> {
-        if matches!(message, Message::System { .. }) {
-            return Ok(());
-        }
-
         let node = Node::new(message, self.current_leaf_id.clone());
         self.history
             .append(&node)
@@ -158,8 +155,8 @@ impl<H: SessionHistory> Session<H> {
         Ok(())
     }
 
-    /// Returns the ordered list of messages on the active branch from root to the current leaf.
-    pub fn context_messages(&self) -> Vec<Message> {
+    /// Returns the ordered [`Message`]s on the active branch from root to the current leaf.
+    pub fn history(&self) -> Vec<Message> {
         let Some(leaf_id) = &self.current_leaf_id else {
             return vec![];
         };
@@ -203,7 +200,7 @@ impl<H: SessionHistory> Session<H> {
     }
 }
 
-/// A tree node in the session history, wrapping a rig [`Message`] with parent linkage.
+/// A tree node in the session history, wrapping a [`Message`] with parent linkage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
     pub id: NodeId,
@@ -229,6 +226,7 @@ mod tests {
     use super::*;
     use crate::dirs::{ProjectConfigDir, ProjectRootDir};
     use crate::fs::FsSessionRegistry;
+    use crate::message::Message;
     use crate::session::registry::SessionRegistry;
     use tempfile::TempDir;
 
@@ -245,7 +243,7 @@ mod tests {
         let (_tmp, r) = registry();
         let session = r.create_session().unwrap();
         assert!(session.current_leaf_id.is_none());
-        assert_eq!(session.context_messages().len(), 0);
+        assert_eq!(session.history().len(), 0);
     }
 
     #[test]
@@ -258,7 +256,7 @@ mod tests {
 
         session.append_message(Message::assistant("hi")).unwrap();
 
-        let ctx = session.context_messages();
+        let ctx = session.history();
         assert_eq!(ctx.len(), 2);
         assert_eq!(ctx[0], Message::user("hello"));
         assert_eq!(ctx[1], Message::assistant("hi"));
@@ -291,7 +289,7 @@ mod tests {
         session.branch(&root_id).unwrap();
         session.append_message(Message::user("branch B")).unwrap();
 
-        let ctx = session.context_messages();
+        let ctx = session.history();
         assert_eq!(ctx.len(), 2);
         assert_eq!(ctx[0], Message::user("root"));
         assert_eq!(ctx[1], Message::user("branch B"));
@@ -318,7 +316,7 @@ mod tests {
         };
 
         let session = r.load_session(&session_id).unwrap();
-        let ctx = session.context_messages();
+        let ctx = session.history();
         assert_eq!(ctx.len(), 2);
         assert_eq!(ctx[0], Message::user("first"));
         assert_eq!(ctx[1], Message::assistant("second"));
@@ -346,7 +344,7 @@ mod tests {
         };
 
         let session = r.load_session(&session_id).unwrap();
-        let ctx = session.context_messages();
+        let ctx = session.history();
         assert_eq!(ctx.len(), 2);
         assert!(matches!(ctx[0], Message::User { .. }));
         assert!(matches!(ctx[1], Message::User { .. }));

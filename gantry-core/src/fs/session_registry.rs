@@ -197,8 +197,8 @@ fn session_filename(session_id: &SessionId) -> Result<String> {
 mod tests {
     use super::*;
     use crate::dirs::ProjectRootDir;
+    use crate::message::Message;
     use crate::session::NodeId;
-    use rig::message::Message;
     use tempfile::TempDir;
 
     fn registry() -> (TempDir, FsSessionRegistry) {

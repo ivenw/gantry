@@ -64,7 +64,10 @@ impl StatefulWidget for ChatView<'_> {
             .iter()
             .map(|m| {
                 let prefix_len = match m {
-                    ChatMessage::User { .. } => USER_PREFIX.len(),
+                    ChatMessage::User { sender, .. } => {
+                        USER_PREFIX.len()
+                            + sender.as_ref().map(|s| s.as_str().len() + 2).unwrap_or(0)
+                    }
                     ChatMessage::Assistant { .. } => ASSISTANT_PREFIX.len(),
                     ChatMessage::ToolResult { tool_name, .. } => {
                         TOOL_RESULT_PREFIX.len() + tool_name.len() + 2
@@ -108,18 +111,19 @@ impl StatefulWidget for ChatView<'_> {
             let content = msg_content(message);
 
             match message {
-                ChatMessage::User { .. } => {
-                    let text_width = area.width.saturating_sub(USER_PREFIX.len() as u16);
-                    let text_area = Rect::new(
-                        area.x + USER_PREFIX.len() as u16,
-                        screen_y,
-                        text_width,
-                        visible_lines,
-                    );
+                ChatMessage::User { sender, .. } => {
+                    let prefix = match sender {
+                        Some(id) => format!("{} {} ", id.as_str(), USER_PREFIX.trim_end()),
+                        None => USER_PREFIX.to_string(),
+                    };
+                    let prefix_len = prefix.chars().count() as u16;
+                    let text_width = area.width.saturating_sub(prefix_len);
+                    let text_area =
+                        Rect::new(area.x + prefix_len, screen_y, text_width, visible_lines);
                     buf.set_string(
                         area.x,
                         screen_y,
-                        USER_PREFIX,
+                        &prefix,
                         Style::default().fg(ratatui::style::Color::LightGreen),
                     );
                     Paragraph::new(Text::raw(content))
@@ -201,7 +205,7 @@ impl StatefulWidget for ChatView<'_> {
 
 fn msg_content(message: &ChatMessage) -> &str {
     match message {
-        ChatMessage::User { content }
+        ChatMessage::User { content, .. }
         | ChatMessage::Assistant { content }
         | ChatMessage::ToolResult { content, .. } => content,
     }
