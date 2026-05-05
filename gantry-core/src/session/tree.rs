@@ -61,7 +61,8 @@ fn build_from(nodes: &HashMap<NodeId, Node>, root_id: NodeId) -> Option<Branch> 
 mod tests {
     use super::*;
     use crate::dirs::{ProjectConfigDir, ProjectRootDir};
-    use crate::session::registry::{FsSessionRegistry, SessionRegistry};
+    use crate::fs::FsSessionRegistry;
+    use crate::session::registry::SessionRegistry;
     use crate::session::{Session, SessionHistory};
     use rig::message::Message;
     use std::collections::HashMap;

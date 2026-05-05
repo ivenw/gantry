@@ -4,14 +4,18 @@ pub mod quit;
 pub mod tree;
 
 use crate::message::Msg;
-use gantry_rpc::JsonRpcClient;
+use gantry_core::{ChatService, SessionHandle, SessionManager};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::runtime::Handle;
+use tokio::sync::mpsc::Sender;
 
 pub struct CommandContext {
-    pub client: Option<Arc<JsonRpcClient>>,
-    pub project_path: std::path::PathBuf,
-    pub msg_tx: tokio::sync::mpsc::Sender<Msg>,
+    pub handle: Arc<SessionHandle>,
+    pub chat_service: Arc<ChatService>,
+    pub session_manager: Arc<SessionManager>,
+    pub project_path: PathBuf,
+    pub msg_tx: Sender<Msg>,
     pub rt_handle: Handle,
 }
 

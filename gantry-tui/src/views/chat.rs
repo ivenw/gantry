@@ -1,4 +1,4 @@
-use gantry_rpc::WireMessage;
+use crate::model::ChatMessage;
 use ratatui::{
     buffer::Buffer,
     layout::{Margin, Rect},
@@ -13,7 +13,7 @@ const ASSISTANT_PREFIX: &str = "<< ";
 const TOOL_RESULT_PREFIX: &str = "~~ ";
 
 pub struct ChatView<'a> {
-    pub messages: &'a [WireMessage],
+    pub messages: &'a [ChatMessage],
     pub scroll_offset: u16,
 }
 
@@ -64,9 +64,9 @@ impl StatefulWidget for ChatView<'_> {
             .iter()
             .map(|m| {
                 let prefix_len = match m {
-                    WireMessage::User { .. } => USER_PREFIX.len(),
-                    WireMessage::Assistant { .. } => ASSISTANT_PREFIX.len(),
-                    WireMessage::ToolResult { tool_name, .. } => {
+                    ChatMessage::User { .. } => USER_PREFIX.len(),
+                    ChatMessage::Assistant { .. } => ASSISTANT_PREFIX.len(),
+                    ChatMessage::ToolResult { tool_name, .. } => {
                         TOOL_RESULT_PREFIX.len() + tool_name.len() + 2
                     }
                 };
@@ -108,7 +108,7 @@ impl StatefulWidget for ChatView<'_> {
             let content = msg_content(message);
 
             match message {
-                WireMessage::User { .. } => {
+                ChatMessage::User { .. } => {
                     let text_width = area.width.saturating_sub(USER_PREFIX.len() as u16);
                     let text_area = Rect::new(
                         area.x + USER_PREFIX.len() as u16,
@@ -128,7 +128,7 @@ impl StatefulWidget for ChatView<'_> {
                         .scroll((clip_top, 0))
                         .render(text_area, buf);
                 }
-                WireMessage::Assistant { .. } => {
+                ChatMessage::Assistant { .. } => {
                     let text_width = area.width.saturating_sub(ASSISTANT_PREFIX.len() as u16);
                     let text_area = Rect::new(
                         area.x + ASSISTANT_PREFIX.len() as u16,
@@ -148,7 +148,7 @@ impl StatefulWidget for ChatView<'_> {
                         .scroll((clip_top, 0))
                         .render(text_area, buf);
                 }
-                WireMessage::ToolResult { tool_name, .. } => {
+                ChatMessage::ToolResult { tool_name, .. } => {
                     let prefix = format!("{}{}: ", TOOL_RESULT_PREFIX, tool_name);
                     let prefix_len = prefix.len() as u16;
                     let text_width = area.width.saturating_sub(prefix_len);
@@ -199,10 +199,10 @@ impl StatefulWidget for ChatView<'_> {
     }
 }
 
-fn msg_content(message: &WireMessage) -> &str {
+fn msg_content(message: &ChatMessage) -> &str {
     match message {
-        WireMessage::User { content }
-        | WireMessage::Assistant { content }
-        | WireMessage::ToolResult { content, .. } => content,
+        ChatMessage::User { content }
+        | ChatMessage::Assistant { content }
+        | ChatMessage::ToolResult { content, .. } => content,
     }
 }

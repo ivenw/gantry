@@ -2,54 +2,25 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use gantry_core::AppEvent;
 
 use crate::message::Msg;
-use crate::model::{CommandEntry, ConnectionState, Model, branch_rows};
+use crate::model::{ChatMessage, CommandEntry, Model, branch_rows};
 use crate::views::ViewState;
 
 pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg> {
     match msg {
         Msg::AppEvent(ev) => handle_app_event(model, ev),
-        Msg::WsDisconnected => {
-            model.connection_state = ConnectionState::Disconnected;
-            model.status_message = Some("Disconnected \u{2014} reconnecting...".into());
-            model.chat.finish_streaming();
-            None
-        }
-        Msg::WsError(e) => {
-            model.status_message = Some(e);
-            None
-        }
         Msg::StreamResult(Ok(())) => None,
         Msg::StreamResult(Err(e)) => {
             model.chat.finish_streaming();
-            if is_connection_error(&e) {
-                model.connection_state = ConnectionState::Disconnected;
-                model.status_message = Some("Disconnected \u{2014} reconnecting...".into());
-            } else {
-                model.status_message = Some(e);
-            }
+            model.status_message = Some(e);
             None
         }
         Msg::SetStatus(s) => {
             model.status_message = Some(s);
             None
         }
-        Msg::ReconnectSuccess {
-            session_id,
-            clear_messages,
-            ..
-        } => {
-            model.connection_state = ConnectionState::Connected;
-            model.session_id = Some(session_id);
-            model.status_message = None;
-            if clear_messages {
-                model.chat.reset();
-            }
-            None
-        }
-        Msg::NewSession { session_id, .. } => {
+        Msg::NewSession(session_id) => {
             model.session_id = Some(session_id);
             model.chat.reset();
-            model.connection_state = ConnectionState::Connected;
             model.status_message = None;
             None
         }
@@ -93,20 +64,13 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
 fn handle_app_event(model: &mut Model, event: AppEvent) -> Option<Msg> {
     match event {
         AppEvent::Init(ev) => {
-            // Don't overwrite state if a message send is already in flight (e.g. Init
-            // arriving from a reconnect subscribe while the user already sent a message).
             if model.chat.pending_message_id.is_none() && model.chat.streaming_message_idx.is_none()
             {
                 model.chat.messages = ev
                     .messages
                     .into_iter()
-                    .map(gantry_rpc::WireMessage::from)
+                    .filter_map(chat_message_from_rig)
                     .collect();
-                let pending_wire = ev.pending_message.map(gantry_rpc::WireMessage::from);
-                if let Some(gantry_rpc::WireMessage::User { ref content }) = pending_wire {
-                    model.chat.add_user_message(content.clone());
-                    model.chat.start_streaming_message();
-                }
             }
         }
         AppEvent::MessageReceived(ev) => {
@@ -128,17 +92,27 @@ fn handle_app_event(model: &mut Model, event: AppEvent) -> Option<Msg> {
         AppEvent::PendingCleared(_) => {
             model.chat.pending_message_id = None;
         }
-        AppEvent::ToolCallStarted(_) => {
-            // Future: show a spinner in the chat view keyed on tool_call_id.
-        }
-        AppEvent::ToolResultReceived(_) => {
-            // Future: replace spinner with result when it arrives.
-        }
+        AppEvent::ToolCallStarted(_) => {}
+        AppEvent::ToolResultReceived(_) => {}
         AppEvent::Error(ev) => {
             model.status_message = Some(ev.message);
         }
     }
     None
+}
+
+/// Converts a rig [`Message`] into a [`ChatMessage`] for display, or `None` for system messages.
+fn chat_message_from_rig(msg: gantry_core::Message) -> Option<ChatMessage> {
+    use gantry_core::message_text;
+    match &msg {
+        gantry_core::Message::User { .. } => Some(ChatMessage::User {
+            content: message_text(&msg),
+        }),
+        gantry_core::Message::Assistant { .. } => Some(ChatMessage::Assistant {
+            content: message_text(&msg),
+        }),
+        gantry_core::Message::System { .. } => None,
+    }
 }
 
 fn handle_key(
@@ -299,11 +273,6 @@ fn handle_enter(model: &mut Model, modifiers: KeyModifiers) -> Option<Msg> {
         }
     }
 
-    if !model.is_connected() {
-        model.status_message = Some("Not connected to server \u{2014} reconnecting...".to_string());
-        return None;
-    }
-
     model.input.clear();
     model.chat.add_user_message(input.clone());
     model.chat.start_streaming_message();
@@ -375,10 +344,3 @@ pub fn available_command_entries() -> Vec<CommandEntry> {
         .collect()
 }
 
-pub fn is_connection_error(err: &str) -> bool {
-    err.contains("connection refused")
-        || err.contains("failed to connect")
-        || err.contains("broken pipe")
-        || err.contains("WebSocket")
-        || err.contains("os error")
-}

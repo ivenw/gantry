@@ -13,26 +13,17 @@ impl Command for Tree {
     }
 
     fn execute(&self, ctx: CommandContext) {
-        match ctx.client {
-            None => {
-                let _ = ctx.msg_tx.try_send(Msg::SetStatus("Not connected".into()));
+        let tx = ctx.msg_tx;
+        let handle = ctx.handle.clone();
+        ctx.rt_handle.spawn(async move {
+            match handle.get_tree().await {
+                Some(tree) => {
+                    let _ = tx.send(Msg::OpenTreeView(tree)).await;
+                }
+                None => {
+                    let _ = tx.send(Msg::SetStatus("No messages yet".into())).await;
+                }
             }
-            Some(client) => {
-                let tx = ctx.msg_tx;
-                ctx.rt_handle.spawn(async move {
-                    match client.get_tree().await {
-                        Ok(Some(tree)) => {
-                            let _ = tx.send(Msg::OpenTreeView(tree)).await;
-                        }
-                        Ok(None) => {
-                            let _ = tx.send(Msg::SetStatus("No messages yet".into())).await;
-                        }
-                        Err(e) => {
-                            let _ = tx.send(Msg::SetStatus(e.to_string())).await;
-                        }
-                    }
-                });
-            }
-        }
+        });
     }
 }

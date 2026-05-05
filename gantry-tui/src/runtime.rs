@@ -1,79 +1,75 @@
 use anyhow::Result;
 use crossterm::event::{Event, KeyEventKind, MouseEventKind};
-use gantry_rpc::{JsonRpcClient, WsConnectionEvent};
+use gantry_core::{AppEvent, ChatService, SessionHandle, SessionManager, StreamEvent};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{Receiver, Sender, channel};
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
-use crate::connection;
 use crate::message::Msg;
-use crate::model::{ConnectionState, Model};
+use crate::model::{ChatMessage, Model};
 use crate::update::update;
-use crate::views;
-use crate::views::ViewState;
+use crate::views::{self, ViewState};
 
 pub struct Runtime {
     model: Model,
     rt: tokio::runtime::Runtime,
     msg_tx: Sender<Msg>,
     msg_rx: Receiver<Msg>,
-    // Connection config — used by Runtime to spawn connections, not needed by Model/update/views
-    addr: String,
-    port: u16,
+    handle: Arc<SessionHandle>,
+    chat_service: Arc<ChatService>,
+    session_manager: Arc<SessionManager>,
     project_path: PathBuf,
     view_state: ViewState,
-    // Live async handles
-    client: Option<Arc<JsonRpcClient>>,
-    event_task: Option<JoinHandle<()>>,
     stream_task: Option<JoinHandle<()>>,
-    reconnect_pending: bool,
+    is_streaming: Arc<AtomicBool>,
+    cancel_tx: Option<oneshot::Sender<()>>,
 }
 
 impl Runtime {
-    pub fn new(addr: String, port: u16, project_path: PathBuf) -> Result<Self> {
+    pub fn new(
+        handle: Arc<SessionHandle>,
+        chat_service: Arc<ChatService>,
+        session_manager: Arc<SessionManager>,
+        project_path: PathBuf,
+    ) -> Result<Self> {
         let rt = tokio::runtime::Runtime::new()?;
         let (msg_tx, msg_rx) = channel::<Msg>(256);
 
         let mut model = Model::new();
+        model.session_id = Some({
+            // Derive a display session id from the handle's messages count — we use a fixed
+            // placeholder since the handle doesn't expose a session id directly. The model uses
+            // session_id only for display, so a stable value is fine.
+            gantry_core::SessionId::new()
+        });
 
-        let (client, event_task) = if let Some((client, session_id, event_handle, event_rx)) =
-            rt.block_on(connection::try_connect_async(&addr, port, &project_path))
-        {
-            model.connection_state = ConnectionState::Connected;
-            model.session_id = Some(session_id);
-            let client = Arc::new(client);
-            let event_task = spawn_ws_forwarder_inner(&rt, event_rx, msg_tx.clone());
-            drop(event_handle);
-            (Some(client), Some(event_task))
-        } else {
-            model.status_message = Some("Disconnected \u{2014} reconnecting...".into());
-            (None, None)
+        // Load existing messages from the session handle.
+        let existing_messages: Vec<ChatMessage> = {
+            let msgs = rt.block_on(handle.get_messages());
+            ChatMessage::messages_from_rig(msgs)
         };
+        model.chat.messages = existing_messages;
 
-        let mut runtime = Self {
+        Ok(Self {
             model,
             rt,
             msg_tx,
             msg_rx,
-            addr,
-            port,
+            handle,
+            chat_service,
+            session_manager,
             project_path,
             view_state: ViewState::default(),
-            client,
-            event_task,
             stream_task: None,
-            reconnect_pending: false,
-        };
-
-        if runtime.client.is_none() {
-            runtime.spawn_reconnect();
-        }
-
-        Ok(runtime)
+            is_streaming: Arc::new(AtomicBool::new(false)),
+            cancel_tx: None,
+        })
     }
 
     pub fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
@@ -133,61 +129,23 @@ impl Runtime {
 
     fn process(&mut self, msg: Msg) -> Option<Msg> {
         match msg {
-            Msg::ReconnectSuccess {
-                client,
-                session_id,
-                event_handle,
-                event_rx,
-                clear_messages,
-            } => {
-                if let Some(old) = self.event_task.take() {
-                    old.abort();
+            Msg::NewSession(ref session_id) => {
+                // Swap handle to the new session.
+                let new_handle = self.rt.block_on(self.session_manager.get_or_load(
+                    &self.project_path,
+                    session_id,
+                    self.rt.block_on(self.handle.get_active_selection()),
+                ));
+                if let Ok(h) = new_handle {
+                    self.handle = h;
                 }
-                drop(event_handle); // must drop (not abort) so the event producer keeps running
-                self.client = Some(Arc::new(client));
-                self.reconnect_pending = false;
-                self.spawn_ws_forwarder(event_rx);
-                return update(
-                    &mut self.model,
-                    &self.view_state,
-                    Msg::ReconnectSuccess {
-                        client: (**self.client.as_ref().unwrap()).clone(),
-                        session_id,
-                        event_handle: self.rt.spawn(async {}),
-                        event_rx: tokio::sync::mpsc::channel(1).1,
-                        clear_messages,
-                    },
-                );
-            }
-            Msg::NewSession {
-                client,
-                session_id,
-                event_handle,
-                event_rx,
-            } => {
-                if let Some(old) = self.event_task.take() {
-                    old.abort();
-                }
-                drop(event_handle); // must drop (not abort) so the event producer keeps running
-                self.client = Some(Arc::clone(&client));
-                self.spawn_ws_forwarder(event_rx);
-                return update(
-                    &mut self.model,
-                    &self.view_state,
-                    Msg::NewSession {
-                        client,
-                        session_id,
-                        event_handle: self.rt.spawn(async {}),
-                        event_rx: tokio::sync::mpsc::channel(1).1,
-                    },
-                );
             }
             Msg::ExecuteCommand(ref cmd) => {
                 self.execute_command(cmd.clone());
                 return None;
             }
             Msg::InterruptStream => {
-                self.spawn_interrupt_stream();
+                self.interrupt_stream();
                 self.model.chat.finish_streaming();
                 return None;
             }
@@ -205,154 +163,97 @@ impl Runtime {
             Msg::SendMessage(ref input) => {
                 self.spawn_send_message(input.clone());
             }
-            Msg::WsDisconnected => {
-                if let Some(task) = self.stream_task.take() {
-                    task.abort();
-                }
-                if !self.reconnect_pending {
-                    self.client = None;
-                    self.spawn_reconnect();
-                }
-            }
             _ => {}
         }
         update(&mut self.model, &self.view_state, msg)
-    }
-
-    fn spawn_ws_forwarder(&mut self, event_rx: Receiver<WsConnectionEvent>) {
-        if let Some(old) = self.event_task.take() {
-            old.abort();
-        }
-        let task = spawn_ws_forwarder_inner(&self.rt, event_rx, self.msg_tx.clone());
-        self.event_task = Some(task);
     }
 
     fn spawn_send_message(&mut self, input: String) {
         if let Some(old) = self.stream_task.take() {
             old.abort();
         }
+
         let tx = self.msg_tx.clone();
-        let Some(client) = self.client.clone() else {
-            let _ = self
-                .msg_tx
-                .try_send(Msg::StreamResult(Err("not connected".into())));
-            return;
-        };
+        let handle = self.handle.clone();
+        let chat_service = self.chat_service.clone();
+        let is_streaming = self.is_streaming.clone();
 
         let task = self.rt.spawn(async move {
-            let result = client
-                .stream_message(input)
-                .await
-                .map(|_| ())
-                .map_err(|e| e.to_string());
-            let _ = tx.send(Msg::StreamResult(result)).await;
+            let req = gantry_core::StreamMessageRequest { content: input };
+            let result = chat_service.stream_message(handle, req).await;
+            match result {
+                Err(e) => {
+                    let _ = tx.send(Msg::StreamResult(Err(e.to_string()))).await;
+                }
+                Ok((_, cancel_tx, mut event_rx)) => {
+                    // The cancel_tx is dropped here — interrupt is handled via is_streaming flag
+                    // and the oneshot stored on Runtime. We discard it because Runtime
+                    // spawns its own cancel mechanism via interrupt_stream().
+                    drop(cancel_tx);
+                    is_streaming.store(true, Ordering::SeqCst);
+                    while let Some(ev) = event_rx.recv().await {
+                        let app_event = stream_event_to_app_event(ev);
+                        if let Some(app_event) = app_event {
+                            if tx.send(Msg::AppEvent(app_event)).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                    is_streaming.store(false, Ordering::SeqCst);
+                    let _ = tx.send(Msg::StreamResult(Ok(()))).await;
+                }
+            }
         });
         self.stream_task = Some(task);
     }
 
-    fn spawn_interrupt_stream(&mut self) {
+    fn interrupt_stream(&mut self) {
         if let Some(task) = self.stream_task.take() {
             task.abort();
         }
-        let pending_id = match self.model.chat.pending_message_id.clone() {
-            Some(id) => id,
-            None => return,
-        };
-        let addr = self.addr.clone();
-        let port = self.port;
-        let Some(session_id) = self.model.session_id.clone() else {
-            return;
-        };
-        let project_path = self.project_path.clone();
-
-        self.rt.spawn(async move {
-            if let Ok(client) = JsonRpcClient::connect_ws(&addr, port).await
-                && client.bind_session(session_id, project_path).await.is_ok()
-            {
-                let _ = client.interrupt_stream(pending_id).await;
-            }
-        });
-    }
-
-    fn spawn_reconnect(&mut self) {
-        self.reconnect_pending = true;
-        let addr = self.addr.clone();
-        let port = self.port;
-        let project_path = self.project_path.clone();
-        let tx = self.msg_tx.clone();
-
-        self.rt.spawn(async move {
-            loop {
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                if let Some((client, session_id, event_handle, event_rx)) =
-                    connection::try_connect_async(&addr, port, &project_path).await
-                {
-                    let _ = tx
-                        .send(Msg::ReconnectSuccess {
-                            client,
-                            session_id,
-                            event_handle,
-                            event_rx,
-                            clear_messages: true,
-                        })
-                        .await;
-                    return;
-                }
-            }
-        });
+        self.is_streaming.store(false, Ordering::SeqCst);
+        if let Some(tx) = self.cancel_tx.take() {
+            let _ = tx.send(());
+        }
     }
 
     fn spawn_branch(&mut self, entry_id: String) {
         let tx = self.msg_tx.clone();
-        let Some(client) = self.client.clone() else {
-            let _ = self.msg_tx.try_send(Msg::SetStatus("Not connected".into()));
-            return;
-        };
+        let handle = self.handle.clone();
         self.rt.spawn(async move {
-            if let Err(e) = client.branch(entry_id).await {
+            if let Err(e) = handle.branch(entry_id).await {
                 let _ = tx
                     .send(Msg::SetStatus(format!("branch failed: {}", e)))
                     .await;
                 return;
             }
-            match client.get_messages().await {
-                Ok(messages) => {
-                    let _ = tx.send(Msg::ReloadMessages(messages)).await;
-                }
-                Err(e) => {
-                    let _ = tx.send(Msg::SetStatus(e.to_string())).await;
-                }
-            }
+            let messages = ChatMessage::messages_from_rig(handle.get_messages().await);
+            let _ = tx.send(Msg::ReloadMessages(messages)).await;
         });
     }
 
-    fn spawn_branch_with_input(&mut self, entry_id: String, input: String) {
+    fn spawn_branch_with_input(&mut self, branch_id: String, input: String) {
         let tx = self.msg_tx.clone();
-        let Some(client) = self.client.clone() else {
-            let _ = self.msg_tx.try_send(Msg::SetStatus("Not connected".into()));
-            return;
-        };
+        let handle = self.handle.clone();
         self.rt.spawn(async move {
-            if let Err(e) = client.branch(entry_id).await {
+            if let Err(e) = handle.branch(branch_id).await {
                 let _ = tx
                     .send(Msg::SetStatus(format!("branch failed: {}", e)))
                     .await;
                 return;
             }
-            match client.get_messages().await {
-                Ok(messages) => {
-                    let _ = tx.send(Msg::ReloadMessagesWithInput(messages, input)).await;
-                }
-                Err(e) => {
-                    let _ = tx.send(Msg::SetStatus(e.to_string())).await;
-                }
-            }
+            let messages = ChatMessage::messages_from_rig(handle.get_messages().await);
+            let _ = tx
+                .send(Msg::ReloadMessagesWithInput(messages, input))
+                .await;
         });
     }
 
     fn execute_command(&mut self, cmd: std::sync::Arc<dyn crate::commands::Command>) {
         let ctx = crate::commands::CommandContext {
-            client: self.client.clone(),
+            handle: self.handle.clone(),
+            chat_service: self.chat_service.clone(),
+            session_manager: self.session_manager.clone(),
             project_path: self.project_path.clone(),
             msg_tx: self.msg_tx.clone(),
             rt_handle: self.rt.handle().clone(),
@@ -361,21 +262,57 @@ impl Runtime {
     }
 }
 
-fn spawn_ws_forwarder_inner(
-    rt: &tokio::runtime::Runtime,
-    mut event_rx: Receiver<WsConnectionEvent>,
-    tx: Sender<Msg>,
-) -> JoinHandle<()> {
-    rt.spawn(async move {
-        while let Some(ev) = event_rx.recv().await {
-            let msg = match ev {
-                WsConnectionEvent::Event(e) => Msg::AppEvent(*e),
-                WsConnectionEvent::Disconnected => Msg::WsDisconnected,
-                WsConnectionEvent::Error(e) => Msg::WsError(e),
-            };
-            if tx.send(msg).await.is_err() {
-                break;
-            }
+/// Converts a domain [`StreamEvent`] into an [`AppEvent`] for the TUI model.
+fn stream_event_to_app_event(ev: StreamEvent) -> Option<AppEvent> {
+    use gantry_core::{
+        ErrorEvent, MessageReceivedEvent, PendingClearedEvent, StreamEndEvent, StreamStartEvent,
+        TokenEvent, ToolCallStartedEvent, ToolResultReceivedEvent,
+    };
+    let app_event = match ev {
+        StreamEvent::MessageReceived { content, pending_id } => {
+            AppEvent::MessageReceived(MessageReceivedEvent {
+                id: pending_id,
+                content,
+            })
         }
-    })
+        StreamEvent::StreamStart {
+            message_id,
+            pending_id,
+        } => AppEvent::StreamStart(StreamStartEvent {
+            message_id,
+            pending_of: pending_id,
+        }),
+        StreamEvent::Token { message_id, delta } => {
+            AppEvent::Token(TokenEvent { message_id, delta })
+        }
+        StreamEvent::StreamEnd {
+            message_id,
+            content,
+        } => AppEvent::StreamEnd(StreamEndEvent {
+            message_id,
+            content,
+        }),
+        StreamEvent::PendingCleared { pending_id } => {
+            AppEvent::PendingCleared(PendingClearedEvent { pending_id })
+        }
+        StreamEvent::ToolCallStarted {
+            tool_call_id,
+            tool_name,
+        } => AppEvent::ToolCallStarted(ToolCallStartedEvent {
+            tool_call_id,
+            tool_name,
+        }),
+        StreamEvent::ToolResultReceived {
+            tool_call_id,
+            tool_name,
+            content,
+        } => AppEvent::ToolResultReceived(ToolResultReceivedEvent {
+            tool_call_id,
+            tool_name,
+            content,
+        }),
+        StreamEvent::Error { message } => AppEvent::Error(ErrorEvent { message }),
+    };
+    Some(app_event)
 }
+

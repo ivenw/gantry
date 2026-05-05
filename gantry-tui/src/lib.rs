@@ -1,5 +1,4 @@
 mod commands;
-mod connection;
 pub mod effects;
 mod message;
 mod model;
@@ -15,11 +14,19 @@ use crossterm::{
     },
     execute,
 };
+use gantry_core::{
+    ChatService, ConfiguredModel, ModelId, OllamaProviderConfig, ProviderConfig,
+    ProviderConfigCatalog, ProviderId, RigAgentFactory, SessionManager,
+    dirs::{ProjectConfigDir, ProjectRootDir},
+    fs::FsSessionRegistry,
+    session::registry::SessionRegistry,
+};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
+use std::sync::Arc;
 
-const DEFAULT_ADDR: &str = "127.0.0.1";
-const DEFAULT_PORT: u16 = 3444;
+const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
+const DEFAULT_OLLAMA_MODEL: &str = "ministral-3:3b";
 
 fn discover_project() -> Option<std::path::PathBuf> {
     let mut dir = std::env::current_dir().ok()?;
@@ -35,18 +42,63 @@ fn discover_project() -> Option<std::path::PathBuf> {
 }
 
 pub fn run() -> Result<()> {
-    let addr = std::env::var("GANTRY_ADDR").unwrap_or_else(|_| DEFAULT_ADDR.to_string());
-    let port: u16 = std::env::var("GANTRY_PORT")
-        .unwrap_or_else(|_| DEFAULT_PORT.to_string())
-        .parse()
-        .unwrap_or(DEFAULT_PORT);
-
     let project_path = discover_project().ok_or_else(|| {
-        anyhow!("no gantry project found in current directory or any parent\nRun `gantry init` to register this project.")
+        anyhow!("no gantry project found in current directory or any parent\nRun `gantry init` to initialize this directory.")
     })?;
 
+    let ollama_url =
+        std::env::var("GANTRY_OLLAMA_URL").unwrap_or_else(|_| DEFAULT_OLLAMA_URL.to_string());
+    let ollama_model =
+        std::env::var("GANTRY_OLLAMA_MODEL").unwrap_or_else(|_| DEFAULT_OLLAMA_MODEL.to_string());
+    let catalog = ProviderConfigCatalog {
+        providers: vec![ProviderConfig::Ollama(OllamaProviderConfig {
+            id: ProviderId::new("ollama"),
+            base_url: ollama_url,
+            models: vec![ConfiguredModel {
+                id: ModelId::new("default"),
+                provider_model_name: ollama_model,
+            }],
+            default_model: ModelId::new("default"),
+        })],
+        default_provider: ProviderId::new("ollama"),
+    };
+
+    let agent_factory = RigAgentFactory::new(catalog)?;
+    let default_selection = agent_factory
+        .catalog()
+        .default_selection()
+        .expect("provider catalog must have a default selection");
+
+    let chat_service = Arc::new(ChatService::new(agent_factory));
+    let session_manager = Arc::new(SessionManager::new());
+
+    // Find or create a session for this project.
+    let handle = {
+        let rt = tokio::runtime::Runtime::new()?;
+        let root = ProjectRootDir::new(&project_path)?;
+        let config_dir = ProjectConfigDir::new(&root)?;
+        let fs_registry = FsSessionRegistry::new(&config_dir)?;
+        let sessions = fs_registry.list()?;
+
+        rt.block_on(async {
+            if let Some(last) = sessions.last() {
+                session_manager
+                    .get_or_load(&project_path, &last.id, default_selection.clone())
+                    .await
+            } else {
+                let session_id = session_manager
+                    .create_session(&project_path, default_selection.clone())
+                    .await?;
+                session_manager
+                    .get_or_load(&project_path, &session_id, default_selection)
+                    .await
+            }
+        })?
+    };
+
     let (_terminal_guard, mut terminal) = TerminalGuard::enter()?;
-    let mut runtime = runtime::Runtime::new(addr, port, project_path)?;
+    let mut runtime =
+        runtime::Runtime::new(handle, chat_service, session_manager, project_path)?;
     runtime.run(&mut terminal)
 }
 

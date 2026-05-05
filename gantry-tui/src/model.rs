@@ -1,9 +1,7 @@
 use gantry_core::{Branch, SessionId, SessionTree};
-use gantry_rpc::WireMessage;
 
 pub struct Model {
     pub session_id: Option<SessionId>,
-    pub connection_state: ConnectionState,
     pub chat: ChatModel,
     pub input: InputModel,
     pub command_picker: Option<CommandPicker>,
@@ -19,13 +17,34 @@ pub struct TreeView {
     pub scroll_offset: usize,
 }
 
-pub enum ConnectionState {
-    Connected,
-    Disconnected,
+/// A simplified message representation used for rendering in the TUI.
+#[derive(Debug, Clone)]
+pub enum ChatMessage {
+    User { content: String },
+    Assistant { content: String },
+    ToolResult { tool_name: String, content: String },
+}
+
+impl ChatMessage {
+    /// Converts a list of rig messages into `ChatMessage`s, skipping system messages.
+    pub fn messages_from_rig(msgs: Vec<gantry_core::Message>) -> Vec<Self> {
+        use gantry_core::message_text;
+        msgs.into_iter()
+            .filter_map(|msg| match &msg {
+                gantry_core::Message::User { .. } => Some(Self::User {
+                    content: message_text(&msg),
+                }),
+                gantry_core::Message::Assistant { .. } => Some(Self::Assistant {
+                    content: message_text(&msg),
+                }),
+                gantry_core::Message::System { .. } => None,
+            })
+            .collect()
+    }
 }
 
 pub struct ChatModel {
-    pub messages: Vec<WireMessage>,
+    pub messages: Vec<ChatMessage>,
     pub pending_message_id: Option<String>,
     pub streaming_content: Option<String>,
     pub streaming_message_idx: Option<usize>,
@@ -60,17 +79,12 @@ impl Model {
     pub fn new() -> Self {
         Self {
             session_id: None,
-            connection_state: ConnectionState::Disconnected,
             chat: ChatModel::new(),
             input: InputModel::new(),
             command_picker: None,
             tree_view: None,
             status_message: None,
         }
-    }
-
-    pub fn is_connected(&self) -> bool {
-        matches!(self.connection_state, ConnectionState::Connected)
     }
 
     pub fn is_streaming(&self) -> bool {
@@ -195,7 +209,7 @@ impl ChatModel {
     }
 
     pub fn add_user_message(&mut self, content: String) {
-        self.messages.push(WireMessage::User { content });
+        self.messages.push(ChatMessage::User { content });
     }
 
     pub fn start_streaming_message(&mut self) {
@@ -216,7 +230,7 @@ impl ChatModel {
             if let Some(ref mut streaming) = self.streaming_content {
                 // Push the message on first flush.
                 if !self.streaming_message_pushed {
-                    self.messages.push(WireMessage::Assistant {
+                    self.messages.push(ChatMessage::Assistant {
                         content: String::new(),
                     });
                     self.streaming_message_pushed = true;
@@ -224,7 +238,7 @@ impl ChatModel {
                 streaming.push_str(&line);
                 if let Some(idx) = self.streaming_message_idx
                     && idx < self.messages.len()
-                    && let WireMessage::Assistant { ref mut content } = self.messages[idx]
+                    && let ChatMessage::Assistant { ref mut content } = self.messages[idx]
                 {
                     content.push_str(&line);
                 }
@@ -237,7 +251,7 @@ impl ChatModel {
             && let Some(ref mut streaming) = self.streaming_content
         {
             if !self.streaming_message_pushed {
-                self.messages.push(WireMessage::Assistant {
+                self.messages.push(ChatMessage::Assistant {
                     content: String::new(),
                 });
                 self.streaming_message_pushed = true;
@@ -245,7 +259,7 @@ impl ChatModel {
             streaming.push_str(&self.streaming_buffer);
             if let Some(idx) = self.streaming_message_idx
                 && idx < self.messages.len()
-                && let WireMessage::Assistant { ref mut content } = self.messages[idx]
+                && let ChatMessage::Assistant { ref mut content } = self.messages[idx]
             {
                 content.push_str(&self.streaming_buffer);
             }

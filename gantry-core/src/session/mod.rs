@@ -1,6 +1,8 @@
+pub mod handle;
 pub mod registry;
 pub mod tree;
 
+pub use handle::{SessionHandle, SessionManager};
 pub use registry::{SessionInfo, SessionRegistry};
 pub use tree::{Branch, SessionTree};
 

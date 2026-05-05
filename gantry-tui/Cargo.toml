@@ -13,4 +13,3 @@ ratatui.workspace = true
 crossterm.workspace = true
 tokio.workspace = true
 gantry-core = { path = "../gantry-core" }
-gantry-rpc = { path = "../gantry-rpc" }
