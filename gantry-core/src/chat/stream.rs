@@ -1,6 +1,6 @@
 use crate::app::App;
 use crate::chat::events::StreamMessageRequest;
-use crate::chat::system_prompt::build_system_prompt;
+use crate::system_prompt::build_system_prompt;
 use crate::project::resource_loader::discover_agents_md;
 use crate::provider::agent_factory::RigAgentFactory;
 use anyhow::Result;

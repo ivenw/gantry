@@ -1,5 +1,6 @@
 pub mod app;
 pub mod chat;
+pub mod system_prompt;
 pub mod dirs;
 pub mod fs;
 pub mod project;
