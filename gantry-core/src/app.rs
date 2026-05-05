@@ -3,16 +3,16 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use rig::message::Message;
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::Mutex;
 
-use crate::chat::events::StreamMessageRequest;
-use crate::chat::stream::StreamEvent;
 use crate::dirs::{ProjectConfigDir, ProjectRootDir};
 use crate::fs::FsSessionRegistry;
-use crate::provider::agent_factory::RigAgentFactory;
+use crate::project::resource_loader::discover_agents_md;
+use crate::provider::agent_factory::{ChatStream, RigAgentFactory};
 use crate::provider::{ModelId, ModelSelection, ProviderConfig, ProviderId};
 use crate::session::registry::SessionRegistry;
 use crate::session::{NodeId, Session, SessionId, SessionTree};
+use crate::system_prompt::build_system_prompt;
 
 type FsSession = Session<crate::fs::session_registry::FsSessionHistory>;
 
@@ -99,11 +99,6 @@ impl App {
         self.selection = selection;
     }
 
-    /// Returns the agent factory for use within the crate.
-    pub(crate) fn agent_factory(&self) -> &RigAgentFactory {
-        &self.agent_factory
-    }
-
     /// Returns all configured providers with their available models.
     pub fn list_providers(&self) -> Vec<ProviderConfig> {
         self.agent_factory.catalog().providers.clone()
@@ -135,17 +130,22 @@ impl App {
         Ok(())
     }
 
-    /// Starts streaming a message and returns the pending message ID, a cancel sender, and a
-    /// receiver of stream events. The caller drives the event receiver and handles cancellation
-    /// via the cancel sender.
-    ///
-    /// `app` must be the same `Arc<Mutex<App>>` that the caller holds; the spawned task uses it
-    /// to persist messages after streaming completes.
+    /// Persists `content` as a user message, then returns rig's streaming result for the agent
+    /// response. The caller is responsible for persisting the assistant message after the stream
+    /// completes.
     pub async fn stream_message(
         app: Arc<Mutex<App>>,
-        req: StreamMessageRequest,
-    ) -> Result<(String, oneshot::Sender<()>, mpsc::Receiver<StreamEvent>)> {
-        use crate::chat::stream::stream_message_with_app;
-        stream_message_with_app(req, app).await
+        content: String,
+    ) -> Result<ChatStream> {
+        let mut app = app.lock().await;
+        app.append_message(Message::user(content))?;
+        let history = app.context_messages();
+        let system_prompt = build_system_prompt(&discover_agents_md(&app.project_path));
+        let agent = app.agent_factory.agent(&app.selection, Some(&system_prompt)).await?;
+        let Some(prompt) = history.last().cloned() else {
+            anyhow::bail!("no messages to stream");
+        };
+        let history = history[..history.len() - 1].to_vec();
+        Ok(agent.stream_chat(prompt, history).await)
     }
 }

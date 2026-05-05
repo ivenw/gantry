@@ -1,4 +1,4 @@
-use gantry_core::{AppEvent, SessionTree};
+use gantry_core::{ChatStreamItem, SessionTree, StreamingError};
 
 use crate::model::ChatMessage;
 
@@ -6,8 +6,9 @@ pub enum Msg {
     // Input
     Key(crossterm::event::KeyEvent),
 
-    // Server app events
-    AppEvent(AppEvent),
+    // Stream events from the agent
+    StreamItem(Result<ChatStreamItem, StreamingError>),
+    StreamDone,
 
     // Streaming result
     StreamResult(Result<(), String>),

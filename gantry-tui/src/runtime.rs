@@ -1,6 +1,7 @@
 use anyhow::Result;
 use crossterm::event::{Event, KeyEventKind, MouseEventKind};
-use gantry_core::{App, AppEvent, StreamEvent};
+use futures::StreamExt;
+use gantry_core::App;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use std::sync::Arc;
@@ -8,7 +9,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
-use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use crate::message::Msg;
@@ -25,7 +25,6 @@ pub struct Runtime {
     view_state: ViewState,
     stream_task: Option<JoinHandle<()>>,
     is_streaming: Arc<AtomicBool>,
-    cancel_tx: Option<oneshot::Sender<()>>,
 }
 
 impl Runtime {
@@ -52,7 +51,6 @@ impl Runtime {
             view_state: ViewState::default(),
             stream_task: None,
             is_streaming: Arc::new(AtomicBool::new(false)),
-            cancel_tx: None,
         })
     }
 
@@ -159,24 +157,19 @@ impl Runtime {
         let is_streaming = self.is_streaming.clone();
 
         let task = self.rt.spawn(async move {
-            let req = gantry_core::StreamMessageRequest { content: input };
-            let result = App::stream_message(app, req).await;
-            match result {
+            match App::stream_message(app, input).await {
                 Err(e) => {
                     let _ = tx.send(Msg::StreamResult(Err(e.to_string()))).await;
                 }
-                Ok((_, cancel_tx, mut event_rx)) => {
-                    drop(cancel_tx);
+                Ok(mut stream) => {
                     is_streaming.store(true, Ordering::SeqCst);
-                    while let Some(ev) = event_rx.recv().await {
-                        let app_event = stream_event_to_app_event(ev);
-                        if let Some(app_event) = app_event {
-                            if tx.send(Msg::AppEvent(app_event)).await.is_err() {
-                                break;
-                            }
+                    while let Some(item) = stream.next().await {
+                        if tx.send(Msg::StreamItem(item)).await.is_err() {
+                            break;
                         }
                     }
                     is_streaming.store(false, Ordering::SeqCst);
+                    let _ = tx.send(Msg::StreamDone).await;
                     let _ = tx.send(Msg::StreamResult(Ok(()))).await;
                 }
             }
@@ -189,9 +182,6 @@ impl Runtime {
             task.abort();
         }
         self.is_streaming.store(false, Ordering::SeqCst);
-        if let Some(tx) = self.cancel_tx.take() {
-            let _ = tx.send(());
-        }
     }
 
     fn spawn_branch(&mut self, entry_id: String) {
@@ -236,56 +226,3 @@ impl Runtime {
     }
 }
 
-/// Converts a domain [`StreamEvent`] into an [`AppEvent`] for the TUI model.
-fn stream_event_to_app_event(ev: StreamEvent) -> Option<AppEvent> {
-    use gantry_core::{
-        ErrorEvent, MessageReceivedEvent, PendingClearedEvent, StreamEndEvent, StreamStartEvent,
-        TokenEvent, ToolCallStartedEvent, ToolResultReceivedEvent,
-    };
-    let app_event = match ev {
-        StreamEvent::MessageReceived { content, pending_id } => {
-            AppEvent::MessageReceived(MessageReceivedEvent {
-                id: pending_id,
-                content,
-            })
-        }
-        StreamEvent::StreamStart {
-            message_id,
-            pending_id,
-        } => AppEvent::StreamStart(StreamStartEvent {
-            message_id,
-            pending_of: pending_id,
-        }),
-        StreamEvent::Token { message_id, delta } => {
-            AppEvent::Token(TokenEvent { message_id, delta })
-        }
-        StreamEvent::StreamEnd {
-            message_id,
-            content,
-        } => AppEvent::StreamEnd(StreamEndEvent {
-            message_id,
-            content,
-        }),
-        StreamEvent::PendingCleared { pending_id } => {
-            AppEvent::PendingCleared(PendingClearedEvent { pending_id })
-        }
-        StreamEvent::ToolCallStarted {
-            tool_call_id,
-            tool_name,
-        } => AppEvent::ToolCallStarted(ToolCallStartedEvent {
-            tool_call_id,
-            tool_name,
-        }),
-        StreamEvent::ToolResultReceived {
-            tool_call_id,
-            tool_name,
-            content,
-        } => AppEvent::ToolResultReceived(ToolResultReceivedEvent {
-            tool_call_id,
-            tool_name,
-            content,
-        }),
-        StreamEvent::Error { message } => AppEvent::Error(ErrorEvent { message }),
-    };
-    Some(app_event)
-}

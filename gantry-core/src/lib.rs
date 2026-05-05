@@ -1,5 +1,4 @@
 pub mod app;
-pub mod chat;
 pub mod system_prompt;
 pub mod dirs;
 pub mod fs;
@@ -9,13 +8,9 @@ pub mod session;
 pub mod tools;
 
 pub use app::App;
-pub use chat::events::{
-    AppEvent, ErrorEvent, InitEvent, MessageReceivedEvent, PendingClearedEvent, StreamEndEvent,
-    StreamMessageRequest, StreamStartEvent, TokenEvent, ToolCallStartedEvent,
-    ToolResultReceivedEvent,
-};
-pub use chat::stream::StreamEvent;
-pub use provider::agent_factory::RigAgentFactory;
+pub use provider::agent_factory::{ChatStream, ChatStreamItem, RigAgentFactory};
+pub use rig::agent::{MultiTurnStreamItem, StreamingError};
+pub use rig::streaming::StreamedAssistantContent;
 pub use provider::{
     ConfiguredModel, ModelId, ModelSelection, OllamaProviderConfig, ProviderConfig,
     ProviderConfigCatalog, ProviderId,

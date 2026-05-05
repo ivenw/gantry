@@ -1,13 +1,20 @@
 use crossterm::event::{KeyCode, KeyModifiers};
-use gantry_core::AppEvent;
+use gantry_core::{ChatStreamItem, MultiTurnStreamItem, StreamedAssistantContent, StreamingError};
 
 use crate::message::Msg;
-use crate::model::{ChatMessage, CommandEntry, Model, branch_rows};
+use crate::model::{CommandEntry, Model, branch_rows};
 use crate::views::ViewState;
 
 pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg> {
     match msg {
-        Msg::AppEvent(ev) => handle_app_event(model, ev),
+        Msg::StreamItem(item) => handle_stream_item(model, item),
+        Msg::StreamDone => {
+            model.chat.finish_streaming();
+            if !model.chat.user_is_scrolling {
+                model.chat.scroll_offset = 0;
+            }
+            None
+        }
         Msg::StreamResult(Ok(())) => None,
         Msg::StreamResult(Err(e)) => {
             model.chat.finish_streaming();
@@ -60,58 +67,23 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
     }
 }
 
-fn handle_app_event(model: &mut Model, event: AppEvent) -> Option<Msg> {
-    match event {
-        AppEvent::Init(ev) => {
-            if model.chat.pending_message_id.is_none() && model.chat.streaming_message_idx.is_none()
-            {
-                model.chat.messages = ev
-                    .messages
-                    .into_iter()
-                    .filter_map(chat_message_from_rig)
-                    .collect();
-            }
-        }
-        AppEvent::MessageReceived(ev) => {
-            model.chat.pending_message_id = Some(ev.id);
-        }
-        AppEvent::StreamStart(_) => {}
-        AppEvent::Token(ev) => {
-            model.chat.append_to_streaming(&ev.delta);
+fn handle_stream_item(
+    model: &mut Model,
+    item: Result<ChatStreamItem, StreamingError>,
+) -> Option<Msg> {
+    match item {
+        Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text))) => {
+            model.chat.append_to_streaming(&text.text);
             if !model.chat.user_is_scrolling {
                 model.chat.scroll_offset = 0;
             }
         }
-        AppEvent::StreamEnd(_) => {
-            model.chat.finish_streaming();
-            if !model.chat.user_is_scrolling {
-                model.chat.scroll_offset = 0;
-            }
-        }
-        AppEvent::PendingCleared(_) => {
-            model.chat.pending_message_id = None;
-        }
-        AppEvent::ToolCallStarted(_) => {}
-        AppEvent::ToolResultReceived(_) => {}
-        AppEvent::Error(ev) => {
-            model.status_message = Some(ev.message);
+        Ok(_) => {}
+        Err(e) => {
+            model.status_message = Some(e.to_string());
         }
     }
     None
-}
-
-/// Converts a rig [`Message`] into a [`ChatMessage`] for display, or `None` for system messages.
-fn chat_message_from_rig(msg: gantry_core::Message) -> Option<ChatMessage> {
-    use gantry_core::message_text;
-    match &msg {
-        gantry_core::Message::User { .. } => Some(ChatMessage::User {
-            content: message_text(&msg),
-        }),
-        gantry_core::Message::Assistant { .. } => Some(ChatMessage::Assistant {
-            content: message_text(&msg),
-        }),
-        gantry_core::Message::System { .. } => None,
-    }
 }
 
 fn handle_key(
