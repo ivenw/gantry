@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 /// The full set of configured providers.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProviderConfigCatalog {
     pub providers: Vec<ProviderConfig>,
 }
@@ -53,11 +53,14 @@ impl ProviderConfig {
     }
 }
 
+const OLLAMA_DEFAULT_BASE_URL: &str = "http://localhost:11434";
+
 /// Configuration for an Ollama provider instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OllamaProviderConfig {
     pub alias: ProviderAlias,
-    pub base_url: String,
+    /// Overrides the default Ollama base URL (`http://localhost:11434`).
+    pub base_url: Option<String>,
 }
 
 impl OllamaProviderConfig {
@@ -73,7 +76,8 @@ impl OllamaProviderConfig {
             name: String,
         }
 
-        let url = format!("{}/api/tags", self.base_url.trim_end_matches('/'));
+        let base_url = self.base_url.as_deref().unwrap_or(OLLAMA_DEFAULT_BASE_URL);
+        let url = format!("{}/api/tags", base_url.trim_end_matches('/'));
         let response: TagsResponse = reqwest::get(&url).await?.json().await?;
         Ok(response
             .models
@@ -127,7 +131,7 @@ mod tests {
         ProviderConfigCatalog {
             providers: vec![ProviderConfig::Ollama(OllamaProviderConfig {
                 alias: ProviderAlias::new("ollama"),
-                base_url: "http://localhost:11434".to_string(),
+                base_url: None,
             })],
         }
     }
@@ -144,7 +148,7 @@ mod tests {
             .providers
             .push(ProviderConfig::Ollama(OllamaProviderConfig {
                 alias: ProviderAlias::new("ollama"),
-                base_url: "http://localhost:11435".to_string(),
+                base_url: None,
             }));
         assert!(catalog.validate().is_err());
     }

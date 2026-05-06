@@ -1,4 +1,5 @@
 pub mod app;
+pub mod config;
 pub mod dirs;
 pub mod fs;
 pub mod message;
@@ -9,6 +10,7 @@ pub mod system_prompt;
 pub mod tools;
 
 pub use app::App;
+pub use config::{ConfigLoader, Credential, CredentialsCatalog};
 pub use message::{Message, UserId};
 pub use provider::agent::{ChatStream, ChatStreamItem};
 pub use provider::agent_factory::AgentFactory;

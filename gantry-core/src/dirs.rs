@@ -18,6 +18,16 @@ impl GlobalConfigDir {
     pub fn path(&self) -> &Path {
         &self.0
     }
+
+    /// Returns the path to `~/.gantry/config.toml`.
+    pub fn config_path(&self) -> PathBuf {
+        self.0.join("config.toml")
+    }
+
+    /// Returns the path to `~/.gantry/credentials.toml`.
+    pub fn credentials_path(&self) -> PathBuf {
+        self.0.join("credentials.toml")
+    }
 }
 
 pub struct ProjectRootDir(PathBuf);

@@ -14,13 +14,11 @@ use crossterm::{
     },
     execute,
 };
-use gantry_core::{AgentFactory, App, OllamaProviderConfig, ProviderAlias, ProviderConfig, ProviderConfigCatalog};
+use gantry_core::{AgentFactory, App, ConfigLoader};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-
-const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
 
 fn discover_project() -> Option<std::path::PathBuf> {
     let mut dir = std::env::current_dir().ok()?;
@@ -40,15 +38,7 @@ pub fn run() -> Result<()> {
         anyhow!("no gantry project found in current directory or any parent\nRun `gantry init` to initialize this directory.")
     })?;
 
-    let ollama_url =
-        std::env::var("GANTRY_OLLAMA_URL").unwrap_or_else(|_| DEFAULT_OLLAMA_URL.to_string());
-    let catalog = ProviderConfigCatalog {
-        providers: vec![ProviderConfig::Ollama(OllamaProviderConfig {
-            alias: ProviderAlias::new("ollama"),
-            base_url: ollama_url,
-        })],
-    };
-
+    let catalog = ConfigLoader::new()?.load_provider_catalog()?;
     let agent_factory = AgentFactory::new(catalog)?;
     let app = App::new(&project_path, None, agent_factory)?;
     let app = Arc::new(Mutex::new(app));

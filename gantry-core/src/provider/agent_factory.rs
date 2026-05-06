@@ -33,10 +33,11 @@ impl AgentFactory {
     ) -> Result<ConfiguredAgent> {
         match self.provider_config(selection)? {
             ProviderConfig::Ollama(provider) => {
-                let client = ollama::Client::builder()
-                    .api_key(Nothing)
-                    .base_url(&provider.base_url)
-                    .build()?;
+                let mut builder = ollama::Client::builder().api_key(Nothing);
+                if let Some(base_url) = &provider.base_url {
+                    builder = builder.base_url(base_url);
+                }
+                let client = builder.build()?;
 
                 let mut builder = client.agent(selection.model.as_str());
                 if let Some(p) = preamble {
