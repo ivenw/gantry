@@ -43,6 +43,8 @@ pub struct ModelSelection {
 pub enum ProviderConfig {
     Ollama(OllamaProviderConfig),
     Copilot(CopilotProviderConfig),
+    OpenAiCompletions(OpenAiCompletionsProviderConfig),
+    OpenAiResponses(OpenAiResponsesProviderConfig),
 }
 
 impl ProviderConfig {
@@ -51,6 +53,8 @@ impl ProviderConfig {
         match self {
             ProviderConfig::Ollama(config) => &config.alias,
             ProviderConfig::Copilot(config) => &config.alias,
+            ProviderConfig::OpenAiCompletions(config) => &config.alias,
+            ProviderConfig::OpenAiResponses(config) => &config.alias,
         }
     }
 }
@@ -93,6 +97,28 @@ impl OllamaProviderConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CopilotProviderConfig {
     pub alias: ProviderAlias,
+}
+
+/// Configuration for an OpenAI-compatible provider using the chat completions API.
+///
+/// Suitable for LLM routers and self-hosted endpoints that implement the OpenAI completions API.
+/// Requires an `api_key` credential stored under this provider's alias.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenAiCompletionsProviderConfig {
+    pub alias: ProviderAlias,
+    /// Base URL of the OpenAI-compatible completions endpoint.
+    pub base_url: String,
+}
+
+/// Configuration for a provider using the OpenAI responses API.
+///
+/// Suitable for endpoints that implement the newer OpenAI responses API.
+/// Requires an `api_key` credential stored under this provider's alias.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenAiResponsesProviderConfig {
+    pub alias: ProviderAlias,
+    /// Base URL of the OpenAI-compatible responses endpoint.
+    pub base_url: String,
 }
 
 /// User-defined alias for a provider instance.

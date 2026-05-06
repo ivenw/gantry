@@ -3,6 +3,6 @@ pub mod agent_factory;
 pub mod catalog;
 
 pub use catalog::{
-    ModelAlias, ModelSelection, OllamaProviderConfig, ProviderAlias, ProviderConfig,
-    ProviderConfigCatalog,
+    ModelAlias, ModelSelection, OllamaProviderConfig, OpenAiCompletionsProviderConfig,
+    OpenAiResponsesProviderConfig, ProviderAlias, ProviderConfig, ProviderConfigCatalog,
 };

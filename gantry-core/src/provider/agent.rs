@@ -3,7 +3,7 @@ use futures::{Stream, StreamExt};
 use rig::agent::{Agent, MultiTurnStreamItem, StreamingError};
 use rig::message::Message;
 use rig::completion::Chat;
-use rig::providers::{copilot, ollama};
+use rig::providers::{copilot, ollama, openai};
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
 use std::pin::Pin;
 
@@ -51,6 +51,8 @@ pub struct ConfiguredAgent {
 enum ConfiguredAgentKind {
     Ollama(Agent<ollama::CompletionModel>),
     Copilot(Agent<copilot::CompletionModel>),
+    OpenAiCompletions(Agent<openai::completion::CompletionModel>),
+    OpenAiResponses(Agent<openai::responses_api::ResponsesCompletionModel>),
 }
 
 impl ConfiguredAgent {
@@ -68,11 +70,33 @@ impl ConfiguredAgent {
         }
     }
 
+    /// Wraps an OpenAI-compatible completions API agent.
+    pub(super) fn openai_completions(agent: Agent<openai::completion::CompletionModel>) -> Self {
+        Self {
+            inner: ConfiguredAgentKind::OpenAiCompletions(agent),
+        }
+    }
+
+    /// Wraps an OpenAI-compatible responses API agent.
+    pub(super) fn openai_responses(
+        agent: Agent<openai::responses_api::ResponsesCompletionModel>,
+    ) -> Self {
+        Self {
+            inner: ConfiguredAgentKind::OpenAiResponses(agent),
+        }
+    }
+
     /// Sends a single-turn chat and returns the assistant's response text.
     pub async fn chat(&self, prompt: Message, history: Vec<Message>) -> Result<String> {
         match &self.inner {
             ConfiguredAgentKind::Ollama(agent) => Ok(agent.chat(prompt, history).await?),
             ConfiguredAgentKind::Copilot(agent) => Ok(agent.chat(prompt, history).await?),
+            ConfiguredAgentKind::OpenAiCompletions(agent) => {
+                Ok(agent.chat(prompt, history).await?)
+            }
+            ConfiguredAgentKind::OpenAiResponses(agent) => {
+                Ok(agent.chat(prompt, history).await?)
+            }
         }
     }
 
@@ -86,6 +110,18 @@ impl ConfiguredAgent {
                     .map(|item| item.map(erase_final)),
             ),
             ConfiguredAgentKind::Copilot(agent) => Box::pin(
+                agent
+                    .stream_chat(prompt, history)
+                    .await
+                    .map(|item| item.map(erase_final)),
+            ),
+            ConfiguredAgentKind::OpenAiCompletions(agent) => Box::pin(
+                agent
+                    .stream_chat(prompt, history)
+                    .await
+                    .map(|item| item.map(erase_final)),
+            ),
+            ConfiguredAgentKind::OpenAiResponses(agent) => Box::pin(
                 agent
                     .stream_chat(prompt, history)
                     .await
