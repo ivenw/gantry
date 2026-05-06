@@ -38,8 +38,10 @@ pub fn run() -> Result<()> {
         anyhow!("no gantry project found in current directory or any parent\nRun `gantry init` to initialize this directory.")
     })?;
 
-    let catalog = ConfigLoader::new()?.load_provider_catalog()?;
-    let agent_factory = AgentFactory::new(catalog)?;
+    let loader = ConfigLoader::new()?;
+    let catalog = loader.load_provider_catalog()?;
+    let credentials = loader.load_credentials()?;
+    let agent_factory = AgentFactory::new(catalog, credentials)?;
     let app = App::new(&project_path, None, agent_factory)?;
     let app = Arc::new(Mutex::new(app));
 

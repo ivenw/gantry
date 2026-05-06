@@ -42,6 +42,7 @@ pub struct ModelSelection {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProviderConfig {
     Ollama(OllamaProviderConfig),
+    Copilot(CopilotProviderConfig),
 }
 
 impl ProviderConfig {
@@ -49,6 +50,7 @@ impl ProviderConfig {
     pub fn alias(&self) -> &ProviderAlias {
         match self {
             ProviderConfig::Ollama(config) => &config.alias,
+            ProviderConfig::Copilot(config) => &config.alias,
         }
     }
 }
@@ -85,6 +87,12 @@ impl OllamaProviderConfig {
             .map(|m| ModelAlias::new(m.name))
             .collect())
     }
+}
+
+/// Configuration for a GitHub Copilot provider instance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CopilotProviderConfig {
+    pub alias: ProviderAlias,
 }
 
 /// User-defined alias for a provider instance.

@@ -3,7 +3,7 @@ use futures::{Stream, StreamExt};
 use rig::agent::{Agent, MultiTurnStreamItem, StreamingError};
 use rig::message::Message;
 use rig::completion::Chat;
-use rig::providers::ollama;
+use rig::providers::{copilot, ollama};
 use rig::streaming::{StreamedAssistantContent, StreamingChat};
 use std::pin::Pin;
 
@@ -50,6 +50,7 @@ pub struct ConfiguredAgent {
 
 enum ConfiguredAgentKind {
     Ollama(Agent<ollama::CompletionModel>),
+    Copilot(Agent<copilot::CompletionModel>),
 }
 
 impl ConfiguredAgent {
@@ -60,10 +61,18 @@ impl ConfiguredAgent {
         }
     }
 
+    /// Wraps a GitHub Copilot agent.
+    pub(super) fn copilot(agent: Agent<copilot::CompletionModel>) -> Self {
+        Self {
+            inner: ConfiguredAgentKind::Copilot(agent),
+        }
+    }
+
     /// Sends a single-turn chat and returns the assistant's response text.
     pub async fn chat(&self, prompt: Message, history: Vec<Message>) -> Result<String> {
         match &self.inner {
             ConfiguredAgentKind::Ollama(agent) => Ok(agent.chat(prompt, history).await?),
+            ConfiguredAgentKind::Copilot(agent) => Ok(agent.chat(prompt, history).await?),
         }
     }
 
@@ -71,6 +80,12 @@ impl ConfiguredAgent {
     pub async fn stream_chat(&self, prompt: Message, history: Vec<Message>) -> ChatStream {
         match &self.inner {
             ConfiguredAgentKind::Ollama(agent) => Box::pin(
+                agent
+                    .stream_chat(prompt, history)
+                    .await
+                    .map(|item| item.map(erase_final)),
+            ),
+            ConfiguredAgentKind::Copilot(agent) => Box::pin(
                 agent
                     .stream_chat(prompt, history)
                     .await

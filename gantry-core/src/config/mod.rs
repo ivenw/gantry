@@ -4,7 +4,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-pub use credentials::{Credential, CredentialsCatalog};
+pub use credentials::{Credential, CredentialsCatalog, StoredCredential};
 
 use crate::dirs::GlobalConfigDir;
 use crate::provider::ProviderConfigCatalog;
@@ -40,7 +40,7 @@ impl ConfigLoader {
     }
 
     /// Writes a single credential entry to `credentials.toml`, preserving all other entries.
-    pub fn save_credential(&self, alias: &crate::provider::ProviderAlias, credential: &Credential) -> Result<()> {
+    pub fn save_credential(&self, alias: &crate::provider::ProviderAlias, credential: &StoredCredential) -> Result<()> {
         let raw = if self.credentials_path.exists() {
             std::fs::read_to_string(&self.credentials_path)
                 .context("failed to read credentials.toml")?

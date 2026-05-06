@@ -10,7 +10,7 @@ jiff = { version = "0.2", features = ["serde"] }
 dirs.workspace = true
 futures = "0.3"
 gantry-tools = { path = "../gantry-tools" }
-rig = { package = "rig-core", version = "0.33.0" }
+rig = { package = "rig-core", version = "0.36.0" }
 schemars = "1.2.1"
 serde.workspace = true
 reqwest.workspace = true
