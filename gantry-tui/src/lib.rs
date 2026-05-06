@@ -15,8 +15,8 @@ use crossterm::{
     execute,
 };
 use gantry_core::{
-    AgentFactory, App, ConfiguredModel, ModelAlias, OllamaProviderConfig, ProviderAlias,
-    ProviderConfig, ProviderConfigCatalog,
+    AgentFactory, App, ModelAlias, OllamaProviderConfig, ProviderAlias, ProviderConfig,
+    ProviderConfigCatalog,
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
@@ -52,11 +52,7 @@ pub fn run() -> Result<()> {
         providers: vec![ProviderConfig::Ollama(OllamaProviderConfig {
             alias: ProviderAlias::new("ollama"),
             base_url: ollama_url,
-            models: vec![ConfiguredModel {
-                alias: ModelAlias::new("default"),
-                provider_model_name: ollama_model,
-            }],
-            default_model: ModelAlias::new("default"),
+            default_model: ModelAlias::new(ollama_model),
         })],
         default_provider: ProviderAlias::new("ollama"),
     };

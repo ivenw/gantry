@@ -118,7 +118,6 @@ impl App {
             provider_alias: self.selection.provider_alias.clone(),
             model_alias,
         };
-        self.agent_factory.validate_selection(&selection)?;
         self.set_selection(selection);
         Ok(())
     }

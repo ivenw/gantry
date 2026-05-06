@@ -37,12 +37,9 @@ impl AgentFactory {
         })
     }
 
-    /// Validates that the given [`ModelSelection`] refers to a configured provider and model.
-    pub fn validate_selection(&self, selection: &ModelSelection) -> Result<()> {
-        self.catalog.validate_selection(selection)
-    }
-
     /// Builds a [`ConfiguredAgent`] for the given model selection and optional preamble.
+    ///
+    /// The `model_alias` is used directly as the Ollama model name.
     pub fn agent(
         &self,
         selection: &ModelSelection,
@@ -50,24 +47,12 @@ impl AgentFactory {
     ) -> Result<ConfiguredAgent> {
         match self.provider_config(selection)? {
             ProviderConfig::Ollama(provider) => {
-                let model = self
-                    .catalog
-                    .model(&selection.provider_alias, &selection.model_alias)
-                    .cloned()
-                    .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "configured model '{}' not found for provider '{}'",
-                            selection.model_alias.as_str(),
-                            selection.provider_alias.as_str()
-                        )
-                    })?;
-
                 let client = ollama::Client::builder()
                     .api_key(Nothing)
                     .base_url(&provider.base_url)
                     .build()?;
 
-                let mut builder = client.agent(&model.provider_model_name);
+                let mut builder = client.agent(selection.model_alias.as_str());
                 if let Some(p) = preamble {
                     builder = builder.preamble(p);
                 }

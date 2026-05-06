@@ -13,7 +13,7 @@ pub use message::{Message, UserId};
 pub use provider::agent::{ChatStream, ChatStreamItem};
 pub use provider::agent_factory::AgentFactory;
 pub use provider::{
-    ConfiguredModel, ModelAlias, ModelSelection, OllamaProviderConfig, ProviderAlias, ProviderConfig,
+    ModelAlias, ModelSelection, OllamaProviderConfig, ProviderAlias, ProviderConfig,
     ProviderConfigCatalog,
 };
 pub use rig::agent::{MultiTurnStreamItem, StreamingError};
