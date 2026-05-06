@@ -15,8 +15,8 @@ use crossterm::{
     execute,
 };
 use gantry_core::{
-    AgentFactory, App, ConfiguredModel, ModelId, OllamaProviderConfig, ProviderConfig,
-    ProviderConfigCatalog, ProviderId,
+    AgentFactory, App, ConfiguredModel, ModelAlias, OllamaProviderConfig, ProviderAlias,
+    ProviderConfig, ProviderConfigCatalog,
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
@@ -50,15 +50,15 @@ pub fn run() -> Result<()> {
         std::env::var("GANTRY_OLLAMA_MODEL").unwrap_or_else(|_| DEFAULT_OLLAMA_MODEL.to_string());
     let catalog = ProviderConfigCatalog {
         providers: vec![ProviderConfig::Ollama(OllamaProviderConfig {
-            id: ProviderId::new("ollama"),
+            alias: ProviderAlias::new("ollama"),
             base_url: ollama_url,
             models: vec![ConfiguredModel {
-                id: ModelId::new("default"),
+                alias: ModelAlias::new("default"),
                 provider_model_name: ollama_model,
             }],
-            default_model: ModelId::new("default"),
+            default_model: ModelAlias::new("default"),
         })],
-        default_provider: ProviderId::new("ollama"),
+        default_provider: ProviderAlias::new("ollama"),
     };
 
     let agent_factory = AgentFactory::new(catalog)?;

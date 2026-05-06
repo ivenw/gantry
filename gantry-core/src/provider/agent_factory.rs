@@ -3,7 +3,7 @@ use rig::client::{CompletionClient, Nothing};
 use rig::providers::ollama;
 
 use crate::provider::agent::ConfiguredAgent;
-use crate::provider::catalog::{ModelSelection, ProviderConfig, ProviderConfigCatalog, ProviderId};
+use crate::provider::catalog::{ModelSelection, ProviderAlias, ProviderConfig, ProviderConfigCatalog};
 
 /// Builds [`ConfiguredAgent`]s from a validated [`ProviderConfigCatalog`].
 #[derive(Clone)]
@@ -29,11 +29,11 @@ impl AgentFactory {
     }
 
     /// Returns the default [`ModelSelection`] for the given provider.
-    pub fn default_selection_for(&self, provider_id: &ProviderId) -> Result<ModelSelection> {
-        let model_id = self.catalog.provider_default_model(provider_id)?.clone();
+    pub fn default_selection_for(&self, provider_alias: &ProviderAlias) -> Result<ModelSelection> {
+        let model_alias = self.catalog.provider_default_model(provider_alias)?.clone();
         Ok(ModelSelection {
-            provider_id: provider_id.clone(),
-            model_id,
+            provider_alias: provider_alias.clone(),
+            model_alias,
         })
     }
 
@@ -52,13 +52,13 @@ impl AgentFactory {
             ProviderConfig::Ollama(provider) => {
                 let model = self
                     .catalog
-                    .model(&selection.provider_id, &selection.model_id)
+                    .model(&selection.provider_alias, &selection.model_alias)
                     .cloned()
                     .ok_or_else(|| {
                         anyhow::anyhow!(
                             "configured model '{}' not found for provider '{}'",
-                            selection.model_id.as_str(),
-                            selection.provider_id.as_str()
+                            selection.model_alias.as_str(),
+                            selection.provider_alias.as_str()
                         )
                     })?;
 
@@ -79,12 +79,12 @@ impl AgentFactory {
     /// Looks up the [`ProviderConfig`] for the given selection, returning an error if not found.
     fn provider_config(&self, selection: &ModelSelection) -> Result<ProviderConfig> {
         self.catalog
-            .provider(&selection.provider_id)
+            .provider(&selection.provider_alias)
             .cloned()
             .ok_or_else(|| {
                 anyhow::anyhow!(
                     "configured provider '{}' not found",
-                    selection.provider_id.as_str()
+                    selection.provider_alias.as_str()
                 )
             })
     }

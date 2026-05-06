@@ -6,29 +6,29 @@ use std::collections::HashSet;
 #[serde(rename_all = "camelCase")]
 pub struct ProviderConfigCatalog {
     pub providers: Vec<ProviderConfig>,
-    pub default_provider: ProviderId,
+    pub default_provider: ProviderAlias,
 }
 
 impl ProviderConfigCatalog {
     /// Checks that provider IDs are unique, model IDs are unique within each provider,
     /// each provider's default model exists, and the catalog's default provider exists.
     pub fn validate(&self) -> anyhow::Result<()> {
-        let mut provider_ids = HashSet::new();
+        let mut provider_aliases = HashSet::new();
         for provider in &self.providers {
-            if !provider_ids.insert(provider.id().clone()) {
+            if !provider_aliases.insert(provider.alias().clone()) {
                 return Err(anyhow::anyhow!(
-                    "duplicate provider id '{}'",
-                    provider.id().as_str()
+                    "duplicate provider alias '{}'",
+                    provider.alias().as_str()
                 ));
             }
 
-            let mut model_ids = HashSet::new();
+            let mut model_aliases = HashSet::new();
             for model in provider.models() {
-                if !model_ids.insert(model.id.clone()) {
+                if !model_aliases.insert(model.alias.clone()) {
                     return Err(anyhow::anyhow!(
-                        "duplicate model id '{}' for provider '{}'",
-                        model.id.as_str(),
-                        provider.id().as_str()
+                        "duplicate model alias '{}' for provider '{}'",
+                        model.alias.as_str(),
+                        provider.alias().as_str()
                     ));
                 }
             }
@@ -36,12 +36,12 @@ impl ProviderConfigCatalog {
             if !provider
                 .models()
                 .iter()
-                .any(|model| model.id == *provider.default_model())
+                .any(|model| model.alias == *provider.default_model())
             {
                 return Err(anyhow::anyhow!(
                     "default model '{}' not found for provider '{}'",
                     provider.default_model().as_str(),
-                    provider.id().as_str()
+                    provider.alias().as_str()
                 ));
             }
         }
@@ -56,47 +56,57 @@ impl ProviderConfigCatalog {
         Ok(())
     }
 
-    /// Returns the [`ProviderConfig`] for the given provider ID, if it exists.
-    pub fn provider(&self, provider_id: &ProviderId) -> Option<&ProviderConfig> {
+    /// Returns the [`ProviderConfig`] for the given provider alias, if it exists.
+    pub fn provider(&self, provider_alias: &ProviderAlias) -> Option<&ProviderConfig> {
         self.providers
             .iter()
-            .find(|provider| provider.id() == provider_id)
+            .find(|provider| provider.alias() == provider_alias)
     }
 
-    /// Returns the [`ConfiguredModel`] for the given provider and model IDs, if both exist.
-    pub fn model(&self, provider_id: &ProviderId, model_id: &ModelId) -> Option<&ConfiguredModel> {
-        self.provider(provider_id)?
+    /// Returns the [`ConfiguredModel`] for the given provider and model aliases, if both exist.
+    pub fn model(
+        &self,
+        provider_alias: &ProviderAlias,
+        model_alias: &ModelAlias,
+    ) -> Option<&ConfiguredModel> {
+        self.provider(provider_alias)?
             .models()
             .iter()
-            .find(|model| model.id == *model_id)
+            .find(|model| model.alias == *model_alias)
     }
 
-    /// Returns the default model ID for the given provider, or an error if the provider is not found.
-    pub fn provider_default_model(&self, provider_id: &ProviderId) -> anyhow::Result<&ModelId> {
-        self.provider(provider_id)
+    /// Returns the default model alias for the given provider, or an error if the provider is not found.
+    pub fn provider_default_model(
+        &self,
+        provider_alias: &ProviderAlias,
+    ) -> anyhow::Result<&ModelAlias> {
+        self.provider(provider_alias)
             .map(ProviderConfig::default_model)
-            .ok_or_else(|| anyhow::anyhow!("provider '{}' not found", provider_id.as_str()))
+            .ok_or_else(|| anyhow::anyhow!("provider '{}' not found", provider_alias.as_str()))
     }
 
     /// Returns a [`ModelSelection`] pointing to the catalog's default provider and its default model.
     pub fn default_selection(&self) -> anyhow::Result<ModelSelection> {
         Ok(ModelSelection {
-            provider_id: self.default_provider.clone(),
-            model_id: self.provider_default_model(&self.default_provider)?.clone(),
+            provider_alias: self.default_provider.clone(),
+            model_alias: self.provider_default_model(&self.default_provider)?.clone(),
         })
     }
 
     /// Checks that the given [`ModelSelection`] refers to a configured provider and model.
     pub fn validate_selection(&self, selection: &ModelSelection) -> anyhow::Result<()> {
-        self.provider(&selection.provider_id).ok_or_else(|| {
-            anyhow::anyhow!("provider '{}' not found", selection.provider_id.as_str())
+        self.provider(&selection.provider_alias).ok_or_else(|| {
+            anyhow::anyhow!(
+                "provider '{}' not found",
+                selection.provider_alias.as_str()
+            )
         })?;
-        self.model(&selection.provider_id, &selection.model_id)
+        self.model(&selection.provider_alias, &selection.model_alias)
             .ok_or_else(|| {
                 anyhow::anyhow!(
                     "model '{}' not found for provider '{}'",
-                    selection.model_id.as_str(),
-                    selection.provider_id.as_str()
+                    selection.model_alias.as_str(),
+                    selection.provider_alias.as_str()
                 )
             })?;
         Ok(())
@@ -107,8 +117,8 @@ impl ProviderConfigCatalog {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelSelection {
-    pub provider_id: ProviderId,
-    pub model_id: ModelId,
+    pub provider_alias: ProviderAlias,
+    pub model_alias: ModelAlias,
 }
 
 /// Discriminated union of all supported provider configurations.
@@ -119,10 +129,10 @@ pub enum ProviderConfig {
 }
 
 impl ProviderConfig {
-    /// Returns the provider's unique identifier.
-    pub fn id(&self) -> &ProviderId {
+    /// Returns the provider's user-defined alias.
+    pub fn alias(&self) -> &ProviderAlias {
         match self {
-            ProviderConfig::Ollama(config) => &config.id,
+            ProviderConfig::Ollama(config) => &config.alias,
         }
     }
 
@@ -133,8 +143,8 @@ impl ProviderConfig {
         }
     }
 
-    /// Returns the default model identifier for this provider.
-    pub fn default_model(&self) -> &ModelId {
+    /// Returns the default model alias for this provider.
+    pub fn default_model(&self) -> &ModelAlias {
         match self {
             ProviderConfig::Ollama(config) => &config.default_model,
         }
@@ -145,27 +155,27 @@ impl ProviderConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OllamaProviderConfig {
-    pub id: ProviderId,
+    pub alias: ProviderAlias,
     pub base_url: String,
     pub models: Vec<ConfiguredModel>,
-    pub default_model: ModelId,
+    pub default_model: ModelAlias,
 }
 
 /// A model exposed to callers, mapped to its provider-specific model name.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfiguredModel {
-    pub id: ModelId,
+    pub alias: ModelAlias,
     pub provider_model_name: String,
 }
 
-/// Unique identifier for a provider.
+/// User-defined alias for a provider instance.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct ProviderId(pub String);
+pub struct ProviderAlias(pub String);
 
-impl ProviderId {
-    /// Creates a new [`ProviderId`] from any string-like value.
+impl ProviderAlias {
+    /// Creates a new [`ProviderAlias`] from any string-like value.
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
@@ -176,13 +186,13 @@ impl ProviderId {
     }
 }
 
-/// Unique identifier for a model within a provider.
+/// User-defined alias for a model within a provider.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct ModelId(pub String);
+pub struct ModelAlias(pub String);
 
-impl ModelId {
-    /// Creates a new [`ModelId`] from any string-like value.
+impl ModelAlias {
+    /// Creates a new [`ModelAlias`] from any string-like value.
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
@@ -200,15 +210,15 @@ mod tests {
     fn sample_catalog() -> ProviderConfigCatalog {
         ProviderConfigCatalog {
             providers: vec![ProviderConfig::Ollama(OllamaProviderConfig {
-                id: ProviderId::new("ollama"),
+                alias: ProviderAlias::new("ollama"),
                 base_url: "http://localhost:11434".to_string(),
                 models: vec![ConfiguredModel {
-                    id: ModelId::new("default"),
+                    alias: ModelAlias::new("default"),
                     provider_model_name: "ministral-3:3b".to_string(),
                 }],
-                default_model: ModelId::new("default"),
+                default_model: ModelAlias::new("default"),
             })],
-            default_provider: ProviderId::new("ollama"),
+            default_provider: ProviderAlias::new("ollama"),
         }
     }
 
@@ -220,7 +230,7 @@ mod tests {
     #[test]
     fn catalog_validation_rejects_missing_default_provider() {
         let mut catalog = sample_catalog();
-        catalog.default_provider = ProviderId::new("missing");
+        catalog.default_provider = ProviderAlias::new("missing");
         assert!(catalog.validate().is_err());
     }
 
@@ -228,7 +238,7 @@ mod tests {
     fn catalog_validation_rejects_missing_default_model() {
         let mut catalog = sample_catalog();
         let ProviderConfig::Ollama(provider) = &mut catalog.providers[0];
-        provider.default_model = ModelId::new("missing");
+        provider.default_model = ModelAlias::new("missing");
         assert!(catalog.validate().is_err());
     }
 }

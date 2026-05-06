@@ -10,7 +10,7 @@ use crate::fs::FsSessionRegistry;
 use crate::project::resource_loader::discover_agents_md;
 use crate::provider::agent::ChatStream;
 use crate::provider::agent_factory::AgentFactory;
-use crate::provider::{ModelId, ModelSelection, ProviderConfig, ProviderId};
+use crate::provider::{ModelAlias, ModelSelection, ProviderAlias, ProviderConfig};
 use crate::session::registry::SessionRegistry;
 use crate::session::{NodeId, Session, SessionId, SessionTree};
 use crate::system_prompt::build_system_prompt;
@@ -106,17 +106,17 @@ impl App {
     }
 
     /// Validates and sets the active provider, using its default model.
-    pub fn set_active_provider(&mut self, provider_id: ProviderId) -> Result<()> {
-        let selection = self.agent_factory.default_selection_for(&provider_id)?;
+    pub fn set_active_provider(&mut self, provider_alias: ProviderAlias) -> Result<()> {
+        let selection = self.agent_factory.default_selection_for(&provider_alias)?;
         self.set_selection(selection);
         Ok(())
     }
 
     /// Validates and sets the active model, keeping the current provider.
-    pub fn set_active_model(&mut self, model_id: ModelId) -> Result<()> {
+    pub fn set_active_model(&mut self, model_alias: ModelAlias) -> Result<()> {
         let selection = ModelSelection {
-            provider_id: self.selection.provider_id.clone(),
-            model_id,
+            provider_alias: self.selection.provider_alias.clone(),
+            model_alias,
         };
         self.agent_factory.validate_selection(&selection)?;
         self.set_selection(selection);

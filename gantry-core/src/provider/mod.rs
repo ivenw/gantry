@@ -3,6 +3,6 @@ pub mod agent_factory;
 pub mod catalog;
 
 pub use catalog::{
-    ConfiguredModel, ModelId, ModelSelection, OllamaProviderConfig, ProviderConfig,
-    ProviderConfigCatalog, ProviderId,
+    ConfiguredModel, ModelAlias, ModelSelection, OllamaProviderConfig, ProviderAlias, ProviderConfig,
+    ProviderConfigCatalog,
 };
