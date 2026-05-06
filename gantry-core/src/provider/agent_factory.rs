@@ -1,37 +1,59 @@
 use anyhow::Result;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use rig::agent::{Agent, MultiTurnStreamItem, StreamingError};
 use rig::client::{CompletionClient, Nothing};
 use rig::completion::Chat;
 use rig::message::Message;
 use rig::providers::ollama;
-use rig::streaming::StreamingChat;
+use rig::streaming::{StreamedAssistantContent, StreamingChat};
 use std::pin::Pin;
 
-use crate::provider::{ModelSelection, ProviderConfig, ProviderConfigCatalog};
+use crate::provider::{ModelSelection, ProviderConfig, ProviderConfigCatalog, ProviderId};
 
-pub type ChatStreamItem = MultiTurnStreamItem<ollama::StreamingCompletionResponse>;
+/// Provider-agnostic stream item. The `Final` variant inside [`StreamedAssistantContent`] carries
+/// `()` because the raw provider chunk is not useful to callers; the assembled result is in
+/// [`MultiTurnStreamItem::FinalResponse`].
+pub type ChatStreamItem = MultiTurnStreamItem<()>;
 pub type ChatStream = Pin<Box<dyn Stream<Item = Result<ChatStreamItem, StreamingError>> + Send>>;
 
-// TODO: Skeptical if we need this as a struct. A factory function seems better
 #[derive(Clone)]
 pub struct RigAgentFactory {
     catalog: ProviderConfigCatalog,
 }
 
 impl RigAgentFactory {
+    /// Creates a new factory, validating the catalog before returning.
     pub fn new(catalog: ProviderConfigCatalog) -> Result<Self> {
         catalog.validate()?;
         Ok(Self { catalog })
     }
 
-    // TODO: skeptical if this should be pub
-    pub fn catalog(&self) -> &ProviderConfigCatalog {
-        &self.catalog
+    /// Returns all configured providers.
+    pub fn providers(&self) -> Vec<ProviderConfig> {
+        self.catalog.providers.clone()
     }
 
-    // TODO: Why is this async? We are not awaiting anything inside of it.
-    pub async fn agent(
+    /// Returns the default [`ModelSelection`] from the catalog.
+    pub fn default_selection(&self) -> Result<ModelSelection> {
+        self.catalog.default_selection()
+    }
+
+    /// Returns the default [`ModelSelection`] for the given provider.
+    pub fn default_selection_for(&self, provider_id: &ProviderId) -> Result<ModelSelection> {
+        let model_id = self.catalog.provider_default_model(provider_id)?.clone();
+        Ok(ModelSelection {
+            provider_id: provider_id.clone(),
+            model_id,
+        })
+    }
+
+    /// Validates that the given [`ModelSelection`] refers to a configured provider and model.
+    pub fn validate_selection(&self, selection: &ModelSelection) -> Result<()> {
+        self.catalog.selection(selection)
+    }
+
+/// Builds a [`ConfiguredAgent`] for the given model selection and optional preamble.
+    pub fn agent(
         &self,
         selection: &ModelSelection,
         preamble: Option<&str>,
@@ -77,6 +99,34 @@ impl RigAgentFactory {
     }
 }
 
+/// Maps a provider-typed [`MultiTurnStreamItem<R>`] to [`ChatStreamItem`] by erasing the
+/// provider-specific `Final(R)` payload to `Final(())`.
+fn erase_final<R>(item: MultiTurnStreamItem<R>) -> ChatStreamItem {
+    match item {
+        MultiTurnStreamItem::StreamAssistantItem(content) => {
+            let erased = match content {
+                StreamedAssistantContent::Final(_) => StreamedAssistantContent::Final(()),
+                StreamedAssistantContent::Text(t) => StreamedAssistantContent::Text(t),
+                StreamedAssistantContent::ToolCall { tool_call, internal_call_id } => {
+                    StreamedAssistantContent::ToolCall { tool_call, internal_call_id }
+                }
+                StreamedAssistantContent::ToolCallDelta { id, internal_call_id, content } => {
+                    StreamedAssistantContent::ToolCallDelta { id, internal_call_id, content }
+                }
+                StreamedAssistantContent::Reasoning(r) => StreamedAssistantContent::Reasoning(r),
+                StreamedAssistantContent::ReasoningDelta { id, reasoning } => {
+                    StreamedAssistantContent::ReasoningDelta { id, reasoning }
+                }
+            };
+            MultiTurnStreamItem::StreamAssistantItem(erased)
+        }
+        MultiTurnStreamItem::StreamUserItem(u) => MultiTurnStreamItem::StreamUserItem(u),
+        MultiTurnStreamItem::FinalResponse(f) => MultiTurnStreamItem::FinalResponse(f),
+        // MultiTurnStreamItem is non-exhaustive; new variants are surfaced as FinalResponse::empty.
+        _ => MultiTurnStreamItem::FinalResponse(rig::agent::FinalResponse::empty()),
+    }
+}
+
 pub struct ConfiguredAgent {
     inner: ConfiguredAgentKind,
 }
@@ -99,10 +149,15 @@ impl ConfiguredAgent {
         }
     }
 
-    /// Streams a multi-turn chat, returning a stream of [`MultiTurnStreamItem`]s.
+    /// Streams a multi-turn chat, returning a provider-agnostic [`ChatStream`].
     pub async fn stream_chat(&self, prompt: Message, history: Vec<Message>) -> ChatStream {
         match &self.inner {
-            ConfiguredAgentKind::Ollama(agent) => Box::pin(agent.stream_chat(prompt, history).await),
+            ConfiguredAgentKind::Ollama(agent) => Box::pin(
+                agent
+                    .stream_chat(prompt, history)
+                    .await
+                    .map(|item| item.map(erase_final)),
+            ),
         }
     }
 }

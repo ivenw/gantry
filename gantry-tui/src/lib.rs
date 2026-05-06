@@ -63,7 +63,6 @@ pub fn run() -> Result<()> {
 
     let agent_factory = RigAgentFactory::new(catalog)?;
     let default_selection = agent_factory
-        .catalog()
         .default_selection()
         .expect("provider catalog must have a default selection");
 

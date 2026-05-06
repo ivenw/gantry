@@ -101,31 +101,23 @@ impl App {
 
     /// Returns all configured providers with their available models.
     pub fn list_providers(&self) -> Vec<ProviderConfig> {
-        self.agent_factory.catalog().providers.clone()
+        self.agent_factory.providers()
     }
 
     /// Validates and sets the active provider, using its default model.
     pub fn set_active_provider(&mut self, provider_id: ProviderId) -> Result<()> {
-        let model_id = self
-            .agent_factory
-            .catalog()
-            .provider_default_model(&provider_id)?
-            .clone();
-        self.set_selection(ModelSelection {
-            provider_id,
-            model_id,
-        });
+        let selection = self.agent_factory.default_selection_for(&provider_id)?;
+        self.set_selection(selection);
         Ok(())
     }
 
     /// Validates and sets the active model, keeping the current provider.
     pub fn set_active_model(&mut self, model_id: ModelId) -> Result<()> {
-        let provider_id = self.selection.provider_id.clone();
         let selection = ModelSelection {
-            provider_id,
+            provider_id: self.selection.provider_id.clone(),
             model_id,
         };
-        self.agent_factory.catalog().selection(&selection)?;
+        self.agent_factory.validate_selection(&selection)?;
         self.set_selection(selection);
         Ok(())
     }
@@ -142,7 +134,7 @@ impl App {
         let history: Vec<rig::message::Message> =
             app.history().into_iter().map(Into::into).collect();
         let system_prompt = build_system_prompt(&discover_agents_md(&app.project_path));
-        let agent = app.agent_factory.agent(&app.selection, Some(&system_prompt)).await?;
+        let agent = app.agent_factory.agent(&app.selection, Some(&system_prompt))?;
         let Some(prompt) = history.last().cloned() else {
             anyhow::bail!("no messages to stream");
         };
