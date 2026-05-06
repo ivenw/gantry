@@ -3,7 +3,6 @@ use std::collections::HashSet;
 
 /// The full set of configured providers and the system-wide default provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ProviderConfigCatalog {
     pub providers: Vec<ProviderConfig>,
     pub default_provider: ProviderAlias,
@@ -60,7 +59,6 @@ impl ProviderConfigCatalog {
 
 /// A resolved provider and model pair used to select a specific model for inference.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct ModelSelection {
     pub provider_alias: ProviderAlias,
     pub model_alias: ModelAlias,
@@ -91,7 +89,6 @@ impl ProviderConfig {
 
 /// Configuration for an Ollama provider instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct OllamaProviderConfig {
     pub alias: ProviderAlias,
     pub base_url: String,
