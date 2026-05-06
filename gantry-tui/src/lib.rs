@@ -15,8 +15,8 @@ use crossterm::{
     execute,
 };
 use gantry_core::{
-    App, ConfiguredModel, ModelId, OllamaProviderConfig, ProviderConfig, ProviderConfigCatalog,
-    ProviderId, RigAgentFactory,
+    AgentFactory, App, ConfiguredModel, ModelId, OllamaProviderConfig, ProviderConfig,
+    ProviderConfigCatalog, ProviderId,
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
@@ -61,7 +61,7 @@ pub fn run() -> Result<()> {
         default_provider: ProviderId::new("ollama"),
     };
 
-    let agent_factory = RigAgentFactory::new(catalog)?;
+    let agent_factory = AgentFactory::new(catalog)?;
     let default_selection = agent_factory
         .default_selection()
         .expect("provider catalog must have a default selection");

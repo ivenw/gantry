@@ -1,14 +1,15 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::Result;
 use crate::message::Message;
+use anyhow::Result;
 use tokio::sync::Mutex;
 
 use crate::dirs::{ProjectConfigDir, ProjectRootDir};
 use crate::fs::FsSessionRegistry;
 use crate::project::resource_loader::discover_agents_md;
-use crate::provider::agent_factory::{ChatStream, RigAgentFactory};
+use crate::provider::agent::ChatStream;
+use crate::provider::agent_factory::AgentFactory;
 use crate::provider::{ModelId, ModelSelection, ProviderConfig, ProviderId};
 use crate::session::registry::SessionRegistry;
 use crate::session::{NodeId, Session, SessionId, SessionTree};
@@ -24,7 +25,7 @@ pub struct App {
     pub project_path: PathBuf,
     session: FsSession,
     selection: ModelSelection,
-    agent_factory: RigAgentFactory,
+    agent_factory: AgentFactory,
 }
 
 impl App {
@@ -33,7 +34,7 @@ impl App {
     pub fn new(
         project_path: &Path,
         selection: ModelSelection,
-        agent_factory: RigAgentFactory,
+        agent_factory: AgentFactory,
     ) -> Result<Self> {
         let root = ProjectRootDir::new(project_path)?;
         let config_dir = ProjectConfigDir::new(&root)?;
@@ -100,7 +101,7 @@ impl App {
     }
 
     /// Returns all configured providers with their available models.
-    pub fn list_providers(&self) -> Vec<ProviderConfig> {
+    pub fn list_providers(&self) -> &[ProviderConfig] {
         self.agent_factory.providers()
     }
 
@@ -125,16 +126,15 @@ impl App {
     /// Persists `content` as a user message, then returns rig's streaming result for the agent
     /// response. The caller is responsible for persisting the assistant message after the stream
     /// completes.
-    pub async fn stream_message(
-        app: Arc<Mutex<App>>,
-        content: String,
-    ) -> Result<ChatStream> {
+    pub async fn stream_message(app: Arc<Mutex<App>>, content: String) -> Result<ChatStream> {
         let mut app = app.lock().await;
         app.append_message(Message::user(content))?;
         let history: Vec<rig::message::Message> =
             app.history().into_iter().map(Into::into).collect();
         let system_prompt = build_system_prompt(&discover_agents_md(&app.project_path));
-        let agent = app.agent_factory.agent(&app.selection, Some(&system_prompt))?;
+        let agent = app
+            .agent_factory
+            .agent(&app.selection, Some(&system_prompt))?;
         let Some(prompt) = history.last().cloned() else {
             anyhow::bail!("no messages to stream");
         };
