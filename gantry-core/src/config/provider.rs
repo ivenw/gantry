@@ -1,7 +1,10 @@
-use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-/// The full set of configured providers.
+use serde::{Deserialize, Serialize};
+
+use crate::provider::ProviderAlias;
+
+/// The full set of configured providers, deserialized from `config.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProviderConfigCatalog {
     pub providers: Vec<ProviderConfig>,
@@ -30,13 +33,6 @@ impl ProviderConfigCatalog {
     }
 }
 
-/// A resolved provider and model pair used to select a specific model for inference.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModelSelection {
-    pub provider: ProviderAlias,
-    pub model: ModelAlias,
-}
-
 /// Discriminated union of all supported provider configurations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -59,38 +55,12 @@ impl ProviderConfig {
     }
 }
 
-const OLLAMA_DEFAULT_BASE_URL: &str = "http://localhost:11434";
-
 /// Configuration for an Ollama provider instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OllamaProviderConfig {
     pub alias: ProviderAlias,
     /// Overrides the default Ollama base URL (`http://localhost:11434`).
     pub base_url: Option<String>,
-}
-
-impl OllamaProviderConfig {
-    /// Fetches the list of available models from the Ollama `/api/tags` endpoint.
-    pub async fn fetch_models(&self) -> anyhow::Result<Vec<ModelAlias>> {
-        #[derive(Deserialize)]
-        struct TagsResponse {
-            models: Vec<OllamaModelEntry>,
-        }
-
-        #[derive(Deserialize)]
-        struct OllamaModelEntry {
-            name: String,
-        }
-
-        let base_url = self.base_url.as_deref().unwrap_or(OLLAMA_DEFAULT_BASE_URL);
-        let url = format!("{}/api/tags", base_url.trim_end_matches('/'));
-        let response: TagsResponse = reqwest::get(&url).await?.json().await?;
-        Ok(response
-            .models
-            .into_iter()
-            .map(|m| ModelAlias::new(m.name))
-            .collect())
-    }
 }
 
 /// Configuration for a GitHub Copilot provider instance.
@@ -119,42 +89,6 @@ pub struct OpenAiResponsesProviderConfig {
     pub alias: ProviderAlias,
     /// Base URL of the OpenAI-compatible responses endpoint.
     pub base_url: String,
-}
-
-/// User-defined alias for a provider instance.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ProviderAlias(pub String);
-
-impl ProviderAlias {
-    /// Creates a new [`ProviderAlias`] from any string-like value.
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    /// Returns the inner string slice.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// User-defined alias for a model within a provider.
-///
-/// For Ollama, this is the model name as returned by `/api/tags` (e.g. `"llama3.2:3b"`).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ModelAlias(pub String);
-
-impl ModelAlias {
-    /// Creates a new [`ModelAlias`] from any string-like value.
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    /// Returns the inner string slice.
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
 #[cfg(test)]

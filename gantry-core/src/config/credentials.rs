@@ -40,19 +40,23 @@ impl StoredCredential {
     /// reading the environment variable. Returns an error if the variable is unset.
     pub fn resolve(&self) -> anyhow::Result<Credential> {
         match self {
-            StoredCredential::ApiKey { value } => Ok(Credential::ApiKey { value: value.clone() }),
+            StoredCredential::ApiKey { value } => Ok(Credential::ApiKey(ApiKeyCredential {
+                value: value.clone(),
+            })),
             StoredCredential::ApiKeyEnv { var } => {
                 let value = std::env::var(var)
                     .map_err(|_| anyhow::anyhow!("environment variable '{}' is not set", var))?;
-                Ok(Credential::ApiKey { value })
+                Ok(Credential::ApiKey(ApiKeyCredential { value }))
             }
-            StoredCredential::OauthToken { access_token, refresh_token, expires_at } => {
-                Ok(Credential::OauthToken {
-                    access_token: access_token.clone(),
-                    refresh_token: refresh_token.clone(),
-                    expires_at: expires_at.clone(),
-                })
-            }
+            StoredCredential::OauthToken {
+                access_token,
+                refresh_token,
+                expires_at,
+            } => Ok(Credential::OauthToken(OauthCredential {
+                access_token: access_token.clone(),
+                refresh_token: refresh_token.clone(),
+                expires_at: expires_at.clone(),
+            })),
         }
     }
 }
@@ -61,11 +65,21 @@ impl StoredCredential {
 #[derive(Debug, Clone)]
 pub enum Credential {
     /// A literal API key.
-    ApiKey { value: String },
+    ApiKey(ApiKeyCredential),
     /// An OAuth token set managed by the application.
-    OauthToken {
-        access_token: String,
-        refresh_token: String,
-        expires_at: String,
-    },
+    OauthToken(OauthCredential),
+}
+
+/// A resolved API key credential.
+#[derive(Debug, Clone)]
+pub struct ApiKeyCredential {
+    pub value: String,
+}
+
+/// A resolved OAuth token credential.
+#[derive(Debug, Clone)]
+pub struct OauthCredential {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: String,
 }

@@ -5,12 +5,13 @@ use crate::message::Message;
 use anyhow::Result;
 use tokio::sync::Mutex;
 
+use crate::config::ProviderConfig;
 use crate::dirs::{ProjectConfigDir, ProjectRootDir};
 use crate::fs::FsSessionRegistry;
 use crate::project::resource_loader::discover_agents_md;
 use crate::provider::agent::ChatStream;
-use crate::provider::agent_factory::AgentFactory;
-use crate::provider::{ModelAlias, ModelSelection, ProviderConfig};
+use crate::provider::registry::ProviderClientRegistry;
+use crate::provider::{ModelAlias, ModelSelection};
 use crate::session::registry::SessionRegistry;
 use crate::session::{NodeId, Session, SessionId, SessionTree};
 use crate::system_prompt::build_system_prompt;
@@ -20,12 +21,12 @@ type FsSession = Session<crate::fs::session_registry::FsSessionHistory>;
 /// Central coordinator for an active gantry session.
 ///
 /// Owns the active conversation session, the current model selection, the project path, and the
-/// agent factory. All chat and session operations go through this type.
+/// provider registry. All chat and session operations go through this type.
 pub struct App {
     pub project_path: PathBuf,
     session: FsSession,
     pub selection: Option<ModelSelection>,
-    agent_factory: AgentFactory,
+    registry: ProviderClientRegistry,
 }
 
 impl App {
@@ -34,24 +35,24 @@ impl App {
     pub fn new(
         project_path: &Path,
         selection: Option<ModelSelection>,
-        agent_factory: AgentFactory,
+        registry: ProviderClientRegistry,
     ) -> Result<Self> {
         let root = ProjectRootDir::new(project_path)?;
         let config_dir = ProjectConfigDir::new(&root)?;
-        let registry = FsSessionRegistry::new(&config_dir)?;
-        let sessions = registry.list()?;
+        let session_registry = FsSessionRegistry::new(&config_dir)?;
+        let sessions = session_registry.list()?;
 
         let session = if let Some(last) = sessions.last() {
-            registry.load_session(&last.id)?
+            session_registry.load_session(&last.id)?
         } else {
-            registry.create_session()?
+            session_registry.create_session()?
         };
 
         Ok(Self {
             project_path: project_path.to_path_buf(),
             session,
             selection,
-            agent_factory,
+            registry,
         })
     }
 
@@ -64,8 +65,8 @@ impl App {
     pub fn new_session(&mut self) -> Result<()> {
         let root = ProjectRootDir::new(&self.project_path)?;
         let config_dir = ProjectConfigDir::new(&root)?;
-        let registry = FsSessionRegistry::new(&config_dir)?;
-        self.session = registry.create_session()?;
+        let session_registry = FsSessionRegistry::new(&config_dir)?;
+        self.session = session_registry.create_session()?;
         Ok(())
     }
 
@@ -102,7 +103,7 @@ impl App {
 
     /// Returns all configured providers.
     pub fn list_providers(&self) -> &[ProviderConfig] {
-        self.agent_factory.providers()
+        self.registry.providers()
     }
 
     /// Validates and sets the active model, keeping the current provider.
@@ -132,9 +133,9 @@ impl App {
         let system_prompt = build_system_prompt(&discover_agents_md(&app.project_path));
         let selection = app
             .selection
-            .as_ref()
+            .clone()
             .ok_or_else(|| anyhow::anyhow!("no active model selection"))?;
-        let agent = app.agent_factory.agent(selection, Some(&system_prompt))?;
+        let agent = app.registry.agent(&selection, Some(&system_prompt))?;
         let Some(prompt) = history.last().cloned() else {
             anyhow::bail!("no messages to stream");
         };

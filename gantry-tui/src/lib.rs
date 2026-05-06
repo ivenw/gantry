@@ -14,7 +14,7 @@ use crossterm::{
     },
     execute,
 };
-use gantry_core::{AgentFactory, App, ConfigLoader};
+use gantry_core::{App, ConfigLoader, ProviderClientRegistry};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use std::sync::Arc;
@@ -41,8 +41,8 @@ pub fn run() -> Result<()> {
     let loader = ConfigLoader::new()?;
     let catalog = loader.load_provider_catalog()?;
     let credentials = loader.load_credentials()?;
-    let agent_factory = AgentFactory::new(catalog, credentials)?;
-    let app = App::new(&project_path, None, agent_factory)?;
+    let registry = ProviderClientRegistry::new(catalog, credentials)?;
+    let app = App::new(&project_path, None, registry)?;
     let app = Arc::new(Mutex::new(app));
 
     let (_terminal_guard, mut terminal) = TerminalGuard::enter()?;
