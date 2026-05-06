@@ -3,7 +3,7 @@ use rig::client::{CompletionClient, Nothing};
 use rig::providers::ollama;
 
 use crate::provider::agent::ConfiguredAgent;
-use crate::provider::catalog::{ModelSelection, ProviderAlias, ProviderConfig, ProviderConfigCatalog};
+use crate::provider::catalog::{ModelSelection, ProviderConfig, ProviderConfigCatalog};
 
 /// Builds [`ConfiguredAgent`]s from a validated [`ProviderConfigCatalog`].
 #[derive(Clone)]
@@ -23,20 +23,6 @@ impl AgentFactory {
         &self.catalog.providers
     }
 
-    /// Returns the default [`ModelSelection`] from the catalog.
-    pub fn default_selection(&self) -> Result<ModelSelection> {
-        self.catalog.default_selection()
-    }
-
-    /// Returns the default [`ModelSelection`] for the given provider.
-    pub fn default_selection_for(&self, provider_alias: &ProviderAlias) -> Result<ModelSelection> {
-        let model_alias = self.catalog.provider_default_model(provider_alias)?.clone();
-        Ok(ModelSelection {
-            provider_alias: provider_alias.clone(),
-            model_alias,
-        })
-    }
-
     /// Builds a [`ConfiguredAgent`] for the given model selection and optional preamble.
     ///
     /// The `model_alias` is used directly as the Ollama model name.
@@ -52,7 +38,7 @@ impl AgentFactory {
                     .base_url(&provider.base_url)
                     .build()?;
 
-                let mut builder = client.agent(selection.model_alias.as_str());
+                let mut builder = client.agent(selection.model.as_str());
                 if let Some(p) = preamble {
                     builder = builder.preamble(p);
                 }
@@ -64,12 +50,12 @@ impl AgentFactory {
     /// Looks up the [`ProviderConfig`] for the given selection, returning an error if not found.
     fn provider_config(&self, selection: &ModelSelection) -> Result<ProviderConfig> {
         self.catalog
-            .provider(&selection.provider_alias)
+            .provider(&selection.provider)
             .cloned()
             .ok_or_else(|| {
                 anyhow::anyhow!(
                     "configured provider '{}' not found",
-                    selection.provider_alias.as_str()
+                    selection.provider.as_str()
                 )
             })
     }

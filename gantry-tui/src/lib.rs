@@ -14,17 +14,13 @@ use crossterm::{
     },
     execute,
 };
-use gantry_core::{
-    AgentFactory, App, ModelAlias, OllamaProviderConfig, ProviderAlias, ProviderConfig,
-    ProviderConfigCatalog,
-};
+use gantry_core::{AgentFactory, App, OllamaProviderConfig, ProviderAlias, ProviderConfig, ProviderConfigCatalog};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 const DEFAULT_OLLAMA_URL: &str = "http://localhost:11434";
-const DEFAULT_OLLAMA_MODEL: &str = "ministral-3:3b";
 
 fn discover_project() -> Option<std::path::PathBuf> {
     let mut dir = std::env::current_dir().ok()?;
@@ -46,23 +42,15 @@ pub fn run() -> Result<()> {
 
     let ollama_url =
         std::env::var("GANTRY_OLLAMA_URL").unwrap_or_else(|_| DEFAULT_OLLAMA_URL.to_string());
-    let ollama_model =
-        std::env::var("GANTRY_OLLAMA_MODEL").unwrap_or_else(|_| DEFAULT_OLLAMA_MODEL.to_string());
     let catalog = ProviderConfigCatalog {
         providers: vec![ProviderConfig::Ollama(OllamaProviderConfig {
             alias: ProviderAlias::new("ollama"),
             base_url: ollama_url,
-            default_model: ModelAlias::new(ollama_model),
         })],
-        default_provider: ProviderAlias::new("ollama"),
     };
 
     let agent_factory = AgentFactory::new(catalog)?;
-    let default_selection = agent_factory
-        .default_selection()
-        .expect("provider catalog must have a default selection");
-
-    let app = App::new(&project_path, default_selection, agent_factory)?;
+    let app = App::new(&project_path, None, agent_factory)?;
     let app = Arc::new(Mutex::new(app));
 
     let (_terminal_guard, mut terminal) = TerminalGuard::enter()?;

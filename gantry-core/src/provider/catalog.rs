@@ -1,15 +1,14 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-/// The full set of configured providers and the system-wide default provider.
+/// The full set of configured providers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfigCatalog {
     pub providers: Vec<ProviderConfig>,
-    pub default_provider: ProviderAlias,
 }
 
 impl ProviderConfigCatalog {
-    /// Checks that provider aliases are unique and the catalog's default provider exists.
+    /// Checks that provider aliases are unique.
     pub fn validate(&self) -> anyhow::Result<()> {
         let mut provider_aliases = HashSet::new();
         for provider in &self.providers {
@@ -20,14 +19,6 @@ impl ProviderConfigCatalog {
                 ));
             }
         }
-
-        if self.provider(&self.default_provider).is_none() {
-            return Err(anyhow::anyhow!(
-                "default provider '{}' not found",
-                self.default_provider.as_str()
-            ));
-        }
-
         Ok(())
     }
 
@@ -37,31 +28,13 @@ impl ProviderConfigCatalog {
             .iter()
             .find(|provider| provider.alias() == provider_alias)
     }
-
-    /// Returns the default model alias for the given provider, or an error if not found.
-    pub fn provider_default_model(
-        &self,
-        provider_alias: &ProviderAlias,
-    ) -> anyhow::Result<&ModelAlias> {
-        self.provider(provider_alias)
-            .map(ProviderConfig::default_model)
-            .ok_or_else(|| anyhow::anyhow!("provider '{}' not found", provider_alias.as_str()))
-    }
-
-    /// Returns a [`ModelSelection`] pointing to the catalog's default provider and its default model.
-    pub fn default_selection(&self) -> anyhow::Result<ModelSelection> {
-        Ok(ModelSelection {
-            provider_alias: self.default_provider.clone(),
-            model_alias: self.provider_default_model(&self.default_provider)?.clone(),
-        })
-    }
 }
 
 /// A resolved provider and model pair used to select a specific model for inference.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelSelection {
-    pub provider_alias: ProviderAlias,
-    pub model_alias: ModelAlias,
+    pub provider: ProviderAlias,
+    pub model: ModelAlias,
 }
 
 /// Discriminated union of all supported provider configurations.
@@ -78,13 +51,6 @@ impl ProviderConfig {
             ProviderConfig::Ollama(config) => &config.alias,
         }
     }
-
-    /// Returns the default model alias for this provider.
-    pub fn default_model(&self) -> &ModelAlias {
-        match self {
-            ProviderConfig::Ollama(config) => &config.default_model,
-        }
-    }
 }
 
 /// Configuration for an Ollama provider instance.
@@ -92,7 +58,6 @@ impl ProviderConfig {
 pub struct OllamaProviderConfig {
     pub alias: ProviderAlias,
     pub base_url: String,
-    pub default_model: ModelAlias,
 }
 
 impl OllamaProviderConfig {
@@ -110,7 +75,11 @@ impl OllamaProviderConfig {
 
         let url = format!("{}/api/tags", self.base_url.trim_end_matches('/'));
         let response: TagsResponse = reqwest::get(&url).await?.json().await?;
-        Ok(response.models.into_iter().map(|m| ModelAlias::new(m.name)).collect())
+        Ok(response
+            .models
+            .into_iter()
+            .map(|m| ModelAlias::new(m.name))
+            .collect())
     }
 }
 
@@ -159,9 +128,7 @@ mod tests {
             providers: vec![ProviderConfig::Ollama(OllamaProviderConfig {
                 alias: ProviderAlias::new("ollama"),
                 base_url: "http://localhost:11434".to_string(),
-                default_model: ModelAlias::new("ministral-3:3b"),
             })],
-            default_provider: ProviderAlias::new("ollama"),
         }
     }
 
@@ -171,9 +138,14 @@ mod tests {
     }
 
     #[test]
-    fn catalog_validation_rejects_missing_default_provider() {
+    fn catalog_validation_rejects_duplicate_alias() {
         let mut catalog = sample_catalog();
-        catalog.default_provider = ProviderAlias::new("missing");
+        catalog
+            .providers
+            .push(ProviderConfig::Ollama(OllamaProviderConfig {
+                alias: ProviderAlias::new("ollama"),
+                base_url: "http://localhost:11435".to_string(),
+            }));
         assert!(catalog.validate().is_err());
     }
 }

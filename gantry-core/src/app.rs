@@ -10,7 +10,7 @@ use crate::fs::FsSessionRegistry;
 use crate::project::resource_loader::discover_agents_md;
 use crate::provider::agent::ChatStream;
 use crate::provider::agent_factory::AgentFactory;
-use crate::provider::{ModelAlias, ModelSelection, ProviderAlias, ProviderConfig};
+use crate::provider::{ModelAlias, ModelSelection, ProviderConfig};
 use crate::session::registry::SessionRegistry;
 use crate::session::{NodeId, Session, SessionId, SessionTree};
 use crate::system_prompt::build_system_prompt;
@@ -24,16 +24,16 @@ type FsSession = Session<crate::fs::session_registry::FsSessionHistory>;
 pub struct App {
     pub project_path: PathBuf,
     session: FsSession,
-    selection: ModelSelection,
+    pub selection: Option<ModelSelection>,
     agent_factory: AgentFactory,
 }
 
 impl App {
     /// Creates an `App` for the project at `project_path`, resuming the most recent session or
-    /// creating a new one if none exist.
+    /// creating a new one if none exist. `selection` is the initial model selection, if any.
     pub fn new(
         project_path: &Path,
-        selection: ModelSelection,
+        selection: Option<ModelSelection>,
         agent_factory: AgentFactory,
     ) -> Result<Self> {
         let root = ProjectRootDir::new(project_path)?;
@@ -90,35 +90,34 @@ impl App {
         self.session.branch(&node_id)
     }
 
-    /// Returns the active model selection.
-    pub fn selection(&self) -> &ModelSelection {
-        &self.selection
+    /// Returns the active model selection, if one has been set.
+    pub fn selection(&self) -> Option<&ModelSelection> {
+        self.selection.as_ref()
     }
 
     /// Replaces the active model selection.
     pub fn set_selection(&mut self, selection: ModelSelection) {
-        self.selection = selection;
+        self.selection = Some(selection);
     }
 
-    /// Returns all configured providers with their available models.
+    /// Returns all configured providers.
     pub fn list_providers(&self) -> &[ProviderConfig] {
         self.agent_factory.providers()
     }
 
-    /// Validates and sets the active provider, using its default model.
-    pub fn set_active_provider(&mut self, provider_alias: ProviderAlias) -> Result<()> {
-        let selection = self.agent_factory.default_selection_for(&provider_alias)?;
-        self.set_selection(selection);
-        Ok(())
-    }
-
     /// Validates and sets the active model, keeping the current provider.
+    ///
+    /// Returns an error if no selection is currently active.
     pub fn set_active_model(&mut self, model_alias: ModelAlias) -> Result<()> {
-        let selection = ModelSelection {
-            provider_alias: self.selection.provider_alias.clone(),
-            model_alias,
-        };
-        self.set_selection(selection);
+        let provider_alias = self
+            .selection
+            .as_ref()
+            .map(|s| s.provider.clone())
+            .ok_or_else(|| anyhow::anyhow!("no active model selection"))?;
+        self.set_selection(ModelSelection {
+            provider: provider_alias,
+            model: model_alias,
+        });
         Ok(())
     }
 
@@ -131,9 +130,11 @@ impl App {
         let history: Vec<rig::message::Message> =
             app.history().into_iter().map(Into::into).collect();
         let system_prompt = build_system_prompt(&discover_agents_md(&app.project_path));
-        let agent = app
-            .agent_factory
-            .agent(&app.selection, Some(&system_prompt))?;
+        let selection = app
+            .selection
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("no active model selection"))?;
+        let agent = app.agent_factory.agent(selection, Some(&system_prompt))?;
         let Some(prompt) = history.last().cloned() else {
             anyhow::bail!("no messages to stream");
         };
