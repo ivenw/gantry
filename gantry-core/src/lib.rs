@@ -14,6 +14,7 @@ pub use config::{
     Credential, CredentialsCatalog, OllamaProviderConfig, ProjectConfig, ProviderConfig,
     ProviderConfigCatalog,
 };
+pub use dirs::{GlobalConfigDir, ProjectRootDir};
 pub use message::{Message, UserId};
 pub use provider::agent::{ChatStream, ChatStreamItem};
 pub use provider::registry::ProviderClientRegistry;

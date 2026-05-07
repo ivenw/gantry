@@ -6,7 +6,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::dirs::ProjectConfigDir;
 use crate::session::{Node, Session, SessionHistory, SessionId};
 use crate::session::registry::{SessionInfo, SessionRegistry};
 
@@ -118,9 +117,9 @@ pub struct FsSessionRegistry {
 }
 
 impl FsSessionRegistry {
-    /// Initialises the registry, creating the sessions directory if needed.
-    pub fn new(project_config_dir: &ProjectConfigDir) -> Result<Self> {
-        let sessions_dir = project_config_dir.path().join("sessions");
+    /// Initialises the registry, creating the sessions directory under `config_dir` if needed.
+    pub fn new(config_dir: &Path) -> Result<Self> {
+        let sessions_dir = config_dir.join("sessions");
         std::fs::create_dir_all(&sessions_dir).with_context(|| {
             format!(
                 "failed to create sessions dir at {}",
@@ -196,26 +195,21 @@ fn session_filename(session_id: &SessionId) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dirs::ProjectRootDir;
     use crate::message::Message;
     use crate::session::NodeId;
     use tempfile::TempDir;
 
     fn registry() -> (TempDir, FsSessionRegistry) {
         let tmp = TempDir::new().unwrap();
-        let root = ProjectRootDir::new(tmp.path()).unwrap();
-        let config_dir = ProjectConfigDir::new(&root).unwrap();
-        let r = FsSessionRegistry::new(&config_dir).unwrap();
+        let r = FsSessionRegistry::new(tmp.path()).unwrap();
         (tmp, r)
     }
 
     #[test]
     fn new_creates_sessions_dir() {
         let tmp = TempDir::new().unwrap();
-        let root = ProjectRootDir::new(tmp.path()).unwrap();
-        let config_dir = ProjectConfigDir::new(&root).unwrap();
-        FsSessionRegistry::new(&config_dir).unwrap();
-        assert!(tmp.path().join(".gantry").join("sessions").exists());
+        FsSessionRegistry::new(tmp.path()).unwrap();
+        assert!(tmp.path().join("sessions").exists());
     }
 
     #[test]

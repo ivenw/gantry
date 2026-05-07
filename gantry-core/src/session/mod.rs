@@ -224,7 +224,6 @@ impl Node {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dirs::{ProjectConfigDir, ProjectRootDir};
     use crate::fs::FsSessionRegistry;
     use crate::message::Message;
     use crate::session::registry::SessionRegistry;
@@ -232,9 +231,7 @@ mod tests {
 
     fn registry() -> (TempDir, FsSessionRegistry) {
         let tmp = TempDir::new().unwrap();
-        let root = ProjectRootDir::new(tmp.path()).unwrap();
-        let config_dir = ProjectConfigDir::new(&root).unwrap();
-        let r = FsSessionRegistry::new(&config_dir).unwrap();
+        let r = FsSessionRegistry::new(tmp.path()).unwrap();
         (tmp, r)
     }
 

@@ -1,9 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-
-const CONFIG_FILE: &str = "gantry.toml";
 
 /// The on-disk representation of `gantry.toml`.
 #[derive(Debug, Serialize, Deserialize)]
@@ -12,51 +10,31 @@ pub struct ProjectConfig {
 }
 
 impl ProjectConfig {
-    /// Walks up from the current working directory to find and load `gantry.toml`.
+    /// Loads and parses the project config from `path`.
     ///
-    /// Returns the config and the directory containing `gantry.toml`. Returns an error if no
-    /// `gantry.toml` is found in the cwd or any ancestor (user must run `gantry init`).
-    pub fn load() -> Result<(Self, PathBuf)> {
-        let project_path = find_project_root()
-            .context("no gantry.toml found in current directory or any parent — run `gantry init` to initialize the project")?;
-        let config_path = project_path.join(CONFIG_FILE);
-        let contents = std::fs::read_to_string(&config_path)
-            .with_context(|| format!("failed to read {}", config_path.display()))?;
-        let config = toml::from_str(&contents).context("failed to parse gantry.toml")?;
-        Ok((config, project_path))
+    /// Returns an error if the file does not exist or cannot be parsed.
+    pub fn load(path: &Path) -> Result<Self> {
+        let contents = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        toml::from_str(&contents).context("failed to parse gantry.toml")
     }
 
-    /// Writes a new `gantry.toml` in the current working directory.
+    /// Writes a new project config to `path`.
     ///
     /// The project name is derived from the git remote origin (`owner/repo`), falling back to
     /// the directory name. Returns an error if the file already exists or cannot be written.
-    pub fn init() -> Result<()> {
-        let cwd = std::env::current_dir().context("failed to determine current directory")?;
-        let config_path = cwd.join(CONFIG_FILE);
-        if config_path.exists() {
-            anyhow::bail!("gantry.toml already exists at {}", cwd.display());
+    pub fn init(path: &Path) -> Result<()> {
+        if path.exists() {
+            anyhow::bail!("gantry.toml already exists at {}", path.display());
         }
-        let name = resolve_project_name(&cwd);
+        let project_root = path.parent().unwrap_or(path);
+        let name = resolve_project_name(project_root);
 
         let mut doc = toml_edit::DocumentMut::new();
         doc["name"] = toml_edit::value(name);
 
-        std::fs::write(&config_path, doc.to_string())
-            .with_context(|| format!("failed to write gantry.toml at {}", config_path.display()))
-    }
-}
-
-/// Walks up from the cwd to find the first directory containing `gantry.toml`.
-fn find_project_root() -> Option<PathBuf> {
-    let mut dir = std::env::current_dir().ok()?;
-    loop {
-        if dir.join(CONFIG_FILE).exists() {
-            return Some(dir);
-        }
-        match dir.parent() {
-            Some(parent) => dir = parent.to_path_buf(),
-            None => return None,
-        }
+        std::fs::write(path, doc.to_string())
+            .with_context(|| format!("failed to write gantry.toml at {}", path.display()))
     }
 }
 

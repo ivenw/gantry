@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::message::Message;
@@ -6,7 +6,7 @@ use anyhow::Result;
 use tokio::sync::Mutex;
 
 use crate::config::ProviderConfig;
-use crate::dirs::{ProjectConfigDir, ProjectRootDir};
+use crate::dirs::ProjectRootDir;
 use crate::fs::FsSessionRegistry;
 use crate::resource_loader::discover_agents_md;
 use crate::provider::agent::ChatStream;
@@ -24,22 +24,23 @@ type FsSession = Session<crate::fs::session_registry::FsSessionHistory>;
 /// provider registry. All chat and session operations go through this type.
 pub struct App {
     pub project_path: PathBuf,
+    root: ProjectRootDir,
     session: FsSession,
     pub selection: Option<ModelSelection>,
     registry: ProviderClientRegistry,
 }
 
 impl App {
-    /// Creates an `App` for the project at `project_path`, resuming the most recent session or
-    /// creating a new one if none exist. `selection` is the initial model selection, if any.
+    /// Creates an `App` for the given project root, resuming the most recent session or creating a
+    /// new one if none exist. `selection` is the initial model selection, if any.
     pub fn new(
-        project_path: &Path,
+        root: ProjectRootDir,
         selection: Option<ModelSelection>,
         registry: ProviderClientRegistry,
     ) -> Result<Self> {
-        let root = ProjectRootDir::new(project_path)?;
-        let config_dir = ProjectConfigDir::new(&root)?;
-        let session_registry = FsSessionRegistry::new(&config_dir)?;
+        let project_path = root.path().to_path_buf();
+        let config_dir = root.config_dir();
+        let session_registry = FsSessionRegistry::new(config_dir.path())?;
         let sessions = session_registry.list()?;
 
         let session = if let Some(last) = sessions.last() {
@@ -49,7 +50,8 @@ impl App {
         };
 
         Ok(Self {
-            project_path: project_path.to_path_buf(),
+            project_path,
+            root,
             session,
             selection,
             registry,
@@ -63,9 +65,8 @@ impl App {
 
     /// Creates a new session and makes it active.
     pub fn new_session(&mut self) -> Result<()> {
-        let root = ProjectRootDir::new(&self.project_path)?;
-        let config_dir = ProjectConfigDir::new(&root)?;
-        let session_registry = FsSessionRegistry::new(&config_dir)?;
+        let config_dir = self.root.config_dir();
+        let session_registry = FsSessionRegistry::new(config_dir.path())?;
         self.session = session_registry.create_session()?;
         Ok(())
     }

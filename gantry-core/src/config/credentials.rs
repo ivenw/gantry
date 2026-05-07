@@ -1,9 +1,9 @@
 use std::collections::HashMap;
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::dirs::GlobalConfigDir;
 use crate::provider::ProviderAlias;
 
 /// The full set of credentials, keyed by provider alias.
@@ -12,22 +12,20 @@ use crate::provider::ProviderAlias;
 pub struct CredentialsCatalog(pub HashMap<ProviderAlias, StoredCredential>);
 
 impl CredentialsCatalog {
-    /// Loads credentials from `~/.gantry/credentials.toml`.
+    /// Loads credentials from `path`.
     ///
     /// Returns an empty catalog if the file does not exist.
-    pub fn load() -> Result<Self> {
-        let path = GlobalConfigDir::new()?.credentials_path();
+    pub fn load(path: &Path) -> Result<Self> {
         if !path.exists() {
             return Ok(Self::default());
         }
-        let raw = std::fs::read_to_string(&path)
+        let raw = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
         toml::from_str(&raw).with_context(|| format!("failed to parse {}", path.display()))
     }
 
-    /// Writes a single credential entry to `~/.gantry/credentials.toml`, preserving all other entries.
-    pub fn save_credential(alias: &ProviderAlias, credential: &StoredCredential) -> Result<()> {
-        let path = GlobalConfigDir::new()?.credentials_path();
+    /// Writes a single credential entry to `path`, preserving all other entries.
+    pub fn save_credential(path: &Path, alias: &ProviderAlias, credential: &StoredCredential) -> Result<()> {
         let raw = if path.exists() {
             std::fs::read_to_string(&path).context("failed to read credentials.toml")?
         } else {
