@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use crate::config::ProviderConfig;
 use crate::dirs::{ProjectConfigDir, ProjectRootDir};
 use crate::fs::FsSessionRegistry;
-use crate::project::resource_loader::discover_agents_md;
+use crate::resource_loader::discover_agents_md;
 use crate::provider::agent::ChatStream;
 use crate::provider::registry::ProviderClientRegistry;
 use crate::provider::{ModelAlias, ModelSelection};

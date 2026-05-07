@@ -3,7 +3,7 @@ pub mod config;
 pub mod dirs;
 pub mod fs;
 pub mod message;
-pub mod project;
+pub mod resource_loader;
 pub mod provider;
 pub mod session;
 pub mod system_prompt;
@@ -11,7 +11,7 @@ pub mod tools;
 
 pub use app::App;
 pub use config::{
-    ConfigLoader, Credential, CredentialsCatalog, OllamaProviderConfig, ProviderConfig,
+    ConfigLoader, Credential, CredentialsCatalog, OllamaProviderConfig, Project, ProviderConfig,
     ProviderConfigCatalog,
 };
 pub use message::{Message, UserId};

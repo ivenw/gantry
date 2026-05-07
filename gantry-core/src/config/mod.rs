@@ -1,4 +1,5 @@
 pub mod credentials;
+pub mod project;
 pub mod provider;
 
 use std::path::Path;
@@ -6,6 +7,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 pub use credentials::{ApiKeyCredential, Credential, CredentialsCatalog, OauthCredential, StoredCredential};
+pub use project::Project;
 pub use provider::{
     CopilotProviderConfig, OllamaProviderConfig, OpenAiCompletionsProviderConfig,
     OpenAiResponsesProviderConfig, ProviderConfig, ProviderConfigCatalog,
