@@ -1,58 +1,62 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 const CONFIG_FILE: &str = "gantry.toml";
 
-/// A gantry project, identified by a stable name.
-///
-/// The name is the canonical identity used to group sessions, including on a central server.
-/// It is read from `gantry.toml` in the project root, which must be committed to version control.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Project {
+/// The on-disk representation of `gantry.toml`.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ProjectConfig {
     pub name: String,
 }
 
-/// The on-disk representation of `gantry.toml`.
-#[derive(Debug, Serialize, Deserialize)]
-struct ProjectConfig {
-    name: String,
-}
-
-impl Project {
-    /// Loads a project from `gantry.toml` at `project_path`.
+impl ProjectConfig {
+    /// Walks up from the current working directory to find and load `gantry.toml`.
     ///
-    /// Returns an error if the file is missing (user must run `gantry init`) or malformed.
-    pub fn load(project_path: &Path) -> Result<Self> {
+    /// Returns the config and the directory containing `gantry.toml`. Returns an error if no
+    /// `gantry.toml` is found in the cwd or any ancestor (user must run `gantry init`).
+    pub fn load() -> Result<(Self, PathBuf)> {
+        let project_path = find_project_root()
+            .context("no gantry.toml found in current directory or any parent — run `gantry init` to initialize the project")?;
         let config_path = project_path.join(CONFIG_FILE);
-        let contents = std::fs::read_to_string(&config_path).with_context(|| {
-            format!(
-                "no gantry.toml found at {} — run `gantry init` to initialize the project",
-                project_path.display()
-            )
-        })?;
-        let config: ProjectConfig =
-            toml::from_str(&contents).context("failed to parse gantry.toml")?;
-        Ok(Self { name: config.name })
+        let contents = std::fs::read_to_string(&config_path)
+            .with_context(|| format!("failed to read {}", config_path.display()))?;
+        let config = toml::from_str(&contents).context("failed to parse gantry.toml")?;
+        Ok((config, project_path))
     }
 
-    /// Initializes a new project at `project_path` by writing `gantry.toml`.
+    /// Writes a new `gantry.toml` in the current working directory.
     ///
     /// The project name is derived from the git remote origin (`owner/repo`), falling back to
     /// the directory name. Returns an error if the file already exists or cannot be written.
-    pub fn init(project_path: &Path) -> Result<Self> {
-        let config_path = project_path.join(CONFIG_FILE);
+    pub fn init() -> Result<()> {
+        let cwd = std::env::current_dir().context("failed to determine current directory")?;
+        let config_path = cwd.join(CONFIG_FILE);
         if config_path.exists() {
-            anyhow::bail!("gantry.toml already exists at {}", project_path.display());
+            anyhow::bail!("gantry.toml already exists at {}", cwd.display());
         }
-        let name = resolve_project_name(project_path);
-        let config = ProjectConfig { name: name.clone() };
-        let contents =
-            toml::to_string_pretty(&config).context("failed to serialize gantry.toml")?;
-        std::fs::write(&config_path, contents)
-            .with_context(|| format!("failed to write gantry.toml at {}", config_path.display()))?;
-        Ok(Self { name })
+        let name = resolve_project_name(&cwd);
+
+        let mut doc = toml_edit::DocumentMut::new();
+        doc["name"] = toml_edit::value(name);
+
+        std::fs::write(&config_path, doc.to_string())
+            .with_context(|| format!("failed to write gantry.toml at {}", config_path.display()))
+    }
+}
+
+/// Walks up from the cwd to find the first directory containing `gantry.toml`.
+fn find_project_root() -> Option<PathBuf> {
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        if dir.join(CONFIG_FILE).exists() {
+            return Some(dir);
+        }
+        match dir.parent() {
+            Some(parent) => dir = parent.to_path_buf(),
+            None => return None,
+        }
     }
 }
 

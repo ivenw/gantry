@@ -6,7 +6,7 @@ mod runtime;
 mod update;
 mod views;
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use crossterm::{
     event::{
         DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
@@ -14,33 +14,17 @@ use crossterm::{
     },
     execute,
 };
-use gantry_core::{App, ConfigLoader, ProviderClientRegistry};
+use gantry_core::{App, CredentialsCatalog, ProjectConfig, ProviderClientRegistry, ProviderConfigCatalog};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-fn discover_project() -> Option<std::path::PathBuf> {
-    let mut dir = std::env::current_dir().ok()?;
-    loop {
-        if dir.join(".gantry").is_dir() {
-            return Some(dir);
-        }
-        match dir.parent() {
-            Some(parent) => dir = parent.to_path_buf(),
-            None => return None,
-        }
-    }
-}
-
 pub fn run() -> Result<()> {
-    let project_path = discover_project().ok_or_else(|| {
-        anyhow!("no gantry project found in current directory or any parent\nRun `gantry init` to initialize this directory.")
-    })?;
+    let (_project_config, project_path) = ProjectConfig::load()?;
 
-    let loader = ConfigLoader::new()?;
-    let catalog = loader.load_provider_catalog()?;
-    let credentials = loader.load_credentials()?;
+    let catalog = ProviderConfigCatalog::load()?;
+    let credentials = CredentialsCatalog::load()?;
     let registry = ProviderClientRegistry::new(catalog, credentials)?;
     let app = App::new(&project_path, None, registry)?;
     let app = Arc::new(Mutex::new(app));

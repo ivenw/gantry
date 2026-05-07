@@ -1,7 +1,9 @@
 use std::collections::HashSet;
 
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::dirs::GlobalConfigDir;
 use crate::provider::ProviderAlias;
 
 /// The full set of configured providers, deserialized from `config.toml`.
@@ -11,6 +13,19 @@ pub struct ProviderConfigCatalog {
 }
 
 impl ProviderConfigCatalog {
+    /// Loads provider configuration from `~/.gantry/config.toml`.
+    ///
+    /// Returns an empty catalog if the file does not exist.
+    pub fn load() -> Result<Self> {
+        let path = GlobalConfigDir::new()?.config_path();
+        if !path.exists() {
+            return Ok(Self::default());
+        }
+        let raw = std::fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        toml::from_str(&raw).with_context(|| format!("failed to parse {}", path.display()))
+    }
+
     /// Checks that provider aliases are unique.
     pub fn validate(&self) -> anyhow::Result<()> {
         let mut provider_aliases = HashSet::new();

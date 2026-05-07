@@ -11,7 +11,7 @@ pub mod tools;
 
 pub use app::App;
 pub use config::{
-    ConfigLoader, Credential, CredentialsCatalog, OllamaProviderConfig, Project, ProviderConfig,
+    Credential, CredentialsCatalog, OllamaProviderConfig, ProjectConfig, ProviderConfig,
     ProviderConfigCatalog,
 };
 pub use message::{Message, UserId};
