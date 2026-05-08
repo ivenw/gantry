@@ -852,6 +852,8 @@ name = "gantry-app"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap",
+ "gantry-core",
  "gantry-tui",
 ]
 
