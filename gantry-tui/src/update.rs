@@ -3,7 +3,7 @@ use gantry_core::{ChatStreamItem, MultiTurnStreamItem, StreamedAssistantContent,
 
 
 use crate::message::Msg;
-use crate::model::{CommandEntry, InputMode, Model, ProviderWizard, ProvidersSubView, WizardProviderKind, branch_rows};
+use crate::model::{CommandEntry, CopilotAuthKind, InputMode, Model, ProviderWizard, ProvidersSubView, WizardProviderKind, branch_rows};
 use crate::views::ViewState;
 
 pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg> {
@@ -162,13 +162,15 @@ fn handle_key_providers_view(model: &mut Model, key: crossterm::event::KeyEvent)
         match pv.sub {
             ProvidersSubView::List { .. } => 0u8,
             ProvidersSubView::TypePicker { .. } => 1,
-            ProvidersSubView::Wizard(_) => 2,
+            ProvidersSubView::CopilotAuthPicker { .. } => 2,
+            ProvidersSubView::Wizard(_) => 3,
         }
     })?;
 
     match sub_kind {
         0 => handle_key_providers_list(model, key),
         1 => handle_key_providers_type_picker(model, key),
+        2 => handle_key_copilot_auth_picker(model, key),
         _ => handle_key_wizard(model, key),
     }
 }
@@ -238,7 +240,48 @@ fn handle_key_providers_type_picker(
             let pv = model.providers_view.as_mut()?;
             if let ProvidersSubView::TypePicker { selected_idx } = pv.sub {
                 let kind = WizardProviderKind::ALL[selected_idx];
-                pv.sub = ProvidersSubView::Wizard(ProviderWizard::new(kind));
+                if kind == WizardProviderKind::Copilot {
+                    pv.sub = ProvidersSubView::CopilotAuthPicker { selected_idx: 0 };
+                } else {
+                    pv.sub = ProvidersSubView::Wizard(ProviderWizard::new(kind, None));
+                }
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
+fn handle_key_copilot_auth_picker(
+    model: &mut Model,
+    key: crossterm::event::KeyEvent,
+) -> Option<Msg> {
+    match key.code {
+        KeyCode::Esc => {
+            let pv = model.providers_view.as_mut()?;
+            pv.sub = ProvidersSubView::TypePicker { selected_idx: 0 };
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            let pv = model.providers_view.as_mut()?;
+            if let ProvidersSubView::CopilotAuthPicker { ref mut selected_idx } = pv.sub {
+                let count = CopilotAuthKind::ALL.len();
+                *selected_idx = selected_idx.checked_sub(1).unwrap_or(count - 1);
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            let pv = model.providers_view.as_mut()?;
+            if let ProvidersSubView::CopilotAuthPicker { ref mut selected_idx } = pv.sub {
+                *selected_idx = (*selected_idx + 1) % CopilotAuthKind::ALL.len();
+            }
+        }
+        KeyCode::Enter => {
+            let pv = model.providers_view.as_mut()?;
+            if let ProvidersSubView::CopilotAuthPicker { selected_idx } = pv.sub {
+                let auth = CopilotAuthKind::ALL[selected_idx];
+                pv.sub = ProvidersSubView::Wizard(ProviderWizard::new(
+                    WizardProviderKind::Copilot,
+                    Some(auth),
+                ));
             }
         }
         _ => {}
@@ -250,7 +293,12 @@ fn handle_key_wizard(model: &mut Model, key: crossterm::event::KeyEvent) -> Opti
     match key.code {
         KeyCode::Esc => {
             let pv = model.providers_view.as_mut()?;
-            pv.sub = ProvidersSubView::TypePicker { selected_idx: 0 };
+            let is_copilot = matches!(&pv.sub, ProvidersSubView::Wizard(w) if w.kind == WizardProviderKind::Copilot);
+            if is_copilot {
+                pv.sub = ProvidersSubView::CopilotAuthPicker { selected_idx: 0 };
+            } else {
+                pv.sub = ProvidersSubView::TypePicker { selected_idx: 0 };
+            }
         }
         KeyCode::Up | KeyCode::Char('k') => {
             let pv = model.providers_view.as_mut()?;

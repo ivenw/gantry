@@ -70,7 +70,7 @@ impl ProviderClientRegistry {
             ProviderConfig::Ollama(config) => ProviderClient::ollama(config),
             ProviderConfig::Copilot(config) => {
                 let credential = self.required_credential(&config.alias)?;
-                ProviderClient::copilot(&credential)
+                ProviderClient::github_copilot(&credential)
             }
             ProviderConfig::OpenAiCompletions(config) => {
                 let credential = self.required_api_key_credential(&config.alias)?;

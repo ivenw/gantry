@@ -5,7 +5,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Widget},
 };
 
-use crate::model::{ProviderWizard, ProvidersSubView, ProvidersView, WizardProviderKind};
+use crate::model::{CopilotAuthKind, ProviderWizard, ProvidersSubView, ProvidersView, WizardProviderKind};
 
 pub struct ProvidersViewWidget<'a> {
     state: &'a ProvidersView,
@@ -25,6 +25,9 @@ impl Widget for ProvidersViewWidget<'_> {
             }
             ProvidersSubView::TypePicker { selected_idx } => {
                 render_type_picker(buf, area, *selected_idx);
+            }
+            ProvidersSubView::CopilotAuthPicker { selected_idx } => {
+                render_copilot_auth_picker(buf, area, *selected_idx);
             }
             ProvidersSubView::Wizard(wizard) => {
                 render_wizard(buf, area, wizard);
@@ -115,6 +118,41 @@ fn render_type_picker(buf: &mut Buffer, area: Rect, selected_idx: usize) {
     buf.set_string(inner.x, footer_y, footer, Style::default().fg(Color::DarkGray));
 }
 
+fn render_copilot_auth_picker(buf: &mut Buffer, area: Rect, selected_idx: usize) {
+    let block = Block::default()
+        .title(" Add Provider — GitHub Copilot — Choose Auth ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Plain)
+        .border_style(Style::default().fg(Color::DarkGray));
+    block.render(area, buf);
+
+    let inner = inner_area(area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let footer_y = inner.bottom().saturating_sub(1);
+    let list_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+
+    for (i, kind) in CopilotAuthKind::ALL.iter().enumerate() {
+        if list_area.y + i as u16 >= list_area.bottom() {
+            break;
+        }
+        let y = list_area.y + i as u16;
+        let is_selected = i == selected_idx;
+        let style = if is_selected {
+            Style::default().fg(Color::Black).bg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        let padded = format!("{:<width$}", kind.label(), width = inner.width as usize);
+        buf.set_string(list_area.x, y, &padded, style);
+    }
+
+    let footer = " ↑↓ navigate   Enter select   Esc back ";
+    buf.set_string(inner.x, footer_y, footer, Style::default().fg(Color::DarkGray));
+}
+
 fn render_wizard(buf: &mut Buffer, area: Rect, wizard: &ProviderWizard) {
     let title = format!(" Add Provider — {} ", wizard.kind.label());
     let block = Block::default()
@@ -129,11 +167,14 @@ fn render_wizard(buf: &mut Buffer, area: Rect, wizard: &ProviderWizard) {
         return;
     }
 
-    // Reserve footer (1) and optional error line (1).
+    // Reserve footer (1), optional error line (1), and optional provider note (1).
     let has_error = wizard.error.is_some();
-    let reserved = 1 + if has_error { 1 } else { 0 };
+    let has_note = wizard.kind == WizardProviderKind::Copilot
+        && wizard.copilot_auth != Some(CopilotAuthKind::ApiKey);
+    let reserved = 1 + if has_error { 1 } else { 0 } + if has_note { 1 } else { 0 };
     let footer_y = inner.bottom().saturating_sub(1);
     let error_y = footer_y.saturating_sub(if has_error { 1 } else { 0 });
+    let note_y = error_y.saturating_sub(if has_note { 1 } else { 0 });
     let content_height = inner.height.saturating_sub(reserved as u16);
     let content_area = Rect::new(inner.x, inner.y, inner.width, content_height);
 
@@ -197,6 +238,11 @@ fn render_wizard(buf: &mut Buffer, area: Rect, wizard: &ProviderWizard) {
         };
         let padded = format!("{:<width$}", "[ Confirm ]", width = inner.width as usize);
         buf.set_string(content_area.x, confirm_y, &padded, style);
+    }
+
+    if has_note {
+        let note = " Requires GitHub CLI (`gh`). Run `gh auth login` if not authenticated. ";
+        buf.set_string(inner.x, note_y, note, Style::default().fg(Color::Yellow));
     }
 
     if has_error

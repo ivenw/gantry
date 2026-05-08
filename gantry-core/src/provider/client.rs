@@ -14,7 +14,7 @@ use crate::provider::agent::ConfiguredAgent;
 /// A constructed, ready-to-use provider client that can list models and create agents.
 pub enum ProviderClient {
     Ollama(ollama::Client),
-    Copilot {
+    GitHubCopilot {
         client: copilot::Client,
         credential: Credential,
     },
@@ -53,12 +53,12 @@ impl ProviderClient {
         Ok(Self::OpenAiResponses(client))
     }
 
-    pub(crate) fn copilot(credential: &Credential) -> Result<Self> {
+    pub(crate) fn github_copilot(credential: &Credential) -> Result<Self> {
         let auth = match credential {
             Credential::ApiKey(c) => CopilotAuth::ApiKey(c.value.clone()),
             Credential::OauthToken(c) => CopilotAuth::GitHubAccessToken(c.access_token.clone()),
         };
-        Ok(Self::Copilot {
+        Ok(Self::GitHubCopilot {
             client: copilot::Client::from_val(auth)?,
             credential: credential.clone(),
         })
@@ -72,7 +72,9 @@ impl ProviderClient {
 
         match self {
             ProviderClient::Ollama(client) => Ok(client.list_models().await?),
-            ProviderClient::Copilot { credential, .. } => fetch_copilot_models(credential).await,
+            ProviderClient::GitHubCopilot { credential, .. } => {
+                fetch_copilot_models(credential).await
+            }
             ProviderClient::OpenAiCompletions(_) | ProviderClient::OpenAiResponses(_) => Err(
                 anyhow::anyhow!("model listing is not supported for OpenAI-compatible providers"),
             ),
@@ -89,7 +91,7 @@ impl ProviderClient {
                 }
                 Ok(ConfiguredAgent::ollama(builder.build()))
             }
-            ProviderClient::Copilot { client, .. } => {
+            ProviderClient::GitHubCopilot { client, .. } => {
                 let mut builder = client.agent(model.as_str());
                 if let Some(p) = preamble {
                     builder = builder.preamble(p);

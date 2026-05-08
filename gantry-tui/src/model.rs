@@ -42,6 +42,8 @@ pub enum ProvidersSubView {
     List { selected_idx: usize },
     /// Picking which provider type to add.
     TypePicker { selected_idx: usize },
+    /// Picking the authentication method for GitHub Copilot.
+    CopilotAuthPicker { selected_idx: usize },
     /// Filling in the fields for a new provider.
     Wizard(ProviderWizard),
 }
@@ -70,6 +72,49 @@ impl WizardField {
     pub fn optional(label: &'static str) -> Self {
         Self { label, value: String::new(), required: false }
     }
+}
+
+/// Authentication method chosen for GitHub Copilot.
+///
+/// # How Copilot auth works
+///
+/// Accessing `api.githubcopilot.com` requires a short-lived Copilot token obtained by
+/// exchanging a GitHub OAuth access token against `api.github.com/copilot_internal/v2/token`.
+/// Not all OAuth tokens satisfy that endpoint — it requires a token issued by the GitHub
+/// Copilot VS Code extension's registered OAuth app (client ID `Iv1.b507a08c87ecfe98`).
+/// Tokens from `gh auth login` (even with the `copilot` scope) are issued under the gh CLI's
+/// client ID and are rejected with 404.
+///
+/// The correct flow (used by tools like opencode and pi) is the OAuth device code flow:
+/// 1. POST `github.com/login/device/code` with `client_id=Iv1.b507a08c87ecfe98&scope=read:user`
+/// 2. Show the user the returned `user_code` and `verification_uri`
+/// 3. Poll `github.com/login/oauth/access_token` until the user completes auth in a browser
+/// 4. Store the resulting access token — it passes the `copilot_internal/v2/token` exchange
+///
+/// The `GhCli` variant currently calls `gh auth token`, which will only work if the user has
+/// re-authed with the device code flow above. This variant should be replaced with an in-app
+/// device code flow (TODO).
+///
+/// The `ApiKey` variant is reserved for Copilot API keys (Business/Enterprise plans only);
+/// individual plan subscribers cannot generate these from `github.com/settings/copilot`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum CopilotAuthKind {
+    /// Obtain an OAuth token from the GitHub CLI (`gh auth token`).
+    GhCli,
+    /// Supply a GitHub Copilot API key directly (Business/Enterprise plans only).
+    ApiKey,
+}
+
+impl CopilotAuthKind {
+    /// Human-readable label shown in the auth picker.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::GhCli => "GitHub CLI (OAuth)",
+            Self::ApiKey => "API Key",
+        }
+    }
+
+    pub const ALL: &'static [CopilotAuthKind] = &[Self::GhCli, Self::ApiKey];
 }
 
 /// The provider type being configured in the wizard.
@@ -103,6 +148,8 @@ impl WizardProviderKind {
 /// State for filling in fields for a new provider.
 pub struct ProviderWizard {
     pub kind: WizardProviderKind,
+    /// Authentication method for Copilot; `None` for non-Copilot providers.
+    pub copilot_auth: Option<CopilotAuthKind>,
     /// Editable fields, followed by a virtual Confirm entry (always last).
     pub fields: Vec<WizardField>,
     /// Index of the currently focused row (field or the confirm entry).
@@ -115,15 +162,24 @@ pub struct ProviderWizard {
 
 impl ProviderWizard {
     /// Builds a wizard pre-populated with the correct fields for `kind`.
-    pub fn new(kind: WizardProviderKind) -> Self {
+    ///
+    /// For `WizardProviderKind::Copilot`, `copilot_auth` selects the credential flow.
+    pub fn new(kind: WizardProviderKind, copilot_auth: Option<CopilotAuthKind>) -> Self {
         let fields = match kind {
             WizardProviderKind::Ollama => vec![
                 WizardField::required("Alias"),
                 WizardField::optional("Base URL"),
             ],
-            WizardProviderKind::Copilot => vec![
-                WizardField::required("Alias"),
-            ],
+            WizardProviderKind::Copilot => match copilot_auth {
+                Some(CopilotAuthKind::ApiKey) => vec![
+                    WizardField::required("Alias"),
+                    WizardField::required("API Key"),
+                ],
+                _ => vec![
+                    WizardField::required("Alias"),
+                    // Token is obtained from `gh auth token` on confirm.
+                ],
+            },
             WizardProviderKind::OpenAiCompletions => vec![
                 WizardField::required("Alias"),
                 WizardField::required("Base URL"),
@@ -135,7 +191,7 @@ impl ProviderWizard {
                 WizardField::required("API Key"),
             ],
         };
-        Self { kind, fields, focused_idx: 0, cursor: 0, error: None }
+        Self { kind, copilot_auth, fields, focused_idx: 0, cursor: 0, error: None }
     }
 
     /// Returns the number of rows in the wizard (fields + confirm).
@@ -171,7 +227,23 @@ impl ProviderWizard {
             }
             WizardProviderKind::Copilot => {
                 let config = ProviderConfig::Copilot(gantry_core::CopilotProviderConfig { alias });
-                Ok((config, None))
+                let credential = match self.copilot_auth {
+                    Some(CopilotAuthKind::ApiKey) => {
+                        let api_key = self.fields[1].value.trim().to_string();
+                        StoredCredential::ApiKey { value: api_key }
+                    }
+                    _ => {
+                        let token = obtain_gh_token()?;
+                        // TODO: implement token refresh via `gh auth token` when the access token
+                        // expires, rather than storing a refresh_token or expires_at.
+                        StoredCredential::OauthToken {
+                            access_token: token,
+                            refresh_token: String::new(),
+                            expires_at: String::new(),
+                        }
+                    }
+                };
+                Ok((config, Some(credential)))
             }
             WizardProviderKind::OpenAiCompletions => {
                 let base_url = self.fields[1].value.trim().to_string();
@@ -193,6 +265,37 @@ impl ProviderWizard {
             }
         }
     }
+}
+
+/// Invokes `gh auth token` and returns the trimmed token string.
+///
+/// Returns an error string if `gh` is not installed, not authenticated, or the command fails.
+fn obtain_gh_token() -> Result<String, String> {
+    let output = std::process::Command::new("gh")
+        .args(["auth", "token"])
+        .output()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                "GitHub CLI (`gh`) not found — install it and run `gh auth login`".to_string()
+            } else {
+                format!("failed to run `gh auth token`: {e}")
+            }
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "`gh auth token` failed — run `gh auth login` first\n{}",
+            stderr.trim()
+        ));
+    }
+
+    let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if token.is_empty() {
+        return Err("`gh auth token` returned an empty token — run `gh auth login`".to_string());
+    }
+
+    Ok(token)
 }
 
 /// A simplified message representation used for rendering in the TUI.
