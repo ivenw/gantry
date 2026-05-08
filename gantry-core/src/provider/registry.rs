@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 
 use crate::config::{
-    ApiKeyCredential, Credential, CredentialsCatalog, ProviderConfig, ProviderConfigCatalog,
+    ApiKeyCredential, Credential, CredentialsRepository, ProviderConfig, ProviderConfigRepository,
 };
 use crate::provider::agent::ConfiguredAgent;
 use crate::provider::client::ProviderClient;
@@ -14,17 +14,20 @@ use crate::provider::{ModelSelection, ProviderAlias};
 /// Clients are constructed lazily on first access and cached for reuse, preserving
 /// any internal state such as auth token caches.
 pub struct ProviderClientRegistry {
-    pub(crate) catalog: ProviderConfigCatalog,
-    pub(crate) credentials: CredentialsCatalog,
+    pub(crate) providers: ProviderConfigRepository,
+    pub(crate) credentials: CredentialsRepository,
     cache: HashMap<ProviderAlias, ProviderClient>,
 }
 
 impl ProviderClientRegistry {
     /// Creates a new registry, validating the provider catalog before returning.
-    pub fn new(catalog: ProviderConfigCatalog, credentials: CredentialsCatalog) -> Result<Self> {
-        catalog.validate()?;
+    pub fn new(
+        providers: ProviderConfigRepository,
+        credentials: CredentialsRepository,
+    ) -> Result<Self> {
+        providers.catalog.validate()?;
         Ok(Self {
-            catalog,
+            providers,
             credentials,
             cache: HashMap::new(),
         })
@@ -32,7 +35,7 @@ impl ProviderClientRegistry {
 
     /// Returns all configured providers.
     pub fn providers(&self) -> &[ProviderConfig] {
-        &self.catalog.providers
+        &self.providers.catalog.providers
     }
 
     /// Returns the [`ProviderClient`] for the given alias, constructing and caching it on first
@@ -58,6 +61,7 @@ impl ProviderClientRegistry {
     /// Constructs a fresh [`ProviderClient`] for the given alias.
     fn build(&self, alias: &ProviderAlias) -> Result<ProviderClient> {
         let config = self
+            .providers
             .catalog
             .provider(alias)
             .ok_or_else(|| anyhow::anyhow!("provider '{}' not found", alias.as_str()))?;
@@ -81,7 +85,7 @@ impl ProviderClientRegistry {
 
     /// Resolves the credential for the given alias, returning an error if absent.
     fn required_credential(&self, alias: &ProviderAlias) -> Result<Credential> {
-        self.credentials.get(alias)?.ok_or_else(|| {
+        self.credentials.catalog.get(alias)?.ok_or_else(|| {
             anyhow::anyhow!("no credential configured for provider '{}'", alias.as_str())
         })
     }

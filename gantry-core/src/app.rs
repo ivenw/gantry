@@ -124,7 +124,7 @@ impl App {
                 .credentials
                 .save_credential(config.alias(), cred)?;
         }
-        self.registry.catalog.add_provider(config)
+        self.registry.providers.add_provider(config)
     }
 
     /// Removes a provider from `config.toml` and its credential from `credentials.toml`.
@@ -133,7 +133,7 @@ impl App {
     /// silently skipped.
     pub fn remove_provider(&mut self, alias: &crate::provider::ProviderAlias) -> Result<()> {
         let _ = self.registry.credentials.remove_credential(alias);
-        self.registry.catalog.remove_provider(alias)
+        self.registry.providers.remove_provider(alias)
     }
 
     /// Validates and sets the active model, keeping the current provider.

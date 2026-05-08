@@ -6,16 +6,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::provider::ProviderAlias;
 
-/// The full set of credentials, keyed by provider alias.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CredentialsCatalog {
-    #[serde(skip)]
+/// Manages persistence of [`CredentialsCatalog`] to and from `credentials.toml`.
+pub struct CredentialsRepository {
     path: PathBuf,
-    #[serde(flatten)]
-    entries: HashMap<ProviderAlias, StoredCredential>,
+    pub catalog: CredentialsCatalog,
 }
 
-impl CredentialsCatalog {
+impl CredentialsRepository {
     /// Loads credentials from `path`.
     ///
     /// Returns an empty catalog if the file does not exist.
@@ -23,7 +20,7 @@ impl CredentialsCatalog {
         if !path.exists() {
             return Ok(Self {
                 path: path.to_path_buf(),
-                entries: HashMap::new(),
+                catalog: CredentialsCatalog::default(),
             });
         }
         let raw = std::fs::read_to_string(path)
@@ -32,12 +29,16 @@ impl CredentialsCatalog {
             toml::from_str(&raw).with_context(|| format!("failed to parse {}", path.display()))?;
         Ok(Self {
             path: path.to_path_buf(),
-            entries,
+            catalog: CredentialsCatalog { entries },
         })
     }
 
     /// Writes a single credential entry to the credentials file, preserving all other entries.
-    pub fn save_credential(&mut self, alias: &ProviderAlias, credential: StoredCredential) -> Result<()> {
+    pub fn save_credential(
+        &mut self,
+        alias: &ProviderAlias,
+        credential: StoredCredential,
+    ) -> Result<()> {
         let raw = if self.path.exists() {
             std::fs::read_to_string(&self.path).context("failed to read credentials.toml")?
         } else {
@@ -48,12 +49,12 @@ impl CredentialsCatalog {
             .parse::<toml_edit::DocumentMut>()
             .context("failed to parse credentials.toml")?;
 
-        let value = toml_edit::ser::to_document(&credential)
-            .context("failed to serialize credential")?;
+        let value =
+            toml_edit::ser::to_document(&credential).context("failed to serialize credential")?;
         doc[alias.as_str()] = toml_edit::Item::Table(value.as_table().clone());
 
         write_secret_file(&self.path, &doc.to_string())?;
-        self.entries.insert(alias.clone(), credential);
+        self.catalog.entries.insert(alias.clone(), credential);
         Ok(())
     }
 
@@ -61,12 +62,11 @@ impl CredentialsCatalog {
     ///
     /// Returns an error if no credential exists for the alias.
     pub fn remove_credential(&mut self, alias: &ProviderAlias) -> Result<()> {
-        if !self.entries.contains_key(alias) {
+        if !self.catalog.entries.contains_key(alias) {
             anyhow::bail!("no credential configured for provider '{}'", alias.as_str());
         }
 
-        let raw = std::fs::read_to_string(&self.path)
-            .context("failed to read credentials.toml")?;
+        let raw = std::fs::read_to_string(&self.path).context("failed to read credentials.toml")?;
 
         let mut doc = raw
             .parse::<toml_edit::DocumentMut>()
@@ -75,16 +75,8 @@ impl CredentialsCatalog {
         doc.remove(alias.as_str());
 
         write_secret_file(&self.path, &doc.to_string())?;
-        self.entries.remove(alias);
+        self.catalog.entries.remove(alias);
         Ok(())
-    }
-
-    /// Resolves and returns the credential for the given provider alias.
-    ///
-    /// Returns `None` if no credential is configured for the alias, or an error
-    /// if resolution fails (e.g. a referenced environment variable is unset).
-    pub fn get(&self, alias: &ProviderAlias) -> anyhow::Result<Option<Credential>> {
-        self.entries.get(alias).map(StoredCredential::resolve).transpose()
     }
 }
 
@@ -98,8 +90,7 @@ fn write_secret_file(path: &std::path::Path, contents: &str) -> Result<()> {
     }
 
     let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, contents)
-        .with_context(|| format!("failed to write {}", tmp.display()))?;
+    std::fs::write(&tmp, contents).with_context(|| format!("failed to write {}", tmp.display()))?;
 
     #[cfg(unix)]
     {
@@ -112,6 +103,26 @@ fn write_secret_file(path: &std::path::Path, contents: &str) -> Result<()> {
         .with_context(|| format!("failed to rename {} to {}", tmp.display(), path.display()))?;
 
     Ok(())
+}
+
+/// The full set of credentials, keyed by provider alias.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct CredentialsCatalog {
+    entries: HashMap<ProviderAlias, StoredCredential>,
+}
+
+impl CredentialsCatalog {
+    /// Resolves and returns the credential for the given provider alias.
+    ///
+    /// Returns `None` if no credential is configured for the alias, or an error
+    /// if resolution fails (e.g. a referenced environment variable is unset).
+    pub fn get(&self, alias: &ProviderAlias) -> anyhow::Result<Option<Credential>> {
+        self.entries
+            .get(alias)
+            .map(StoredCredential::resolve)
+            .transpose()
+    }
 }
 
 /// A credential as stored on disk; may reference an environment variable.

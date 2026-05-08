@@ -15,8 +15,8 @@ use crossterm::{
     execute,
 };
 use gantry_core::{
-    App, CredentialsCatalog, GlobalConfigDir, ProjectRootDir, ProviderClientRegistry,
-    ProviderConfigCatalog,
+    App, CredentialsRepository, GlobalConfigDir, ProjectRootDir, ProviderClientRegistry,
+    ProviderConfigRepository,
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
@@ -28,9 +28,9 @@ pub fn run() -> Result<()> {
     let cwd = std::env::current_dir().context("failed to determine current directory")?;
     let project_root_dir = ProjectRootDir::new(&cwd)?;
 
-    let catalog = ProviderConfigCatalog::load(&global_config_dir.config_file())?;
-    let credentials = CredentialsCatalog::load(&global_config_dir.credentials_file())?;
-    let registry = ProviderClientRegistry::new(catalog, credentials)?;
+    let providers = ProviderConfigRepository::load(&global_config_dir.config_file())?;
+    let credentials = CredentialsRepository::load(&global_config_dir.credentials_file())?;
+    let registry = ProviderClientRegistry::new(providers, credentials)?;
     let app = App::new(global_config_dir, project_root_dir, None, registry)?;
     let app = Arc::new(Mutex::new(app));
 
