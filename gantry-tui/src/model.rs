@@ -18,6 +18,7 @@ pub struct Model {
     pub command_picker: Option<CommandPicker>,
     pub tree_view: Option<TreeView>,
     pub providers_view: Option<ProvidersView>,
+    pub model_picker_view: Option<ModelPickerView>,
     pub status_message: Option<String>,
 }
 
@@ -43,6 +44,15 @@ pub enum ProvidersSubView {
     TypePicker { selected_idx: usize },
     /// Filling in the fields for a new provider.
     Wizard(ProviderWizard),
+}
+
+/// State for the model picker overlay.
+pub struct ModelPickerView {
+    pub models: Vec<ModelSelection>,
+    /// Index of the cursor row (keyboard highlight).
+    pub selected_idx: usize,
+    /// The model that was active when the picker was opened, used to mark the current selection.
+    pub active_selection: Option<ModelSelection>,
 }
 
 /// A field in the provider wizard — a label, an editable string value, and whether it is required.
@@ -262,6 +272,7 @@ impl Model {
             command_picker: None,
             tree_view: None,
             providers_view: None,
+            model_picker_view: None,
             status_message: None,
         }
     }
@@ -377,6 +388,46 @@ impl Model {
 
     pub fn deactivate_providers_view(&mut self) {
         self.providers_view = None;
+    }
+
+    pub fn is_model_picker_active(&self) -> bool {
+        self.model_picker_view.is_some()
+    }
+
+    pub fn activate_model_picker_view(&mut self, models: Vec<ModelSelection>) {
+        let active_selection = self.selection.clone();
+        let selected_idx = active_selection
+            .as_ref()
+            .and_then(|s| models.iter().position(|m| m == s))
+            .unwrap_or(0);
+        self.model_picker_view = Some(ModelPickerView { models, selected_idx, active_selection });
+    }
+
+    pub fn deactivate_model_picker_view(&mut self) {
+        self.model_picker_view = None;
+    }
+
+    pub fn move_model_picker_selection_up(&mut self) {
+        if let Some(ref mut mv) = self.model_picker_view {
+            if !mv.models.is_empty() {
+                mv.selected_idx = mv.selected_idx.checked_sub(1).unwrap_or(mv.models.len() - 1);
+            }
+        }
+    }
+
+    pub fn move_model_picker_selection_down(&mut self) {
+        if let Some(ref mut mv) = self.model_picker_view {
+            if !mv.models.is_empty() {
+                mv.selected_idx = (mv.selected_idx + 1) % mv.models.len();
+            }
+        }
+    }
+
+    /// Returns the currently highlighted model selection in the model picker, if any.
+    pub fn selected_model_in_picker(&self) -> Option<&ModelSelection> {
+        self.model_picker_view
+            .as_ref()
+            .and_then(|mv| mv.models.get(mv.selected_idx))
     }
 
     pub fn selected_tree_node(&self) -> Option<&Branch> {

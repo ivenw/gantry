@@ -37,6 +37,10 @@ pub enum Msg {
     AddProvider(ProviderConfig, Option<StoredCredential>),
     RemoveProvider(ProviderAlias),
 
+    // Model picker overlay
+    OpenModelPicker(Vec<ModelSelection>),
+    SelectModel(ModelSelection),
+
     // Side-effect signals intercepted by Runtime before update()
     SendMessage(String),
     InterruptStream,

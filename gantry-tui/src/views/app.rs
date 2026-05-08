@@ -5,6 +5,7 @@ use crate::views::command_picker::CommandPickerView;
 use crate::views::input::InputView;
 use crate::views::status_message::StatusMessageView;
 use crate::views::statusline::StatuslineView;
+use crate::views::model_picker::ModelPickerViewWidget;
 use crate::views::providers::ProvidersViewWidget;
 use crate::views::tree::TreeViewWidget;
 
@@ -23,6 +24,11 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
 
     if let Some(ref pv) = model.providers_view {
         frame.render_widget(ProvidersViewWidget::new(pv), area);
+        return;
+    }
+
+    if let Some(ref mv) = model.model_picker_view {
+        frame.render_widget(ModelPickerViewWidget::new(mv), area);
         return;
     }
 

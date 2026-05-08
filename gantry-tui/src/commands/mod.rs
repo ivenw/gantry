@@ -1,3 +1,4 @@
+pub mod model;
 pub mod new;
 pub mod providers;
 pub mod quit;
@@ -23,6 +24,7 @@ pub trait Command: Send + Sync {
 /// Compile-time registry of all available commands.
 #[derive(Clone, Copy)]
 pub enum KnownCommand {
+    Model,
     New,
     Providers,
     Quit,
@@ -31,6 +33,7 @@ pub enum KnownCommand {
 
 impl KnownCommand {
     pub const ALL: &[KnownCommand] = &[
+        KnownCommand::Model,
         KnownCommand::New,
         KnownCommand::Providers,
         KnownCommand::Quit,
@@ -39,6 +42,7 @@ impl KnownCommand {
 
     pub const fn name(&self) -> &'static str {
         match self {
+            KnownCommand::Model => "model",
             KnownCommand::New => "new",
             KnownCommand::Providers => "providers",
             KnownCommand::Quit => "quit",
@@ -48,6 +52,7 @@ impl KnownCommand {
 
     pub const fn description(&self) -> &'static str {
         match self {
+            KnownCommand::Model => "Pick the active model",
             KnownCommand::New => "Start a new session",
             KnownCommand::Providers => "Manage configured providers",
             KnownCommand::Quit => "Quit the application",
@@ -58,6 +63,7 @@ impl KnownCommand {
     /// Constructs the concrete [`Command`] implementation for this variant.
     pub fn into_command(self) -> Box<dyn Command> {
         match self {
+            KnownCommand::Model => Box::new(model::Model),
             KnownCommand::New => Box::new(new::New),
             KnownCommand::Providers => Box::new(providers::Providers),
             KnownCommand::Quit => Box::new(quit::Quit),

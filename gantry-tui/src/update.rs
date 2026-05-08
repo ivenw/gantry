@@ -1,6 +1,7 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use gantry_core::{ChatStreamItem, MultiTurnStreamItem, StreamedAssistantContent, StreamingError};
 
+
 use crate::message::Msg;
 use crate::model::{CommandEntry, InputMode, Model, ProviderWizard, ProvidersSubView, WizardProviderKind, branch_rows};
 use crate::views::ViewState;
@@ -71,6 +72,12 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
         }
         // AddProvider and RemoveProvider are handled in Runtime before update() is called.
         Msg::AddProvider(_, _) | Msg::RemoveProvider(_) => None,
+        Msg::OpenModelPicker(selections) => {
+            model.activate_model_picker_view(selections);
+            None
+        }
+        // SelectModel is handled in Runtime before update() is called.
+        Msg::SelectModel(_) => None,
         Msg::Quit
         | Msg::SendMessage(_)
         | Msg::InterruptStream
@@ -105,6 +112,10 @@ fn handle_key(
     key: crossterm::event::KeyEvent,
 ) -> Option<Msg> {
     // Overlay states are handled before normal/insert mode.
+    if model.is_model_picker_active() {
+        return handle_key_model_picker(model, key);
+    }
+
     if model.is_providers_view_active() {
         return handle_key_providers_view(model, key);
     }
@@ -120,6 +131,29 @@ fn handle_key(
     match model.mode {
         InputMode::Normal => handle_key_normal(model, view_state, key),
         InputMode::Insert => handle_key_insert(model, view_state, key),
+    }
+}
+
+fn handle_key_model_picker(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
+    match key.code {
+        KeyCode::Esc => {
+            model.deactivate_model_picker_view();
+            None
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            model.move_model_picker_selection_up();
+            None
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            model.move_model_picker_selection_down();
+            None
+        }
+        KeyCode::Enter => {
+            let msg = model.selected_model_in_picker().cloned().map(Msg::SelectModel);
+            model.deactivate_model_picker_view();
+            msg
+        }
+        _ => None,
     }
 }
 

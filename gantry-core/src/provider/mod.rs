@@ -5,7 +5,7 @@ pub mod registry;
 use serde::{Deserialize, Serialize};
 
 /// A resolved provider and model pair used to select a specific model for inference.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelSelection {
     pub provider: ProviderAlias,
     pub model: ModelAlias,

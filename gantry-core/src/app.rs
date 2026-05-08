@@ -111,6 +111,45 @@ impl App {
         self.registry.providers()
     }
 
+    /// Lists all available models across every configured provider.
+    ///
+    /// Queries each provider in turn. Returns an error if any provider fails, including
+    /// the alias and reason for each failure. On success the selections are ordered by
+    /// provider, then by model within that provider.
+    pub async fn list_models(&mut self) -> Result<Vec<ModelSelection>> {
+        let aliases: Vec<_> = self
+            .registry
+            .providers()
+            .iter()
+            .map(|p| p.alias().clone())
+            .collect();
+
+        let mut selections = Vec::new();
+        let mut errors = Vec::new();
+        for alias in aliases {
+            match self.registry.client(&alias) {
+                Err(e) => errors.push(format!("{}: {}", alias.as_str(), e)),
+                Ok(client) => match client.list_models().await {
+                    Err(e) => errors.push(format!("{}: {}", alias.as_str(), e)),
+                    Ok(list) => {
+                        for model in list.data {
+                            selections.push(ModelSelection {
+                                provider: alias.clone(),
+                                model: ModelAlias::new(model.id),
+                            });
+                        }
+                    }
+                },
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(selections)
+        } else {
+            Err(anyhow::anyhow!("{}", errors.join("; ")))
+        }
+    }
+
     /// Adds a new provider to `config.toml` and optionally saves its credential.
     ///
     /// Fails if a provider with the same alias already exists.

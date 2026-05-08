@@ -2,6 +2,7 @@ pub mod app;
 pub mod chat;
 pub mod command_picker;
 pub mod input;
+pub mod model_picker;
 pub mod providers;
 pub mod status_message;
 pub mod statusline;

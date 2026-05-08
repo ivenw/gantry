@@ -157,6 +157,10 @@ impl Runtime {
                 self.handle_remove_provider(alias.clone());
                 return None;
             }
+            Msg::SelectModel(ref selection) => {
+                self.handle_select_model(selection.clone());
+                return None;
+            }
             _ => {}
         }
         update(&mut self.model, &self.view_state, msg)
@@ -282,6 +286,13 @@ impl Runtime {
                 self.model.status_message = Some(e.to_string());
             }
         }
+    }
+
+    fn handle_select_model(&mut self, selection: gantry_core::ModelSelection) {
+        self.rt.block_on(async {
+            self.app.lock().await.set_selection(selection.clone());
+        });
+        self.model.selection = Some(selection);
     }
 
     fn execute_command(&mut self, cmd: std::sync::Arc<dyn crate::commands::Command>) {
