@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use gantry_core::{ChatStreamItem, MultiTurnStreamItem, StreamedAssistantContent, StreamingError};
 
 use crate::message::Msg;
-use crate::model::{CommandEntry, InputMode, Model, branch_rows};
+use crate::model::{CommandEntry, InputMode, Model, ProviderWizard, ProvidersSubView, WizardProviderKind, branch_rows};
 use crate::views::ViewState;
 
 pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg> {
@@ -65,6 +65,12 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             model.selection = selection;
             None
         }
+        Msg::OpenProvidersView(providers) => {
+            model.activate_providers_view(providers);
+            None
+        }
+        // AddProvider and RemoveProvider are handled in Runtime before update() is called.
+        Msg::AddProvider(_, _) | Msg::RemoveProvider(_) => None,
         Msg::Quit
         | Msg::SendMessage(_)
         | Msg::InterruptStream
@@ -98,7 +104,11 @@ fn handle_key(
     view_state: &ViewState,
     key: crossterm::event::KeyEvent,
 ) -> Option<Msg> {
-    // Tree view and command picker are independent modal states handled before normal/insert.
+    // Overlay states are handled before normal/insert mode.
+    if model.is_providers_view_active() {
+        return handle_key_providers_view(model, key);
+    }
+
     if model.is_tree_view_active() {
         return handle_key_tree_view(model, key);
     }
@@ -111,6 +121,199 @@ fn handle_key(
         InputMode::Normal => handle_key_normal(model, view_state, key),
         InputMode::Insert => handle_key_insert(model, view_state, key),
     }
+}
+
+fn handle_key_providers_view(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
+    let sub_kind = model.providers_view.as_ref().map(|pv| {
+        match pv.sub {
+            ProvidersSubView::List { .. } => 0u8,
+            ProvidersSubView::TypePicker { .. } => 1,
+            ProvidersSubView::Wizard(_) => 2,
+        }
+    })?;
+
+    match sub_kind {
+        0 => handle_key_providers_list(model, key),
+        1 => handle_key_providers_type_picker(model, key),
+        _ => handle_key_wizard(model, key),
+    }
+}
+
+fn handle_key_providers_list(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
+    match key.code {
+        KeyCode::Esc => {
+            model.deactivate_providers_view();
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            let pv = model.providers_view.as_mut()?;
+            if let ProvidersSubView::List { ref mut selected_idx } = pv.sub {
+                if !pv.providers.is_empty() {
+                    *selected_idx = selected_idx.checked_sub(1).unwrap_or(pv.providers.len() - 1);
+                }
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            let pv = model.providers_view.as_mut()?;
+            if let ProvidersSubView::List { ref mut selected_idx } = pv.sub {
+                if !pv.providers.is_empty() {
+                    *selected_idx = (*selected_idx + 1) % pv.providers.len();
+                }
+            }
+        }
+        KeyCode::Char('a') => {
+            let pv = model.providers_view.as_mut()?;
+            pv.sub = ProvidersSubView::TypePicker { selected_idx: 0 };
+        }
+        KeyCode::Char('d') => {
+            let pv = model.providers_view.as_ref()?;
+            if let ProvidersSubView::List { selected_idx } = pv.sub {
+                if selected_idx < pv.providers.len() {
+                    let alias = pv.providers[selected_idx].alias().clone();
+                    return Some(Msg::RemoveProvider(alias));
+                }
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
+fn handle_key_providers_type_picker(
+    model: &mut Model,
+    key: crossterm::event::KeyEvent,
+) -> Option<Msg> {
+    match key.code {
+        KeyCode::Esc => {
+            let pv = model.providers_view.as_mut()?;
+            pv.sub = ProvidersSubView::List { selected_idx: 0 };
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            let pv = model.providers_view.as_mut()?;
+            if let ProvidersSubView::TypePicker { ref mut selected_idx } = pv.sub {
+                let count = WizardProviderKind::ALL.len();
+                *selected_idx = selected_idx.checked_sub(1).unwrap_or(count - 1);
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            let pv = model.providers_view.as_mut()?;
+            if let ProvidersSubView::TypePicker { ref mut selected_idx } = pv.sub {
+                *selected_idx = (*selected_idx + 1) % WizardProviderKind::ALL.len();
+            }
+        }
+        KeyCode::Enter => {
+            let pv = model.providers_view.as_mut()?;
+            if let ProvidersSubView::TypePicker { selected_idx } = pv.sub {
+                let kind = WizardProviderKind::ALL[selected_idx];
+                pv.sub = ProvidersSubView::Wizard(ProviderWizard::new(kind));
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
+fn handle_key_wizard(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
+    match key.code {
+        KeyCode::Esc => {
+            let pv = model.providers_view.as_mut()?;
+            pv.sub = ProvidersSubView::TypePicker { selected_idx: 0 };
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            let pv = model.providers_view.as_mut()?;
+            if let ProvidersSubView::Wizard(ref mut w) = pv.sub {
+                if w.focused_idx > 0 {
+                    w.focused_idx -= 1;
+                    w.cursor = w.fields.get(w.focused_idx).map(|f| f.value.len()).unwrap_or(0);
+                }
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            let pv = model.providers_view.as_mut()?;
+            if let ProvidersSubView::Wizard(ref mut w) = pv.sub {
+                if w.focused_idx + 1 < w.row_count() {
+                    w.focused_idx += 1;
+                    w.cursor = w.fields.get(w.focused_idx).map(|f| f.value.len()).unwrap_or(0);
+                }
+            }
+        }
+        KeyCode::Enter => {
+            let pv = model.providers_view.as_mut()?;
+            if let ProvidersSubView::Wizard(ref mut w) = pv.sub {
+                if w.is_on_confirm() {
+                    match w.build() {
+                        Ok((config, credential)) => {
+                            return Some(Msg::AddProvider(config, credential));
+                        }
+                        Err(msg) => {
+                            w.error = Some(msg);
+                        }
+                    }
+                } else {
+                    // Advance to the next row, skipping optional empty fields.
+                    if w.focused_idx + 1 < w.row_count() {
+                        w.focused_idx += 1;
+                        w.cursor = w.fields.get(w.focused_idx).map(|f| f.value.len()).unwrap_or(0);
+                    }
+                }
+            }
+        }
+        KeyCode::Char(c) => {
+            let pv = model.providers_view.as_mut()?;
+            if let ProvidersSubView::Wizard(ref mut w) = pv.sub {
+                if !w.is_on_confirm() {
+                    let field = &mut w.fields[w.focused_idx];
+                    field.value.insert(w.cursor, c);
+                    w.cursor += c.len_utf8();
+                    w.error = None;
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            let pv = model.providers_view.as_mut()?;
+            if let ProvidersSubView::Wizard(ref mut w) = pv.sub {
+                if !w.is_on_confirm() && w.cursor > 0 {
+                    let field = &mut w.fields[w.focused_idx];
+                    let prev = prev_char_boundary(&field.value, w.cursor);
+                    field.value.drain(prev..w.cursor);
+                    w.cursor = prev;
+                    w.error = None;
+                }
+            }
+        }
+        KeyCode::Left => {
+            let pv = model.providers_view.as_mut()?;
+            if let ProvidersSubView::Wizard(ref mut w) = pv.sub {
+                if !w.is_on_confirm() {
+                    w.cursor = prev_char_boundary(&w.fields[w.focused_idx].value, w.cursor);
+                }
+            }
+        }
+        KeyCode::Right => {
+            let pv = model.providers_view.as_mut()?;
+            if let ProvidersSubView::Wizard(ref mut w) = pv.sub {
+                if !w.is_on_confirm() {
+                    let val = &w.fields[w.focused_idx].value;
+                    if w.cursor < val.len() {
+                        let c = val[w.cursor..].chars().next().unwrap();
+                        w.cursor += c.len_utf8();
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
+fn prev_char_boundary(s: &str, cursor: usize) -> usize {
+    let mut pos = cursor;
+    while pos > 0 {
+        pos -= 1;
+        if s.is_char_boundary(pos) {
+            return pos;
+        }
+    }
+    0
 }
 
 fn handle_key_tree_view(

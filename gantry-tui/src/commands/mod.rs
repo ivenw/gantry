@@ -1,4 +1,5 @@
 pub mod new;
+pub mod providers;
 pub mod quit;
 pub mod tree;
 
@@ -23,6 +24,7 @@ pub trait Command: Send + Sync {
 #[derive(Clone, Copy)]
 pub enum KnownCommand {
     New,
+    Providers,
     Quit,
     Tree,
 }
@@ -30,6 +32,7 @@ pub enum KnownCommand {
 impl KnownCommand {
     pub const ALL: &[KnownCommand] = &[
         KnownCommand::New,
+        KnownCommand::Providers,
         KnownCommand::Quit,
         KnownCommand::Tree,
     ];
@@ -37,6 +40,7 @@ impl KnownCommand {
     pub const fn name(&self) -> &'static str {
         match self {
             KnownCommand::New => "new",
+            KnownCommand::Providers => "providers",
             KnownCommand::Quit => "quit",
             KnownCommand::Tree => "tree",
         }
@@ -45,6 +49,7 @@ impl KnownCommand {
     pub const fn description(&self) -> &'static str {
         match self {
             KnownCommand::New => "Start a new session",
+            KnownCommand::Providers => "Manage configured providers",
             KnownCommand::Quit => "Quit the application",
             KnownCommand::Tree => "Browse the message tree",
         }
@@ -54,6 +59,7 @@ impl KnownCommand {
     pub fn into_command(self) -> Box<dyn Command> {
         match self {
             KnownCommand::New => Box::new(new::New),
+            KnownCommand::Providers => Box::new(providers::Providers),
             KnownCommand::Quit => Box::new(quit::Quit),
             KnownCommand::Tree => Box::new(tree::Tree),
         }

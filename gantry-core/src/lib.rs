@@ -11,8 +11,9 @@ pub mod tools;
 
 pub use app::App;
 pub use config::{
-    Credential, CredentialsCatalog, OllamaProviderConfig, ProjectConfig, ProviderConfig,
-    ProviderConfigCatalog,
+    Credential, CredentialsCatalog, CopilotProviderConfig, OllamaProviderConfig,
+    OpenAiCompletionsProviderConfig, OpenAiResponsesProviderConfig, ProjectConfig, ProviderConfig,
+    ProviderConfigCatalog, StoredCredential,
 };
 pub use dirs::{GlobalConfigDir, ProjectRootDir};
 pub use message::{Message, UserId};

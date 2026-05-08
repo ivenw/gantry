@@ -1,4 +1,4 @@
-use gantry_core::{ChatStreamItem, ModelSelection, SessionTree, StreamingError};
+use gantry_core::{ChatStreamItem, ModelSelection, ProviderAlias, ProviderConfig, SessionTree, StoredCredential, StreamingError};
 
 use crate::model::ChatMessage;
 
@@ -31,6 +31,11 @@ pub enum Msg {
     ReloadMessagesWithInput(Vec<ChatMessage>, String),
 
     ModelSelectionChanged(Option<ModelSelection>),
+
+    // Providers overlay
+    OpenProvidersView(Vec<ProviderConfig>),
+    AddProvider(ProviderConfig, Option<StoredCredential>),
+    RemoveProvider(ProviderAlias),
 
     // Side-effect signals intercepted by Runtime before update()
     SendMessage(String),

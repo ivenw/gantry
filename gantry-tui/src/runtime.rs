@@ -149,6 +149,14 @@ impl Runtime {
             Msg::SendMessage(ref input) => {
                 self.spawn_send_message(input.clone());
             }
+            Msg::AddProvider(ref config, ref credential) => {
+                self.handle_add_provider(config.clone(), credential.clone());
+                return None;
+            }
+            Msg::RemoveProvider(ref alias) => {
+                self.handle_remove_provider(alias.clone());
+                return None;
+            }
             _ => {}
         }
         update(&mut self.model, &self.view_state, msg)
@@ -221,6 +229,59 @@ impl Runtime {
                 .send(Msg::ReloadMessagesWithInput(messages, input))
                 .await;
         });
+    }
+
+    fn handle_add_provider(
+        &mut self,
+        config: gantry_core::ProviderConfig,
+        credential: Option<gantry_core::StoredCredential>,
+    ) {
+        match self.rt.block_on(async {
+            self.app.lock().await.add_provider(config, credential)
+        }) {
+            Ok(()) => {
+                let providers = self.rt.block_on(async {
+                    self.app.lock().await.list_providers().to_vec()
+                });
+                self.model.activate_providers_view(providers);
+            }
+            Err(e) => {
+                // Surface the error inside the wizard.
+                if let Some(ref mut pv) = self.model.providers_view
+                    && let crate::model::ProvidersSubView::Wizard(ref mut w) = pv.sub
+                {
+                    w.error = Some(e.to_string());
+                } else {
+                    self.model.status_message = Some(e.to_string());
+                }
+            }
+        }
+    }
+
+    fn handle_remove_provider(&mut self, alias: gantry_core::ProviderAlias) {
+        match self.rt.block_on(async {
+            self.app.lock().await.remove_provider(&alias)
+        }) {
+            Ok(()) => {
+                let providers = self.rt.block_on(async {
+                    self.app.lock().await.list_providers().to_vec()
+                });
+                // Refresh the list view, clamping selection if it is now out of bounds.
+                if let Some(ref mut pv) = self.model.providers_view
+                    && let crate::model::ProvidersSubView::List { ref mut selected_idx } = pv.sub
+                {
+                    pv.providers = providers;
+                    if !pv.providers.is_empty() {
+                        *selected_idx = (*selected_idx).min(pv.providers.len() - 1);
+                    } else {
+                        *selected_idx = 0;
+                    }
+                }
+            }
+            Err(e) => {
+                self.model.status_message = Some(e.to_string());
+            }
+        }
     }
 
     fn execute_command(&mut self, cmd: std::sync::Arc<dyn crate::commands::Command>) {

@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -7,8 +7,11 @@ use serde::{Deserialize, Serialize};
 use crate::provider::ProviderAlias;
 
 /// The full set of configured providers, deserialized from `config.toml`.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfigCatalog {
+    #[serde(skip)]
+    path: PathBuf,
+    #[serde(default)]
     pub providers: Vec<ProviderConfig>,
 }
 
@@ -18,11 +21,17 @@ impl ProviderConfigCatalog {
     /// Returns an empty catalog if the file does not exist.
     pub fn load(path: &Path) -> Result<Self> {
         if !path.exists() {
-            return Ok(Self::default());
+            return Ok(Self {
+                path: path.to_path_buf(),
+                providers: Vec::new(),
+            });
         }
         let raw = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        toml::from_str(&raw).with_context(|| format!("failed to parse {}", path.display()))
+        let mut catalog: Self =
+            toml::from_str(&raw).with_context(|| format!("failed to parse {}", path.display()))?;
+        catalog.path = path.to_path_buf();
+        Ok(catalog)
     }
 
     /// Checks that provider aliases are unique.
@@ -44,6 +53,82 @@ impl ProviderConfigCatalog {
         self.providers
             .iter()
             .find(|provider| provider.alias() == provider_alias)
+    }
+
+    /// Appends a new provider entry to `config.toml`, preserving all existing content.
+    ///
+    /// Returns an error if a provider with the same alias already exists.
+    pub fn add_provider(&mut self, config: ProviderConfig) -> Result<()> {
+        if self.provider(config.alias()).is_some() {
+            anyhow::bail!("provider '{}' already exists", config.alias().as_str());
+        }
+
+        let raw = if self.path.exists() {
+            std::fs::read_to_string(&self.path)
+                .with_context(|| format!("failed to read {}", self.path.display()))?
+        } else {
+            String::new()
+        };
+
+        let mut doc = raw
+            .parse::<toml_edit::DocumentMut>()
+            .with_context(|| format!("failed to parse {}", self.path.display()))?;
+
+        let entry =
+            toml_edit::ser::to_document(&config).context("failed to serialize provider config")?;
+
+        // `[[providers]]` is an array-of-tables in TOML.
+        if !doc.contains_key("providers") {
+            doc["providers"] = toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new());
+        }
+        let array = doc["providers"]
+            .as_array_of_tables_mut()
+            .context("'providers' is not an array of tables")?;
+        array.push(entry.as_table().clone());
+
+        atomic_write(&self.path, &doc.to_string())?;
+        self.providers.push(config);
+        Ok(())
+    }
+
+    /// Removes the provider with the given alias from `config.toml`.
+    ///
+    /// Returns an error if no provider with that alias exists.
+    pub fn remove_provider(&mut self, alias: &ProviderAlias) -> Result<()> {
+        let pos = self
+            .providers
+            .iter()
+            .position(|p| p.alias() == alias)
+            .ok_or_else(|| anyhow::anyhow!("provider '{}' not found", alias.as_str()))?;
+
+        let raw = std::fs::read_to_string(&self.path)
+            .with_context(|| format!("failed to read {}", self.path.display()))?;
+
+        let mut doc = raw
+            .parse::<toml_edit::DocumentMut>()
+            .with_context(|| format!("failed to parse {}", self.path.display()))?;
+
+        let array = doc["providers"]
+            .as_array_of_tables_mut()
+            .context("'providers' is not an array of tables")?;
+
+        // Find the matching entry by alias field value.
+        let toml_pos = array
+            .iter()
+            .position(|t| {
+                t.get("alias")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s == alias.as_str())
+                    .unwrap_or(false)
+            })
+            .ok_or_else(|| {
+                anyhow::anyhow!("provider '{}' not found in config file", alias.as_str())
+            })?;
+
+        array.remove(toml_pos);
+        atomic_write(&self.path, &doc.to_string())?;
+        self.providers.remove(pos);
+        Ok(())
     }
 }
 
@@ -105,12 +190,28 @@ pub struct OpenAiResponsesProviderConfig {
     pub base_url: String,
 }
 
+/// Writes `contents` to `path` atomically via a sibling temp file and rename.
+///
+/// Creates parent directories if they do not exist.
+fn atomic_write(path: &Path, contents: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create directory {}", parent.display()))?;
+    }
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, contents).with_context(|| format!("failed to write {}", tmp.display()))?;
+    std::fs::rename(&tmp, path)
+        .with_context(|| format!("failed to rename {} to {}", tmp.display(), path.display()))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn sample_catalog() -> ProviderConfigCatalog {
+    fn sample_catalog_at(path: &Path) -> ProviderConfigCatalog {
         ProviderConfigCatalog {
+            path: path.to_path_buf(),
             providers: vec![ProviderConfig::Ollama(OllamaProviderConfig {
                 alias: ProviderAlias::new("ollama"),
                 base_url: None,
@@ -120,12 +221,14 @@ mod tests {
 
     #[test]
     fn catalog_validation_accepts_valid_catalog() {
-        sample_catalog().validate().unwrap();
+        sample_catalog_at(Path::new("/dev/null"))
+            .validate()
+            .unwrap();
     }
 
     #[test]
     fn catalog_validation_rejects_duplicate_alias() {
-        let mut catalog = sample_catalog();
+        let mut catalog = sample_catalog_at(Path::new("/dev/null"));
         catalog
             .providers
             .push(ProviderConfig::Ollama(OllamaProviderConfig {
@@ -133,5 +236,54 @@ mod tests {
                 base_url: None,
             }));
         assert!(catalog.validate().is_err());
+    }
+
+    #[test]
+    fn add_and_remove_provider_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+
+        let mut catalog = ProviderConfigCatalog::load(&path).unwrap();
+        catalog
+            .add_provider(ProviderConfig::Ollama(OllamaProviderConfig {
+                alias: ProviderAlias::new("local"),
+                base_url: None,
+            }))
+            .unwrap();
+
+        assert_eq!(catalog.providers.len(), 1);
+        assert!(path.exists());
+
+        let reloaded = ProviderConfigCatalog::load(&path).unwrap();
+        assert_eq!(reloaded.providers.len(), 1);
+
+        catalog
+            .remove_provider(&ProviderAlias::new("local"))
+            .unwrap();
+
+        assert_eq!(catalog.providers.len(), 0);
+
+        let reloaded = ProviderConfigCatalog::load(&path).unwrap();
+        assert_eq!(reloaded.providers.len(), 0);
+    }
+
+    #[test]
+    fn add_provider_rejects_duplicate_alias() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let mut catalog = ProviderConfigCatalog::load(&path).unwrap();
+        catalog
+            .add_provider(ProviderConfig::Ollama(OllamaProviderConfig {
+                alias: ProviderAlias::new("local"),
+                base_url: None,
+            }))
+            .unwrap();
+        let err = catalog
+            .add_provider(ProviderConfig::Ollama(OllamaProviderConfig {
+                alias: ProviderAlias::new("local"),
+                base_url: None,
+            }))
+            .unwrap_err();
+        assert!(err.to_string().contains("already exists"));
     }
 }

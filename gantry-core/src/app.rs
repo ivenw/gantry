@@ -111,6 +111,31 @@ impl App {
         self.registry.providers()
     }
 
+    /// Adds a new provider to `config.toml` and optionally saves its credential.
+    ///
+    /// Fails if a provider with the same alias already exists.
+    pub fn add_provider(
+        &mut self,
+        config: ProviderConfig,
+        credential: Option<crate::config::StoredCredential>,
+    ) -> Result<()> {
+        if let Some(cred) = credential {
+            self.registry
+                .credentials
+                .save_credential(config.alias(), cred)?;
+        }
+        self.registry.catalog.add_provider(config)
+    }
+
+    /// Removes a provider from `config.toml` and its credential from `credentials.toml`.
+    ///
+    /// The credential removal is best-effort: if no credential exists for the alias, it is
+    /// silently skipped.
+    pub fn remove_provider(&mut self, alias: &crate::provider::ProviderAlias) -> Result<()> {
+        let _ = self.registry.credentials.remove_credential(alias);
+        self.registry.catalog.remove_provider(alias)
+    }
+
     /// Validates and sets the active model, keeping the current provider.
     ///
     /// Returns an error if no selection is currently active.

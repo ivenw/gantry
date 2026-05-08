@@ -14,8 +14,8 @@ use crate::provider::{ModelSelection, ProviderAlias};
 /// Clients are constructed lazily on first access and cached for reuse, preserving
 /// any internal state such as auth token caches.
 pub struct ProviderClientRegistry {
-    catalog: ProviderConfigCatalog,
-    credentials: CredentialsCatalog,
+    pub(crate) catalog: ProviderConfigCatalog,
+    pub(crate) credentials: CredentialsCatalog,
     cache: HashMap<ProviderAlias, ProviderClient>,
 }
 

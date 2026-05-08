@@ -1,4 +1,4 @@
-use gantry_core::{Branch, ModelSelection, SessionId, SessionTree, UserId};
+use gantry_core::{Branch, ModelSelection, ProviderAlias, ProviderConfig, SessionId, SessionTree, StoredCredential, UserId};
 
 /// The top-level editing mode, analogous to Vim's modal editing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,6 +17,7 @@ pub struct Model {
     pub input: InputModel,
     pub command_picker: Option<CommandPicker>,
     pub tree_view: Option<TreeView>,
+    pub providers_view: Option<ProvidersView>,
     pub status_message: Option<String>,
 }
 
@@ -26,6 +27,162 @@ pub struct TreeView {
     pub selected_idx: usize,
     /// First visible row index (scroll offset).
     pub scroll_offset: usize,
+}
+
+/// Top-level state for the providers overlay.
+pub struct ProvidersView {
+    pub providers: Vec<ProviderConfig>,
+    pub sub: ProvidersSubView,
+}
+
+/// Which sub-screen of the providers overlay is active.
+pub enum ProvidersSubView {
+    /// The list of configured providers with add/remove actions.
+    List { selected_idx: usize },
+    /// Picking which provider type to add.
+    TypePicker { selected_idx: usize },
+    /// Filling in the fields for a new provider.
+    Wizard(ProviderWizard),
+}
+
+/// A field in the provider wizard — a label, an editable string value, and whether it is required.
+pub struct WizardField {
+    pub label: &'static str,
+    pub value: String,
+    pub required: bool,
+}
+
+impl WizardField {
+    pub fn required(label: &'static str) -> Self {
+        Self { label, value: String::new(), required: true }
+    }
+
+    pub fn optional(label: &'static str) -> Self {
+        Self { label, value: String::new(), required: false }
+    }
+}
+
+/// The provider type being configured in the wizard.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum WizardProviderKind {
+    Ollama,
+    Copilot,
+    OpenAiCompletions,
+    OpenAiResponses,
+}
+
+impl WizardProviderKind {
+    /// Human-readable label shown in the type picker.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Ollama => "Ollama",
+            Self::Copilot => "GitHub Copilot",
+            Self::OpenAiCompletions => "OpenAI Completions",
+            Self::OpenAiResponses => "OpenAI Responses",
+        }
+    }
+
+    pub const ALL: &'static [WizardProviderKind] = &[
+        Self::Ollama,
+        Self::Copilot,
+        Self::OpenAiCompletions,
+        Self::OpenAiResponses,
+    ];
+}
+
+/// State for filling in fields for a new provider.
+pub struct ProviderWizard {
+    pub kind: WizardProviderKind,
+    /// Editable fields, followed by a virtual Confirm entry (always last).
+    pub fields: Vec<WizardField>,
+    /// Index of the currently focused row (field or the confirm entry).
+    pub focused_idx: usize,
+    /// Cursor byte-offset within the focused field's value string.
+    pub cursor: usize,
+    /// Error message shown when the user attempts to confirm with invalid state.
+    pub error: Option<String>,
+}
+
+impl ProviderWizard {
+    /// Builds a wizard pre-populated with the correct fields for `kind`.
+    pub fn new(kind: WizardProviderKind) -> Self {
+        let fields = match kind {
+            WizardProviderKind::Ollama => vec![
+                WizardField::required("Alias"),
+                WizardField::optional("Base URL"),
+            ],
+            WizardProviderKind::Copilot => vec![
+                WizardField::required("Alias"),
+            ],
+            WizardProviderKind::OpenAiCompletions => vec![
+                WizardField::required("Alias"),
+                WizardField::required("Base URL"),
+                WizardField::required("API Key"),
+            ],
+            WizardProviderKind::OpenAiResponses => vec![
+                WizardField::required("Alias"),
+                WizardField::required("Base URL"),
+                WizardField::required("API Key"),
+            ],
+        };
+        Self { kind, fields, focused_idx: 0, cursor: 0, error: None }
+    }
+
+    /// Returns the number of rows in the wizard (fields + confirm).
+    pub fn row_count(&self) -> usize {
+        self.fields.len() + 1
+    }
+
+    /// Returns true if the focused row is the Confirm entry.
+    pub fn is_on_confirm(&self) -> bool {
+        self.focused_idx == self.fields.len()
+    }
+
+    /// Validates fields and builds the `ProviderConfig` and optional `StoredCredential`.
+    ///
+    /// Returns an error string if any required field is empty.
+    pub fn build(&self) -> Result<(ProviderConfig, Option<StoredCredential>), String> {
+        for f in &self.fields {
+            if f.required && f.value.trim().is_empty() {
+                return Err(format!("'{}' is required", f.label));
+            }
+        }
+
+        let alias = ProviderAlias::new(self.fields[0].value.trim());
+
+        match self.kind {
+            WizardProviderKind::Ollama => {
+                let base_url = self.fields[1].value.trim();
+                let config = ProviderConfig::Ollama(gantry_core::OllamaProviderConfig {
+                    alias,
+                    base_url: if base_url.is_empty() { None } else { Some(base_url.to_string()) },
+                });
+                Ok((config, None))
+            }
+            WizardProviderKind::Copilot => {
+                let config = ProviderConfig::Copilot(gantry_core::CopilotProviderConfig { alias });
+                Ok((config, None))
+            }
+            WizardProviderKind::OpenAiCompletions => {
+                let base_url = self.fields[1].value.trim().to_string();
+                let api_key = self.fields[2].value.trim().to_string();
+                let config = ProviderConfig::OpenAiCompletions(gantry_core::OpenAiCompletionsProviderConfig {
+                    alias,
+                    base_url,
+                });
+                Ok((config, Some(StoredCredential::ApiKey { value: api_key })))
+            }
+            WizardProviderKind::OpenAiResponses => {
+                let base_url = self.fields[1].value.trim().to_string();
+                let api_key = self.fields[2].value.trim().to_string();
+                let config = ProviderConfig::OpenAiResponses(gantry_core::OpenAiResponsesProviderConfig {
+                    alias,
+                    base_url,
+                });
+                Ok((config, Some(StoredCredential::ApiKey { value: api_key })))
+            }
+        }
+    }
 }
 
 /// A simplified message representation used for rendering in the TUI.
@@ -104,6 +261,7 @@ impl Model {
             input: InputModel::new(),
             command_picker: None,
             tree_view: None,
+            providers_view: None,
             status_message: None,
         }
     }
@@ -204,6 +362,21 @@ impl Model {
                 tv.selected_idx = (tv.selected_idx + 1).min(count - 1);
             }
         }
+    }
+
+    pub fn is_providers_view_active(&self) -> bool {
+        self.providers_view.is_some()
+    }
+
+    pub fn activate_providers_view(&mut self, providers: Vec<ProviderConfig>) {
+        self.providers_view = Some(ProvidersView {
+            providers,
+            sub: ProvidersSubView::List { selected_idx: 0 },
+        });
+    }
+
+    pub fn deactivate_providers_view(&mut self) {
+        self.providers_view = None;
     }
 
     pub fn selected_tree_node(&self) -> Option<&Branch> {
