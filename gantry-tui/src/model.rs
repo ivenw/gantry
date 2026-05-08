@@ -511,19 +511,17 @@ impl Model {
     }
 
     pub fn move_model_picker_selection_up(&mut self) {
-        if let Some(ref mut mv) = self.model_picker_view {
-            if !mv.models.is_empty() {
+        if let Some(ref mut mv) = self.model_picker_view
+            && !mv.models.is_empty() {
                 mv.selected_idx = mv.selected_idx.checked_sub(1).unwrap_or(mv.models.len() - 1);
             }
-        }
     }
 
     pub fn move_model_picker_selection_down(&mut self) {
-        if let Some(ref mut mv) = self.model_picker_view {
-            if !mv.models.is_empty() {
+        if let Some(ref mut mv) = self.model_picker_view
+            && !mv.models.is_empty() {
                 mv.selected_idx = (mv.selected_idx + 1) % mv.models.len();
             }
-        }
     }
 
     /// Returns the currently highlighted model selection in the model picker, if any.
@@ -615,13 +613,11 @@ impl ChatModel {
     /// can restore it to the input.
     pub fn cancel_streaming(&mut self) -> Option<String> {
         // Remove any partial assistant message that was pushed during streaming.
-        if self.streaming_message_pushed {
-            if let Some(idx) = self.streaming_message_idx {
-                if idx < self.messages.len() {
+        if self.streaming_message_pushed
+            && let Some(idx) = self.streaming_message_idx
+                && idx < self.messages.len() {
                     self.messages.remove(idx);
                 }
-            }
-        }
         // Remove the optimistic user message that was added just before streaming started.
         // It sits immediately before the (now-removed) assistant message.
         let user_idx = self

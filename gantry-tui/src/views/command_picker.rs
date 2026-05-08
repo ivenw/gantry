@@ -116,7 +116,7 @@ impl Widget for CommandPickerView<'_> {
             if is_selected {
                 let gap_x = inner.x + MAX_CMD_NAME_LEN as u16;
                 let gap_width = DESC_COL.saturating_sub(MAX_CMD_NAME_LEN as u16) as usize;
-                buf.set_string(gap_x, y, &" ".repeat(gap_width), desc_style);
+                buf.set_string(gap_x, y, " ".repeat(gap_width), desc_style);
             }
 
             let desc_chunks: Vec<&str> = if cmd.description.is_empty() {
@@ -135,7 +135,7 @@ impl Widget for CommandPickerView<'_> {
                 }
                 // Continuation lines re-indent to the description column.
                 if j > 0 {
-                    buf.set_string(inner.x, y, &" ".repeat(DESC_COL as usize), desc_style);
+                    buf.set_string(inner.x, y, " ".repeat(DESC_COL as usize), desc_style);
                 }
                 buf.set_string(desc_col_x, y, chunk, desc_style);
                 y += 1;
