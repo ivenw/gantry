@@ -339,15 +339,12 @@ fn handle_enter_insert(model: &mut Model, modifiers: KeyModifiers) -> Option<Msg
 }
 
 pub fn available_command_entries() -> Vec<CommandEntry> {
-    crate::commands::all_commands()
-        .into_iter()
-        .map(|c| {
-            let c: std::sync::Arc<dyn crate::commands::Command> = c.into();
-            CommandEntry {
-                name: c.name().to_string(),
-                description: c.description().to_string(),
-                command: c,
-            }
+    crate::commands::KnownCommand::ALL
+        .iter()
+        .map(|k| CommandEntry {
+            name: k.name().to_string(),
+            description: k.description().to_string(),
+            command: k.into_command().into(),
         })
         .collect()
 }

@@ -4,14 +4,6 @@ use crate::message::Msg;
 pub struct Tree;
 
 impl Command for Tree {
-    fn name(&self) -> &'static str {
-        "tree"
-    }
-
-    fn description(&self) -> &'static str {
-        "Browse the message tree"
-    }
-
     fn execute(&self, ctx: CommandContext) {
         let tx = ctx.msg_tx;
         let app = ctx.app.clone();

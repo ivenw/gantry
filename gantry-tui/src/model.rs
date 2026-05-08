@@ -147,7 +147,10 @@ impl Model {
 
     pub fn move_command_selection_up(&mut self) {
         if let Some(ref mut picker) = self.command_picker {
-            picker.selected_idx = picker.selected_idx.saturating_sub(1);
+            let count = picker.filtered_commands().len();
+            if count > 0 {
+                picker.selected_idx = picker.selected_idx.checked_sub(1).unwrap_or(count - 1);
+            }
         }
     }
 

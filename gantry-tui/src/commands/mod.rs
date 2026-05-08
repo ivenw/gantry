@@ -1,4 +1,3 @@
-pub mod health;
 pub mod new;
 pub mod quit;
 pub mod tree;
@@ -17,16 +16,63 @@ pub struct CommandContext {
 }
 
 pub trait Command: Send + Sync {
-    fn name(&self) -> &'static str;
-    fn description(&self) -> &'static str;
     fn execute(&self, ctx: CommandContext);
 }
 
-pub fn all_commands() -> Vec<Box<dyn Command>> {
-    vec![
-        Box::new(health::Health),
-        Box::new(new::New),
-        Box::new(quit::Quit),
-        Box::new(tree::Tree),
-    ]
+/// Compile-time registry of all available commands.
+#[derive(Clone, Copy)]
+pub enum KnownCommand {
+    New,
+    Quit,
+    Tree,
 }
+
+impl KnownCommand {
+    pub const ALL: &[KnownCommand] = &[
+        KnownCommand::New,
+        KnownCommand::Quit,
+        KnownCommand::Tree,
+    ];
+
+    pub const fn name(&self) -> &'static str {
+        match self {
+            KnownCommand::New => "new",
+            KnownCommand::Quit => "quit",
+            KnownCommand::Tree => "tree",
+        }
+    }
+
+    pub const fn description(&self) -> &'static str {
+        match self {
+            KnownCommand::New => "Start a new session",
+            KnownCommand::Quit => "Quit the application",
+            KnownCommand::Tree => "Browse the message tree",
+        }
+    }
+
+    /// Constructs the concrete [`Command`] implementation for this variant.
+    pub fn into_command(self) -> Box<dyn Command> {
+        match self {
+            KnownCommand::New => Box::new(new::New),
+            KnownCommand::Quit => Box::new(quit::Quit),
+            KnownCommand::Tree => Box::new(tree::Tree),
+        }
+    }
+}
+
+/// The length of the longest command name, computed at compile time.
+pub const MAX_CMD_NAME_LEN: usize = max_name_len(KnownCommand::ALL);
+
+const fn max_name_len(commands: &[KnownCommand]) -> usize {
+    let mut max = 0;
+    let mut i = 0;
+    while i < commands.len() {
+        let len = commands[i].name().len();
+        if len > max {
+            max = len;
+        }
+        i += 1;
+    }
+    max
+}
+

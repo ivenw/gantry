@@ -5,10 +5,14 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Widget},
 };
 
+use crate::commands::MAX_CMD_NAME_LEN;
 use crate::model::CommandPicker;
 
-/// The height of the filter input row inside the picker border.
-const FILTER_ROW_HEIGHT: u16 = 1;
+/// Minimum spaces between the end of a command name and the start of its description.
+const CMD_DESC_GAP: usize = 12;
+
+/// Column offset at which descriptions start, relative to the list area.
+const DESC_COL: u16 = (MAX_CMD_NAME_LEN + CMD_DESC_GAP) as u16;
 
 pub struct CommandPickerView<'a> {
     state: &'a CommandPicker,
@@ -19,9 +23,13 @@ impl<'a> CommandPickerView<'a> {
         Self { state }
     }
 
+    /// Calculates the total height needed to render the picker at the given width.
     pub fn calc_height(&self, width: u16) -> u16 {
         let filtered = self.state.filtered_commands();
-        let text_width = (width.saturating_sub(4)).max(1) as usize;
+        // Available width for descriptions: subtract borders and the name column.
+        let desc_width = (width.saturating_sub(2) as usize)
+            .saturating_sub(DESC_COL as usize)
+            .max(1);
 
         let list_height: u16 = if filtered.is_empty() {
             1
@@ -33,15 +41,15 @@ impl<'a> CommandPickerView<'a> {
                     let wrapped = if desc_len == 0 {
                         1
                     } else {
-                        desc_len.div_ceil(text_width)
+                        desc_len.div_ceil(desc_width)
                     };
                     wrapped.max(1) as u16
                 })
                 .sum()
         };
 
-        // border top + filter row + list rows + border bottom
-        list_height + FILTER_ROW_HEIGHT + 2
+        // border top + list rows + border bottom
+        list_height + 2
     }
 }
 
@@ -49,10 +57,14 @@ impl Widget for CommandPickerView<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let filtered = self.state.filtered_commands();
 
-        let title = if filtered.is_empty() {
-            " No commands "
+        let title = if self.state.filter.is_empty() {
+            if filtered.is_empty() {
+                " No commands ".to_string()
+            } else {
+                " Commands ".to_string()
+            }
         } else {
-            " Commands "
+            format!(" Commands: {} ", self.state.filter)
         };
 
         let block = Block::default()
@@ -73,56 +85,59 @@ impl Widget for CommandPickerView<'_> {
             return;
         }
 
-        // Render the filter row.
-        let filter_display = format!("> {}", self.state.filter);
-        buf.set_string(inner.x, inner.y, &filter_display, Style::default().fg(Color::LightGreen));
-
-        let list_area = Rect::new(
-            inner.x,
-            inner.y + FILTER_ROW_HEIGHT,
-            inner.width,
-            inner.height.saturating_sub(FILTER_ROW_HEIGHT),
-        );
-
-        if list_area.height == 0 {
-            return;
-        }
-
-        let text_width = list_area.width as usize;
-        let mut y = list_area.y;
+        let desc_col_x = inner.x + DESC_COL;
+        let desc_width = (inner.width as usize)
+            .saturating_sub(DESC_COL as usize)
+            .max(1);
+        let mut y = inner.y;
 
         for (i, cmd) in filtered.iter().enumerate() {
-            if y >= list_area.bottom() {
+            if y >= inner.bottom() {
                 break;
             }
 
             let is_selected = i == self.state.selected_idx;
-            let style = if is_selected {
+            let name_style = if is_selected {
+                Style::default().fg(Color::Black).bg(Color::LightGreen)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            let desc_style = if is_selected {
                 Style::default().fg(Color::Black).bg(Color::LightGreen)
             } else {
                 Style::default().fg(Color::White)
             };
 
-            let line = format!("{} - {}", cmd.name, cmd.description);
-            let wrapped_lines: Vec<&str> = if line.is_empty() {
+            // Pad the name to fill the name column so the selection highlight is uniform.
+            let padded_name = format!("{:<width$}", cmd.name, width = MAX_CMD_NAME_LEN);
+            buf.set_string(inner.x, y, &padded_name, name_style);
+
+            // For selected rows, fill the gap between name and description columns.
+            if is_selected {
+                let gap_x = inner.x + MAX_CMD_NAME_LEN as u16;
+                let gap_width = DESC_COL.saturating_sub(MAX_CMD_NAME_LEN as u16) as usize;
+                buf.set_string(gap_x, y, &" ".repeat(gap_width), desc_style);
+            }
+
+            let desc_chunks: Vec<&str> = if cmd.description.is_empty() {
                 vec![""]
             } else {
-                line.as_bytes()
-                    .chunks(text_width)
+                cmd.description
+                    .as_bytes()
+                    .chunks(desc_width)
                     .map(|c| unsafe { std::str::from_utf8_unchecked(c) })
                     .collect()
             };
 
-            for (j, line_chunk) in wrapped_lines.iter().enumerate() {
-                if y >= list_area.bottom() {
+            for (j, chunk) in desc_chunks.iter().enumerate() {
+                if y >= inner.bottom() {
                     break;
                 }
-                let x = if j == 0 && is_selected {
-                    list_area.x
-                } else {
-                    list_area.x + (cmd.name.len() as u16) + 3
-                };
-                buf.set_string(x, y, line_chunk, style);
+                // Continuation lines re-indent to the description column.
+                if j > 0 {
+                    buf.set_string(inner.x, y, &" ".repeat(DESC_COL as usize), desc_style);
+                }
+                buf.set_string(desc_col_x, y, chunk, desc_style);
                 y += 1;
             }
         }
