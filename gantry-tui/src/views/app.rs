@@ -59,7 +59,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
         frame.render_widget(StatusMessageView::new(msg), statusline_area);
     } else {
         frame.render_stateful_widget(
-            StatuslineView::new(model.is_streaming()),
+            StatuslineView::new(model.mode, model.is_streaming()),
             statusline_area,
             &mut view_state.statusline,
         );

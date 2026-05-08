@@ -1,4 +1,5 @@
 use crate::effects::throbber::{Throbber, ThrobberStyle};
+use crate::model::InputMode;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -26,12 +27,13 @@ impl StatuslineViewState {
 }
 
 pub struct StatuslineView {
+    mode: InputMode,
     is_streaming: bool,
 }
 
 impl StatuslineView {
-    pub fn new(is_streaming: bool) -> Self {
-        Self { is_streaming }
+    pub fn new(mode: InputMode, is_streaming: bool) -> Self {
+        Self { mode, is_streaming }
     }
 }
 
@@ -42,7 +44,10 @@ impl StatefulWidget for StatuslineView {
         let text = if self.is_streaming {
             format!("[{}] EVALUATING", state.throbber.current())
         } else {
-            String::new()
+            match self.mode {
+                InputMode::Normal => "NORMAL".to_string(),
+                InputMode::Insert => "INSERT".to_string(),
+            }
         };
         Paragraph::new(text)
             .style(Style::default().fg(Color::Gray))

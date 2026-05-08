@@ -1,8 +1,18 @@
 use gantry_core::{Branch, ModelSelection, SessionId, SessionTree, UserId};
 
+/// The top-level editing mode, analogous to Vim's modal editing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputMode {
+    /// Navigation/command mode. Typing does not enter text into the input buffer.
+    Normal,
+    /// Text entry mode. Keys are forwarded to the input buffer.
+    Insert,
+}
+
 pub struct Model {
     pub session_id: Option<SessionId>,
     pub selection: Option<ModelSelection>,
+    pub mode: InputMode,
     pub chat: ChatModel,
     pub input: InputModel,
     pub command_picker: Option<CommandPicker>,
@@ -89,6 +99,7 @@ impl Model {
         Self {
             session_id: None,
             selection: None,
+            mode: InputMode::Normal,
             chat: ChatModel::new(),
             input: InputModel::new(),
             command_picker: None,
@@ -118,9 +129,18 @@ impl Model {
         self.command_picker = None;
     }
 
-    pub fn update_command_filter(&mut self, filter: &str) {
+    /// Appends a character to the command picker's filter string.
+    pub fn command_picker_filter_push(&mut self, c: char) {
         if let Some(ref mut picker) = self.command_picker {
-            picker.filter = filter.to_string();
+            picker.filter.push(c);
+            picker.selected_idx = 0;
+        }
+    }
+
+    /// Removes the last character from the command picker's filter string.
+    pub fn command_picker_filter_pop(&mut self) {
+        if let Some(ref mut picker) = self.command_picker {
+            picker.filter.pop();
             picker.selected_idx = 0;
         }
     }
@@ -388,14 +408,21 @@ impl InputModel {
 }
 
 impl CommandPicker {
+    /// Returns commands whose names contain every character in `filter` as a subsequence.
     pub fn filtered_commands(&self) -> Vec<CommandEntry> {
         if self.filter.is_empty() {
             return self.commands.clone();
         }
         self.commands
             .iter()
-            .filter(|c| c.name.starts_with(&self.filter))
+            .filter(|c| fuzzy_match(&c.name, &self.filter))
             .cloned()
             .collect()
     }
+}
+
+/// Returns true if every character in `needle` appears in `haystack` in order.
+fn fuzzy_match(haystack: &str, needle: &str) -> bool {
+    let mut chars = haystack.chars();
+    needle.chars().all(|n| chars.any(|h| h == n))
 }
