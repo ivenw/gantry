@@ -36,11 +36,15 @@ impl Runtime {
         let mut model = Model::new();
         model.session_id = Some(gantry_core::SessionId::new());
 
-        let existing_messages: Vec<ChatMessage> = {
+        let (existing_messages, selection) = {
             let app = rt.block_on(app.lock());
-            ChatMessage::messages_from(app.history())
+            (
+                ChatMessage::messages_from(app.history()),
+                app.selection().cloned(),
+            )
         };
         model.chat.messages = existing_messages;
+        model.selection = selection;
 
         Ok(Self {
             model,

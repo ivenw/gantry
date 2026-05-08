@@ -1,7 +1,8 @@
-use gantry_core::{Branch, SessionId, SessionTree, UserId};
+use gantry_core::{Branch, ModelSelection, SessionId, SessionTree, UserId};
 
 pub struct Model {
     pub session_id: Option<SessionId>,
+    pub selection: Option<ModelSelection>,
     pub chat: ChatModel,
     pub input: InputModel,
     pub command_picker: Option<CommandPicker>,
@@ -87,6 +88,7 @@ impl Model {
     pub fn new() -> Self {
         Self {
             session_id: None,
+            selection: None,
             chat: ChatModel::new(),
             input: InputModel::new(),
             command_picker: None,
@@ -256,6 +258,46 @@ impl ChatModel {
                 }
             }
         }
+    }
+
+    /// Cancels an in-progress stream, rolling back the optimistic user message and any
+    /// partial assistant content. Returns the rolled-back user message text so the caller
+    /// can restore it to the input.
+    pub fn cancel_streaming(&mut self) -> Option<String> {
+        // Remove any partial assistant message that was pushed during streaming.
+        if self.streaming_message_pushed {
+            if let Some(idx) = self.streaming_message_idx {
+                if idx < self.messages.len() {
+                    self.messages.remove(idx);
+                }
+            }
+        }
+        // Remove the optimistic user message that was added just before streaming started.
+        // It sits immediately before the (now-removed) assistant message.
+        let user_idx = self
+            .streaming_message_idx
+            .map(|i| i.saturating_sub(1))
+            .unwrap_or_else(|| self.messages.len().saturating_sub(1));
+        let restored = if user_idx < self.messages.len() {
+            if let ChatMessage::User { .. } = self.messages[user_idx] {
+                let msg = self.messages.remove(user_idx);
+                if let ChatMessage::User { content, .. } = msg {
+                    Some(content)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        self.streaming_content = None;
+        self.streaming_message_idx = None;
+        self.streaming_buffer.clear();
+        self.streaming_message_pushed = false;
+        self.pending_message_id = None;
+        restored
     }
 
     pub fn finish_streaming(&mut self) {

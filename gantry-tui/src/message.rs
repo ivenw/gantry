@@ -1,4 +1,4 @@
-use gantry_core::{ChatStreamItem, SessionTree, StreamingError};
+use gantry_core::{ChatStreamItem, ModelSelection, SessionTree, StreamingError};
 
 use crate::model::ChatMessage;
 
@@ -29,6 +29,8 @@ pub enum Msg {
     },
     ReloadMessages(Vec<ChatMessage>),
     ReloadMessagesWithInput(Vec<ChatMessage>, String),
+
+    ModelSelectionChanged(Option<ModelSelection>),
 
     // Side-effect signals intercepted by Runtime before update()
     SendMessage(String),

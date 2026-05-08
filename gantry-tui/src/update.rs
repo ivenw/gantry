@@ -17,7 +17,10 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
         }
         Msg::StreamResult(Ok(())) => None,
         Msg::StreamResult(Err(e)) => {
-            model.chat.finish_streaming();
+            if let Some(text) = model.chat.cancel_streaming() {
+                model.input.value = text;
+                model.input.cursor = model.input.value.chars().count();
+            }
             model.status_message = Some(e);
             None
         }
@@ -56,6 +59,10 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             model.input.value = input;
             model.input.cursor = model.input.value.chars().count();
             model.deactivate_tree_view();
+            None
+        }
+        Msg::ModelSelectionChanged(selection) => {
+            model.selection = selection;
             None
         }
         Msg::Quit
@@ -231,6 +238,11 @@ fn handle_enter(model: &mut Model, modifiers: KeyModifiers) -> Option<Msg> {
 
     let input = model.input.value.clone();
     if input.trim().is_empty() || model.is_streaming() {
+        return None;
+    }
+
+    if model.selection.is_none() {
+        model.status_message = Some("No model selected".to_string());
         return None;
     }
 
