@@ -14,22 +14,24 @@ use crossterm::{
     },
     execute,
 };
-use gantry_core::{App, CredentialsCatalog, GlobalConfigDir, ProjectConfig, ProjectRootDir, ProviderClientRegistry, ProviderConfigCatalog};
+use gantry_core::{
+    App, CredentialsCatalog, GlobalConfigDir, ProjectRootDir, ProviderClientRegistry,
+    ProviderConfigCatalog,
+};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub fn run() -> Result<()> {
-    let cwd = std::env::current_dir().context("failed to determine current directory")?;
-    let root = ProjectRootDir::new(&cwd)?;
     let global_config_dir = GlobalConfigDir::new()?;
+    let cwd = std::env::current_dir().context("failed to determine current directory")?;
+    let project_root_dir = ProjectRootDir::new(&cwd)?;
 
-    let _project_config = ProjectConfig::load(&root.config_file())?;
     let catalog = ProviderConfigCatalog::load(&global_config_dir.config_file())?;
     let credentials = CredentialsCatalog::load(&global_config_dir.credentials_file())?;
     let registry = ProviderClientRegistry::new(catalog, credentials)?;
-    let app = App::new(root, None, registry)?;
+    let app = App::new(global_config_dir, project_root_dir, None, registry)?;
     let app = Arc::new(Mutex::new(app));
 
     let (_terminal_guard, mut terminal) = TerminalGuard::enter()?;

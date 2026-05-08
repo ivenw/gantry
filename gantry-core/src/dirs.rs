@@ -28,6 +28,15 @@ impl GlobalConfigDir {
     pub fn credentials_file(&self) -> PathBuf {
         self.0.join("credentials.toml")
     }
+
+    /// Returns the path to `~/.gantry/sessions/<project_name>/`.
+    ///
+    /// Slashes in `project_name` (e.g. `owner/repo`) are replaced with `_` so the name maps to a
+    /// single directory component.
+    pub fn sessions_dir(&self, project_name: &str) -> PathBuf {
+        let sanitized = project_name.replace('/', "_");
+        self.0.join("sessions").join(sanitized)
+    }
 }
 
 const PROJECT_CONFIG_FILE: &str = "gantry.toml";

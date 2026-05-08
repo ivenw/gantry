@@ -5,13 +5,13 @@ use crate::message::Message;
 use anyhow::Result;
 use tokio::sync::Mutex;
 
-use crate::config::ProviderConfig;
-use crate::dirs::ProjectRootDir;
+use crate::config::{ProjectConfig, ProviderConfig};
+use crate::dirs::{GlobalConfigDir, ProjectRootDir};
 use crate::fs::FsSessionRegistry;
-use crate::resource_loader::discover_agents_md;
 use crate::provider::agent::ChatStream;
 use crate::provider::registry::ProviderClientRegistry;
 use crate::provider::{ModelAlias, ModelSelection};
+use crate::resource_loader::discover_agents_md;
 use crate::session::registry::SessionRegistry;
 use crate::session::{NodeId, Session, SessionId, SessionTree};
 use crate::system_prompt::build_system_prompt;
@@ -33,14 +33,18 @@ pub struct App {
 impl App {
     /// Creates an `App` for the given project root, resuming the most recent session or creating a
     /// new one if none exist. `selection` is the initial model selection, if any.
+    ///
+    /// Sessions are stored under `global_config_dir/sessions/<project_name>/`.
     pub fn new(
-        root: ProjectRootDir,
+        global_config_dir: GlobalConfigDir,
+        project_rood_dir: ProjectRootDir,
         selection: Option<ModelSelection>,
         registry: ProviderClientRegistry,
     ) -> Result<Self> {
-        let project_path = root.path().to_path_buf();
-        let config_dir = root.config_dir();
-        let session_registry = FsSessionRegistry::new(config_dir.path())?;
+        let project_path = project_rood_dir.path().to_path_buf();
+        let project_config = ProjectConfig::load(&project_rood_dir.config_file())?;
+        let sessions_dir = global_config_dir.sessions_dir(&project_config.name);
+        let session_registry = FsSessionRegistry::new(&sessions_dir)?;
         let sessions = session_registry.list()?;
 
         let session = if let Some(last) = sessions.last() {
@@ -51,7 +55,7 @@ impl App {
 
         Ok(Self {
             project_path,
-            root,
+            root: project_rood_dir,
             session,
             selection,
             registry,
