@@ -10,6 +10,7 @@ use crate::config::{
 };
 use crate::provider::ModelAlias;
 use crate::provider::agent::ConfiguredAgent;
+use crate::tools::{EditTool, GrepTool, ReadTool, TreeTool, WriteTool};
 
 /// A constructed, ready-to-use provider client that can list models and create agents.
 pub enum ProviderClient {
@@ -89,28 +90,60 @@ impl ProviderClient {
                 if let Some(p) = preamble {
                     builder = builder.preamble(p);
                 }
-                Ok(ConfiguredAgent::ollama(builder.build()))
+                Ok(ConfiguredAgent::ollama(
+                    builder
+                        .tool(ReadTool)
+                        .tool(WriteTool)
+                        .tool(EditTool)
+                        .tool(GrepTool)
+                        .tool(TreeTool)
+                        .build(),
+                ))
             }
             ProviderClient::GitHubCopilot { client, .. } => {
                 let mut builder = client.agent(model.as_str());
                 if let Some(p) = preamble {
                     builder = builder.preamble(p);
                 }
-                Ok(ConfiguredAgent::copilot(builder.build()))
+                Ok(ConfiguredAgent::copilot(
+                    builder
+                        .tool(ReadTool)
+                        .tool(WriteTool)
+                        .tool(EditTool)
+                        .tool(GrepTool)
+                        .tool(TreeTool)
+                        .build(),
+                ))
             }
             ProviderClient::OpenAiCompletions(client) => {
                 let mut builder = client.agent(model.as_str());
                 if let Some(p) = preamble {
                     builder = builder.preamble(p);
                 }
-                Ok(ConfiguredAgent::openai_completions(builder.build()))
+                Ok(ConfiguredAgent::openai_completions(
+                    builder
+                        .tool(ReadTool)
+                        .tool(WriteTool)
+                        .tool(EditTool)
+                        .tool(GrepTool)
+                        .tool(TreeTool)
+                        .build(),
+                ))
             }
             ProviderClient::OpenAiResponses(client) => {
                 let mut builder = client.agent(model.as_str());
                 if let Some(p) = preamble {
                     builder = builder.preamble(p);
                 }
-                Ok(ConfiguredAgent::openai_responses(builder.build()))
+                Ok(ConfiguredAgent::openai_responses(
+                    builder
+                        .tool(ReadTool)
+                        .tool(WriteTool)
+                        .tool(EditTool)
+                        .tool(GrepTool)
+                        .tool(TreeTool)
+                        .build(),
+                ))
             }
         }
     }
