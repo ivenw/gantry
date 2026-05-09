@@ -1,3 +1,8 @@
+use nucleo_matcher::{
+    pattern::{AtomKind, CaseMatching, Normalization, Pattern},
+    Config, Matcher,
+};
+
 use gantry_core::{Branch, ModelSelection, ProviderAlias, ProviderConfig, SessionId, SessionTree, StoredCredential, UserId};
 
 /// The top-level editing mode, analogous to Vim's modal editing.
@@ -734,21 +739,28 @@ impl InputModel {
 }
 
 impl CommandPicker {
-    /// Returns commands whose names contain every character in `filter` as a subsequence.
+    /// Returns commands matching `filter`, sorted by descending nucleo score.
+    ///
+    /// Commands with no match are excluded. When the filter is empty all commands
+    /// are returned in their original order.
     pub fn filtered_commands(&self) -> Vec<CommandEntry> {
         if self.filter.is_empty() {
             return self.commands.clone();
         }
-        self.commands
-            .iter()
-            .filter(|c| fuzzy_match(&c.name, &self.filter))
-            .cloned()
-            .collect()
-    }
-}
 
-/// Returns true if every character in `needle` appears in `haystack` in order.
-fn fuzzy_match(haystack: &str, needle: &str) -> bool {
-    let mut chars = haystack.chars();
-    needle.chars().all(|n| chars.any(|h| h == n))
+        let mut matcher = Matcher::new(Config::DEFAULT);
+        let pattern = Pattern::new(&self.filter, CaseMatching::Smart, Normalization::Smart, AtomKind::Fuzzy);
+
+        let mut scored: Vec<(u32, &CommandEntry)> = self
+            .commands
+            .iter()
+            .filter_map(|cmd| {
+                let score = pattern.score(nucleo_matcher::Utf32Str::new(&cmd.name, &mut Vec::new()), &mut matcher)?;
+                Some((score, cmd))
+            })
+            .collect();
+
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.into_iter().map(|(_, cmd)| cmd.clone()).collect()
+    }
 }

@@ -14,3 +14,4 @@ ratatui.workspace = true
 crossterm.workspace = true
 tokio.workspace = true
 gantry-core = { path = "../gantry-core" }
+nucleo-matcher = "0.3.1"
