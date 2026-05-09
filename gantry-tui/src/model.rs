@@ -331,10 +331,6 @@ pub enum ChatMessage {
         name: String,
         done: bool,
     },
-    ToolResult {
-        tool_name: String,
-        content: String,
-    },
 }
 
 impl ChatMessage {
@@ -357,7 +353,6 @@ impl ChatMessage {
 
 pub struct ChatModel {
     pub messages: Vec<ChatMessage>,
-    pub pending_message_id: Option<String>,
     pub streaming_content: Option<String>,
     pub streaming_message_idx: Option<usize>,
     pub streaming_buffer: String,
@@ -608,6 +603,18 @@ impl Model {
     }
 }
 
+/// Returns the byte offset of the character boundary immediately before `cursor` in `s`.
+pub fn prev_char_boundary(s: &str, cursor: usize) -> usize {
+    let mut pos = cursor;
+    while pos > 0 {
+        pos -= 1;
+        if s.is_char_boundary(pos) {
+            return pos;
+        }
+    }
+    0
+}
+
 /// Flattens a `Branch` tree into a DFS-ordered list of `(branch, depth)` pairs for row-indexed access.
 pub fn branch_rows(branch: &Branch, depth: usize) -> Vec<(&Branch, usize)> {
     let mut rows = vec![(branch, depth)];
@@ -621,7 +628,6 @@ impl ChatModel {
     pub fn new() -> Self {
         Self {
             messages: Vec::new(),
-            pending_message_id: None,
             streaming_content: None,
             streaming_message_idx: None,
             streaming_buffer: String::new(),
@@ -724,7 +730,6 @@ impl ChatModel {
         self.streaming_message_idx = None;
         self.streaming_buffer.clear();
         self.streaming_message_pushed = false;
-        self.pending_message_id = None;
         restored
     }
 
@@ -750,7 +755,6 @@ impl ChatModel {
         self.streaming_message_idx = None;
         self.streaming_buffer.clear();
         self.streaming_message_pushed = false;
-        self.pending_message_id = None;
     }
 
     pub fn reset(&mut self) {
@@ -759,7 +763,6 @@ impl ChatModel {
         self.streaming_message_idx = None;
         self.streaming_buffer.clear();
         self.streaming_message_pushed = false;
-        self.pending_message_id = None;
         self.scroll_offset = 0;
         self.user_is_scrolling = false;
     }
@@ -804,14 +807,7 @@ impl InputModel {
     }
 
     fn prev_char_boundary(&self) -> usize {
-        let mut pos = self.cursor;
-        while pos > 0 {
-            pos -= 1;
-            if self.value.is_char_boundary(pos) {
-                return pos;
-            }
-        }
-        0
+        prev_char_boundary(&self.value, self.cursor)
     }
 }
 

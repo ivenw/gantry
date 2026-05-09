@@ -3,7 +3,7 @@ use gantry_core::{ChatStreamItem, MultiTurnStreamItem, StreamedAssistantContent,
 
 
 use crate::message::Msg;
-use crate::model::{CommandEntry, CopilotAuthKind, InputMode, Model, ProviderWizard, ProvidersSubView, WizardProviderKind, branch_rows};
+use crate::model::{CommandEntry, CopilotAuthKind, InputMode, Model, ProviderWizard, ProvidersSubView, WizardProviderKind, branch_rows, prev_char_boundary};
 use gantry_core::SessionId;
 use crate::views::ViewState;
 
@@ -25,8 +25,7 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             model.chat.finish_tool_call(&id);
             None
         }
-        Msg::StreamResult(Ok(())) => None,
-        Msg::StreamResult(Err(e)) => {
+        Msg::StreamError(e) => {
             if let Some(text) = model.chat.cancel_streaming() {
                 model.input.value = text;
                 model.input.cursor = model.input.value.chars().count();
@@ -77,10 +76,6 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             model.deactivate_tree_view();
             None
         }
-        Msg::ModelSelectionChanged(selection) => {
-            model.selection = selection;
-            None
-        }
         Msg::UsageUpdated(usage) => {
             model.last_usage = Some(usage);
             None
@@ -97,12 +92,7 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
         }
         // SelectModel is handled in Runtime before update() is called.
         Msg::SelectModel(_) => None,
-        Msg::Quit
-        | Msg::SendMessage(_)
-        | Msg::InterruptStream
-        | Msg::ExecuteCommand(_)
-        | Msg::BranchTo(_)
-        | Msg::BranchToWithInput { .. } => None,
+        Msg::Quit | Msg::SendMessage(_) | Msg::InterruptStream | Msg::ExecuteCommand(_) | Msg::BranchTo(_) | Msg::BranchToWithInput { .. } => None,
     }
 }
 
@@ -401,17 +391,6 @@ fn handle_key_wizard(model: &mut Model, key: crossterm::event::KeyEvent) -> Opti
     None
 }
 
-fn prev_char_boundary(s: &str, cursor: usize) -> usize {
-    let mut pos = cursor;
-    while pos > 0 {
-        pos -= 1;
-        if s.is_char_boundary(pos) {
-            return pos;
-        }
-    }
-    0
-}
-
 fn handle_key_sessions_view(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
     match key.code {
         KeyCode::Esc => {
@@ -548,7 +527,7 @@ fn handle_key_insert(
     match key.code {
         KeyCode::Esc => {
             model.mode = InputMode::Normal;
-            if model.chat.pending_message_id.is_some() {
+            if model.is_streaming() {
                 return Some(Msg::InterruptStream);
             }
             None

@@ -11,7 +11,6 @@ use ratatui::{
 const USER_PREFIX: &str = ">> ";
 const ASSISTANT_PREFIX: &str = "<< ";
 const TOOL_CALL_PREFIX: &str = ".. ";
-const TOOL_RESULT_PREFIX: &str = "~~ ";
 
 
 pub struct ChatView<'a> {
@@ -75,9 +74,6 @@ impl StatefulWidget for ChatView<'_> {
                     ChatMessage::Assistant { .. } => ASSISTANT_PREFIX.len(),
                     ChatMessage::ToolCall { name, .. } => {
                         TOOL_CALL_PREFIX.len() + name.len() + 1
-                    }
-                    ChatMessage::ToolResult { tool_name, .. } => {
-                        TOOL_RESULT_PREFIX.len() + tool_name.len() + 2
                     }
                 };
                 let content = msg_content(m);
@@ -173,24 +169,6 @@ impl StatefulWidget for ChatView<'_> {
                         }),
                     );
                 }
-                ChatMessage::ToolResult { tool_name, .. } => {
-                    let prefix = format!("{}{}: ", TOOL_RESULT_PREFIX, tool_name);
-                    let prefix_len = prefix.len() as u16;
-                    let text_width = area.width.saturating_sub(prefix_len);
-                    let text_area =
-                        Rect::new(area.x + prefix_len, screen_y, text_width, visible_lines);
-                    buf.set_string(
-                        area.x,
-                        screen_y,
-                        &prefix,
-                        Style::default().fg(ratatui::style::Color::Yellow),
-                    );
-                    Paragraph::new(Text::raw(content))
-                        .style(Style::default().fg(ratatui::style::Color::DarkGray))
-                        .wrap(ratatui::widgets::Wrap { trim: false })
-                        .scroll((clip_top, 0))
-                        .render(text_area, buf);
-                }
             }
 
             vline += msg_height + gap;
@@ -226,9 +204,7 @@ impl StatefulWidget for ChatView<'_> {
 
 fn msg_content(message: &ChatMessage) -> &str {
     match message {
-        ChatMessage::User { content, .. }
-        | ChatMessage::Assistant { content }
-        | ChatMessage::ToolResult { content, .. } => content,
+        ChatMessage::User { content, .. } | ChatMessage::Assistant { content } => content,
         ChatMessage::ToolCall { .. } => "",
     }
 }

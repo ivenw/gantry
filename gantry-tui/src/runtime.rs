@@ -183,7 +183,7 @@ impl Runtime {
         let task = self.rt.spawn(async move {
             match App::stream_message(app, input).await {
                 Err(e) => {
-                    let _ = tx.send(Msg::StreamResult(Err(e.to_string()))).await;
+                    let _ = tx.send(Msg::StreamError(e.to_string())).await;
                 }
                 Ok((mut stream, mut hook_rx)) => {
                     is_streaming.store(true, Ordering::SeqCst);
@@ -216,7 +216,6 @@ impl Runtime {
                     }
                     is_streaming.store(false, Ordering::SeqCst);
                     let _ = tx.send(Msg::StreamDone).await;
-                    let _ = tx.send(Msg::StreamResult(Ok(()))).await;
                 }
             }
         });

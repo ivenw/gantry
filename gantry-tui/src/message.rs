@@ -12,8 +12,8 @@ pub enum Msg {
     ToolCallStarted { name: String, id: String },
     ToolCallFinished { id: String },
 
-    // Streaming result
-    StreamResult(Result<(), String>),
+    // Streaming error (stream task failed; StreamDone is not sent in this case)
+    StreamError(String),
 
     // Command results
     SetStatus(String),
@@ -36,7 +36,6 @@ pub enum Msg {
     OpenSessionsView(Vec<SessionInfo>, SessionId),
     ResumeSession(SessionId),
 
-    ModelSelectionChanged(Option<ModelSelection>),
     UsageUpdated(Usage),
 
     // Providers overlay
