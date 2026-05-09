@@ -1,5 +1,6 @@
 use crate::effects::throbber::{Throbber, ThrobberStyle};
 use crate::model::InputMode;
+use gantry_core::Usage;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -34,11 +35,23 @@ impl StatuslineViewState {
 pub struct StatuslineView {
     mode: InputMode,
     is_streaming: bool,
+    last_usage: Option<Usage>,
+    context_length: Option<u32>,
 }
 
 impl StatuslineView {
-    pub fn new(mode: InputMode, is_streaming: bool) -> Self {
-        Self { mode, is_streaming }
+    pub fn new(
+        mode: InputMode,
+        is_streaming: bool,
+        last_usage: Option<Usage>,
+        context_length: Option<u32>,
+    ) -> Self {
+        Self {
+            mode,
+            is_streaming,
+            last_usage,
+            context_length,
+        }
     }
 }
 
@@ -46,7 +59,7 @@ impl StatefulWidget for StatuslineView {
     type State = StatuslineViewState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let text = if self.is_streaming {
+        let mode_text = if self.is_streaming {
             format!("[{}] EVALUATING", state.throbber.current())
         } else {
             match self.mode {
@@ -54,6 +67,18 @@ impl StatefulWidget for StatuslineView {
                 InputMode::Insert => "INSERT".to_string(),
             }
         };
+
+        let text = match self.last_usage {
+            Some(usage) => {
+                let tokens_used = usage.input_tokens + usage.output_tokens;
+                match self.context_length {
+                    Some(ctx) => format!("{mode_text}  {tokens_used}/{ctx} ctx"),
+                    None => format!("{mode_text}  {tokens_used} ctx tokens"),
+                }
+            }
+            None => mode_text,
+        };
+
         Paragraph::new(text)
             .style(Style::default().fg(Color::Gray))
             .block(Block::new().padding(Padding::horizontal(2)))

@@ -20,6 +20,7 @@ use crate::resource_loader::discover_agents_md;
 use crate::session::registry::SessionRegistry;
 use crate::session::{NodeId, Session, SessionId, SessionTree};
 use crate::system_prompt::build_system_prompt;
+use rig::completion::Usage;
 
 type FsSession = Session<crate::fs::session_registry::FsSessionHistory>;
 
@@ -34,6 +35,8 @@ pub struct App {
     session: FsSession,
     pub selection: Option<ModelSelection>,
     registry: ProviderClientRegistry,
+    /// Token usage from the most recently completed stream.
+    last_usage: Option<Usage>,
 }
 
 impl App {
@@ -66,6 +69,7 @@ impl App {
             session,
             selection,
             registry,
+            last_usage: None,
         })
     }
 
@@ -120,8 +124,31 @@ impl App {
     }
 
     /// Replaces the active model selection.
-    pub fn set_selection(&mut self, selection: ModelSelection) {
+    ///
+    /// If `selection.context_length` is `None`, attempts to resolve it from the provider config.
+    /// For Ollama providers, the context window is read from `OllamaProviderConfig::context_window`.
+    pub fn set_selection(&mut self, mut selection: ModelSelection) {
+        if selection.context_length.is_none() {
+            selection.context_length = self.resolve_context_length(&selection);
+        }
         self.selection = Some(selection);
+    }
+
+    /// Resolves the context window size for a selection from the provider config.
+    fn resolve_context_length(&self, selection: &ModelSelection) -> Option<u32> {
+        self.registry
+            .providers()
+            .iter()
+            .find(|p| p.alias() == &selection.provider)
+            .and_then(|p| match p {
+                ProviderConfig::Ollama(cfg) => cfg.context_window,
+                _ => None,
+            })
+    }
+
+    /// Returns the token usage from the most recently completed stream, if any.
+    pub fn last_usage(&self) -> Option<&Usage> {
+        self.last_usage.as_ref()
     }
 
     /// Returns all configured providers.
@@ -154,6 +181,7 @@ impl App {
                             selections.push(ModelSelection {
                                 provider: alias.clone(),
                                 model: ModelAlias::new(model.id),
+                                context_length: model.context_length,
                             });
                         }
                     }
@@ -205,6 +233,7 @@ impl App {
         self.set_selection(ModelSelection {
             provider: provider_alias,
             model: model_alias,
+            context_length: None,
         });
         Ok(())
     }
@@ -240,11 +269,13 @@ impl App {
 }
 
 /// Wraps a [`ChatStream`], accumulating streamed text and appending the complete assistant
-/// message to the session once the inner stream is exhausted.
+/// message to the session once the inner stream is exhausted. Also captures token usage from
+/// the [`MultiTurnStreamItem::FinalResponse`] and stores it on the [`App`].
 struct AppendOnExhaust {
     inner: ChatStream,
     app: Arc<Mutex<App>>,
     buffer: String,
+    usage: Option<Usage>,
     done: bool,
 }
 
@@ -254,6 +285,7 @@ impl AppendOnExhaust {
             inner,
             app,
             buffer: String::new(),
+            usage: None,
             done: false,
         }
     }
@@ -270,24 +302,34 @@ impl Stream for AppendOnExhaust {
         match Pin::new(&mut self.inner).poll_next(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Some(item)) => {
-                if let Ok(MultiTurnStreamItem::StreamAssistantItem(
-                    StreamedAssistantContent::Text(ref t),
-                )) = item
-                {
-                    self.buffer.push_str(&t.text);
+                match &item {
+                    Ok(MultiTurnStreamItem::StreamAssistantItem(
+                        StreamedAssistantContent::Text(t),
+                    )) => {
+                        self.buffer.push_str(&t.text);
+                    }
+                    Ok(MultiTurnStreamItem::FinalResponse(f)) => {
+                        self.usage = Some(f.usage());
+                    }
+                    _ => {}
                 }
                 Poll::Ready(Some(item))
             }
             Poll::Ready(None) => {
                 self.done = true;
                 let text = std::mem::take(&mut self.buffer);
-                if !text.is_empty() {
-                    let app = self.app.clone();
-                    // Spawn a detached task so we can persist without blocking the stream poll.
-                    tokio::spawn(async move {
-                        let _ = app.lock().await.append_message(Message::assistant(text));
-                    });
-                }
+                let usage = self.usage.take();
+                let app = self.app.clone();
+                // Spawn a detached task so we can persist without blocking the stream poll.
+                tokio::spawn(async move {
+                    let mut guard = app.lock().await;
+                    if !text.is_empty() {
+                        let _ = guard.append_message(Message::assistant(text));
+                    }
+                    if let Some(u) = usage {
+                        guard.last_usage = Some(u);
+                    }
+                });
                 Poll::Ready(None)
             }
         }

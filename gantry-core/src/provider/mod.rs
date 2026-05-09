@@ -18,6 +18,9 @@ pub enum ToolCallEvent {
 pub struct ModelSelection {
     pub provider: ProviderAlias,
     pub model: ModelAlias,
+    /// Context window size in tokens, if known for this model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_length: Option<u32>,
 }
 
 /// User-defined alias for a provider instance.

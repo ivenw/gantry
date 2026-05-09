@@ -22,6 +22,7 @@ pub use provider::ToolCallEvent;
 pub use provider::registry::ProviderClientRegistry;
 pub use provider::{ModelAlias, ModelSelection, ProviderAlias};
 pub use rig::agent::{MultiTurnStreamItem, StreamingError};
+pub use rig::completion::Usage;
 pub use rig::streaming::StreamedAssistantContent;
 
 pub use fs::FsSessionRegistry;

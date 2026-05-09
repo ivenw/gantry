@@ -204,6 +204,12 @@ impl Runtime {
                         }
                     });
                     while let Some(item) = stream.next().await {
+                        if let Ok(gantry_core::MultiTurnStreamItem::FinalResponse(ref f)) = item {
+                            let usage = f.usage();
+                            if usage.input_tokens > 0 || usage.output_tokens > 0 {
+                                let _ = tx.send(Msg::UsageUpdated(usage)).await;
+                            }
+                        }
                         if tx.send(Msg::StreamItem(item)).await.is_err() {
                             break;
                         }

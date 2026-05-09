@@ -1,4 +1,4 @@
-use gantry_core::{ChatStreamItem, ModelSelection, ProviderAlias, ProviderConfig, SessionId, SessionInfo, SessionTree, StoredCredential, StreamingError};
+use gantry_core::{ChatStreamItem, ModelSelection, ProviderAlias, ProviderConfig, SessionId, SessionInfo, SessionTree, StoredCredential, StreamingError, Usage};
 
 use crate::model::ChatMessage;
 
@@ -37,6 +37,7 @@ pub enum Msg {
     ResumeSession(SessionId),
 
     ModelSelectionChanged(Option<ModelSelection>),
+    UsageUpdated(Usage),
 
     // Providers overlay
     OpenProvidersView(Vec<ProviderConfig>),

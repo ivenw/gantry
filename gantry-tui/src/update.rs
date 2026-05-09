@@ -81,6 +81,10 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             model.selection = selection;
             None
         }
+        Msg::UsageUpdated(usage) => {
+            model.last_usage = Some(usage);
+            None
+        }
         Msg::OpenProvidersView(providers) => {
             model.activate_providers_view(providers);
             None

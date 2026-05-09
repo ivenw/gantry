@@ -194,6 +194,8 @@ async fn fetch_copilot_models(credential: &Credential) -> Result<ModelList> {
         name: Option<String>,
         #[serde(default)]
         capabilities: Option<ModelCapabilities>,
+        #[serde(default)]
+        limits: Option<ModelLimits>,
     }
 
     #[derive(serde::Deserialize)]
@@ -206,6 +208,12 @@ async fn fetch_copilot_models(credential: &Credential) -> Result<ModelList> {
     struct ModelSupports {
         #[serde(default)]
         tool_calls: Option<bool>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct ModelLimits {
+        #[serde(default)]
+        max_context_window_tokens: Option<u32>,
     }
 
     let http = reqwest::Client::new();
@@ -264,9 +272,14 @@ async fn fetch_copilot_models(credential: &Credential) -> Result<ModelList> {
                     .and_then(|s| s.tool_calls)
                     .unwrap_or(false)
             })
-            .map(|m| match m.name {
-                Some(name) => rig::model::Model::new(m.id, name),
-                None => rig::model::Model::from_id(m.id),
+            .map(|m| {
+                let context_length = m.limits.and_then(|l| l.max_context_window_tokens);
+                let mut model = match m.name {
+                    Some(name) => rig::model::Model::new(m.id, name),
+                    None => rig::model::Model::from_id(m.id),
+                };
+                model.context_length = context_length;
+                model
             })
             .collect(),
     ))

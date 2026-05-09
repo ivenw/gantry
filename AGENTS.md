@@ -19,3 +19,6 @@
   ```
 
 - ALWAYS confirm with the user before supressing any lint instead of fixing it.
+- Prefer to import import a type at the top of a module instead of fully qualifying it at the call site/return type.
+- ALWAYS write at least a minimally descriptive docstring of what a function does. A docstrings ALWAYS starts with one short sentence.
+The docstring should be informative to the caller. Implementation details are to be documented inside of the function body.
