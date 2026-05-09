@@ -10,7 +10,7 @@ use crate::config::{
 };
 use crate::provider::ModelAlias;
 use crate::provider::agent::ConfiguredAgent;
-use crate::tools::{EditTool, GrepTool, ReadTool, TreeTool, WriteTool};
+use crate::tools::{BashTool, EditTool, GrepTool, ReadTool, TreeTool, WriteTool};
 
 /// A constructed, ready-to-use provider client that can list models and create agents.
 pub enum ProviderClient {
@@ -97,6 +97,7 @@ impl ProviderClient {
                         .tool(EditTool)
                         .tool(GrepTool)
                         .tool(TreeTool)
+                        .tool(BashTool)
                         .build(),
                 ))
             }
@@ -112,6 +113,7 @@ impl ProviderClient {
                         .tool(EditTool)
                         .tool(GrepTool)
                         .tool(TreeTool)
+                        .tool(BashTool)
                         .build(),
                 ))
             }
@@ -127,6 +129,7 @@ impl ProviderClient {
                         .tool(EditTool)
                         .tool(GrepTool)
                         .tool(TreeTool)
+                        .tool(BashTool)
                         .build(),
                 ))
             }
@@ -142,6 +145,7 @@ impl ProviderClient {
                         .tool(EditTool)
                         .tool(GrepTool)
                         .tool(TreeTool)
+                        .tool(BashTool)
                         .build(),
                 ))
             }

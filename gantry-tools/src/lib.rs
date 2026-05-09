@@ -1,9 +1,11 @@
+pub mod bash;
 pub mod edit;
 pub mod grep;
 pub mod read;
 pub mod tree;
 pub mod write;
 
+pub use bash::{BashError, run_bash};
 pub use edit::{EditError, EditOp, LineRef, edit_file};
 pub use grep::{GrepError, grep_files};
 pub use read::{ReadError, read_file};
