@@ -1,8 +1,13 @@
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use crate::message::Message;
 use anyhow::Result;
+use futures::Stream;
+use rig::agent::{MultiTurnStreamItem, StreamingError};
+use rig::streaming::StreamedAssistantContent;
 use tokio::sync::Mutex;
 
 use crate::config::{ProjectConfig, ProviderConfig};
@@ -204,24 +209,82 @@ impl App {
         Ok(())
     }
 
-    /// Persists `content` as a user message, then returns rig's streaming result for the agent
-    /// response. The caller is responsible for persisting the assistant message after the stream
-    /// completes.
+    /// Persists `content` as a user message, then streams the agent response.
+    ///
+    /// When the returned stream is exhausted the assembled assistant reply is automatically
+    /// appended to the session history. The caller does not need to persist it separately.
     pub async fn stream_message(app: Arc<Mutex<App>>, content: String) -> Result<ChatStream> {
-        let mut app = app.lock().await;
-        app.append_message(Message::user(content))?;
+        let mut guard = app.lock().await;
+        guard.append_message(Message::user(content))?;
         let history: Vec<rig::message::Message> =
-            app.history().into_iter().map(Into::into).collect();
-        let system_prompt = build_system_prompt(&discover_agents_md(&app.project_path));
-        let selection = app
+            guard.history().into_iter().map(Into::into).collect();
+        let system_prompt = build_system_prompt(&discover_agents_md(&guard.project_path));
+        let selection = guard
             .selection
             .clone()
             .ok_or_else(|| anyhow::anyhow!("no active model selection"))?;
-        let agent = app.registry.agent(&selection, Some(&system_prompt))?;
+        let agent = guard.registry.agent(&selection, Some(&system_prompt))?;
         let Some(prompt) = history.last().cloned() else {
             anyhow::bail!("no messages to stream");
         };
         let history = history[..history.len() - 1].to_vec();
-        Ok(agent.stream_chat(prompt, history).await)
+        drop(guard);
+        let inner = agent.stream_chat(prompt, history).await;
+        Ok(Box::pin(AppendOnExhaust::new(inner, app)))
+    }
+}
+
+/// Wraps a [`ChatStream`], accumulating streamed text and appending the complete assistant
+/// message to the session once the inner stream is exhausted.
+struct AppendOnExhaust {
+    inner: ChatStream,
+    app: Arc<Mutex<App>>,
+    buffer: String,
+    done: bool,
+}
+
+impl AppendOnExhaust {
+    fn new(inner: ChatStream, app: Arc<Mutex<App>>) -> Self {
+        Self {
+            inner,
+            app,
+            buffer: String::new(),
+            done: false,
+        }
+    }
+}
+
+impl Stream for AppendOnExhaust {
+    type Item = Result<MultiTurnStreamItem<()>, StreamingError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        if self.done {
+            return Poll::Ready(None);
+        }
+
+        match Pin::new(&mut self.inner).poll_next(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Some(item)) => {
+                if let Ok(MultiTurnStreamItem::StreamAssistantItem(
+                    StreamedAssistantContent::Text(ref t),
+                )) = item
+                {
+                    self.buffer.push_str(&t.text);
+                }
+                Poll::Ready(Some(item))
+            }
+            Poll::Ready(None) => {
+                self.done = true;
+                let text = std::mem::take(&mut self.buffer);
+                if !text.is_empty() {
+                    let app = self.app.clone();
+                    // Spawn a detached task so we can persist without blocking the stream poll.
+                    tokio::spawn(async move {
+                        let _ = app.lock().await.append_message(Message::assistant(text));
+                    });
+                }
+                Poll::Ready(None)
+            }
+        }
     }
 }
