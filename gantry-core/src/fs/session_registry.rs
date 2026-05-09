@@ -117,16 +117,17 @@ pub struct FsSessionRegistry {
 }
 
 impl FsSessionRegistry {
-    /// Initialises the registry, creating the sessions directory under `config_dir` if needed.
-    pub fn new(config_dir: &Path) -> Result<Self> {
-        let sessions_dir = config_dir.join("sessions");
-        std::fs::create_dir_all(&sessions_dir).with_context(|| {
+    /// Initialises the registry, creating `sessions_dir` if needed.
+    pub fn new(sessions_dir: &Path) -> Result<Self> {
+        std::fs::create_dir_all(sessions_dir).with_context(|| {
             format!(
                 "failed to create sessions dir at {}",
                 sessions_dir.display()
             )
         })?;
-        Ok(Self { sessions_dir })
+        Ok(Self {
+            sessions_dir: sessions_dir.to_path_buf(),
+        })
     }
 }
 
@@ -208,8 +209,9 @@ mod tests {
     #[test]
     fn new_creates_sessions_dir() {
         let tmp = TempDir::new().unwrap();
-        FsSessionRegistry::new(tmp.path()).unwrap();
-        assert!(tmp.path().join("sessions").exists());
+        let sessions_dir = tmp.path().join("sessions");
+        FsSessionRegistry::new(&sessions_dir).unwrap();
+        assert!(sessions_dir.exists());
     }
 
     #[test]

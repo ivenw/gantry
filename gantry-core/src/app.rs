@@ -25,6 +25,7 @@ type FsSession = Session<crate::fs::session_registry::FsSessionHistory>;
 pub struct App {
     pub project_path: PathBuf,
     root: ProjectRootDir,
+    sessions_dir: PathBuf,
     session: FsSession,
     pub selection: Option<ModelSelection>,
     registry: ProviderClientRegistry,
@@ -56,6 +57,7 @@ impl App {
         Ok(Self {
             project_path,
             root: project_rood_dir,
+            sessions_dir,
             session,
             selection,
             registry,
@@ -69,8 +71,7 @@ impl App {
 
     /// Creates a new session and makes it active.
     pub fn new_session(&mut self) -> Result<()> {
-        let config_dir = self.root.config_dir();
-        let session_registry = FsSessionRegistry::new(config_dir.path())?;
+        let session_registry = FsSessionRegistry::new(&self.sessions_dir)?;
         self.session = session_registry.create_session()?;
         Ok(())
     }

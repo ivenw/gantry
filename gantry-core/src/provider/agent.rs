@@ -74,7 +74,7 @@ impl ConfiguredAgent {
     pub async fn stream_chat(&self, prompt: Message, history: Vec<Message>) -> ChatStream {
         match &self.inner {
             ConfiguredAgentKind::Ollama(agent) => {
-                into_chat_stream(agent.stream_chat(prompt, history).await)
+                into_chat_stream(agent.stream_chat(prompt, history).multi_turn(5).await)
             }
             ConfiguredAgentKind::Copilot(agent) => {
                 into_chat_stream(agent.stream_chat(prompt, history).await)

@@ -34,15 +34,16 @@ impl Runtime {
         let (msg_tx, msg_rx) = channel::<Msg>(256);
 
         let mut model = Model::new();
-        model.session_id = Some(gantry_core::SessionId::new());
 
-        let (existing_messages, selection) = {
+        let (session_id, existing_messages, selection) = {
             let app = rt.block_on(app.lock());
             (
+                app.session_id().clone(),
                 ChatMessage::messages_from(app.history()),
                 app.selection().cloned(),
             )
         };
+        model.session_id = Some(session_id);
         model.chat.messages = existing_messages;
         model.selection = selection;
 
