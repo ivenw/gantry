@@ -4,13 +4,16 @@ use std::path::PathBuf;
 use gantry_tools::tree::TreeError;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
+use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 
 pub struct TreeTool;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct TreeArgs {
+    /// Path to the directory to list.
     pub path: PathBuf,
+    /// Maximum recursion depth. Omit for unlimited depth.
     pub depth: Option<u32>,
 }
 
@@ -61,20 +64,7 @@ impl Tool for TreeTool {
         ToolDefinition {
             name: Self::NAME.to_string(),
             description: "List a directory tree as a formatted string.".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to the directory to list."
-                    },
-                    "depth": {
-                        "type": "integer",
-                        "description": "Maximum recursion depth. Omit for unlimited depth."
-                    }
-                },
-                "required": ["path"]
-            }),
+            parameters: schema_for!(TreeArgs).into(),
         }
     }
 

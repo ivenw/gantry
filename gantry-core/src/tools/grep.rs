@@ -4,17 +4,23 @@ use std::path::PathBuf;
 use gantry_tools::grep::GrepError;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
+use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 
 pub struct GrepTool;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct GrepArgs {
+    /// Regex pattern to search for.
     pub pattern: String,
+    /// File or directory to search in.
     pub path: PathBuf,
+    /// Whether to match case-insensitively. Defaults to false.
     #[serde(default)]
     pub case_insensitive: bool,
+    /// Optional glob pattern to restrict which files are searched, e.g. `*.rs`.
     pub glob_filter: Option<String>,
+    /// Maximum number of matching lines to return. Defaults to 100.
     pub max_results: Option<usize>,
 }
 
@@ -63,32 +69,7 @@ impl Tool for GrepTool {
                 Results are grouped by file and formatted as 'line_num: content'. \
                 Returns an empty string if no matches are found."
                 .to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "pattern": {
-                        "type": "string",
-                        "description": "Regex pattern to search for."
-                    },
-                    "path": {
-                        "type": "string",
-                        "description": "File or directory to search in."
-                    },
-                    "case_insensitive": {
-                        "type": "boolean",
-                        "description": "Whether to match case-insensitively. Defaults to false."
-                    },
-                    "glob_filter": {
-                        "type": "string",
-                        "description": "Optional glob pattern to restrict which files are searched, e.g. '*.rs'."
-                    },
-                    "max_results": {
-                        "type": "integer",
-                        "description": "Maximum number of matching lines to return. Defaults to 100."
-                    }
-                },
-                "required": ["pattern", "path"]
-            }),
+            parameters: schema_for!(GrepArgs).into(),
         }
     }
 

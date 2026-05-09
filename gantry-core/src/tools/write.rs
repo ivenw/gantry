@@ -4,13 +4,16 @@ use std::path::PathBuf;
 use gantry_tools::write::WriteError;
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
+use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 
 pub struct WriteTool;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct WriteArgs {
+    /// Path of the file to create.
     pub path: PathBuf,
+    /// Content to write. An empty string creates a zero-byte file.
     pub content: String,
 }
 
@@ -61,34 +64,18 @@ impl Tool for WriteTool {
                 Fails if the file already exists — use the edit tool to modify existing files. \
                 Intermediate directories are created automatically."
                 .to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path of the file to create."
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "Content to write. An empty string creates a zero-byte file."
-                    }
-                },
-                "required": ["path", "content"]
-            }),
+            parameters: schema_for!(WriteArgs).into(),
         }
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let path = args.path.clone();
         let byte_count = args.content.len();
+        let path = args.path.clone();
         let content = args.content.clone();
         tokio::task::spawn_blocking(move || gantry_tools::write_file(&path, &content))
             .await
             .expect("write_file task panicked")
             .map_err(WriteToolError::from)?;
-        Ok(format!(
-            "wrote {byte_count} bytes to {}",
-            args.path.display()
-        ))
+        Ok(format!("wrote {byte_count} bytes to {}", args.path.display()))
     }
 }

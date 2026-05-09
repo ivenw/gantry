@@ -5,22 +5,28 @@ use gantry_tools::EditOp;
 use gantry_tools::edit::{EditError, InvalidLineRefReason, StaleLine, StaleLineKind};
 use rig::completion::ToolDefinition;
 use rig::tool::Tool;
+use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 
 pub struct EditTool;
 
-/// DTO for a single edit operation. Line references are passed as strings in
-/// 'N#XX' format and parsed into `gantry_tools::LineRef` inside `call`.
-#[derive(Debug, Deserialize)]
+/// A single edit operation. Line references are passed as strings in `N#XX` format
+/// and parsed into `gantry_tools::LineRef` inside `call`.
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct EditOpDto {
+    /// Start line reference in `N#XX` format (1-indexed line number and 2-char hash).
     pub start: String,
+    /// Optional end line reference. If omitted, the operation inserts after start.
     pub end: Option<String>,
+    /// Replacement content. If omitted with an end ref, the range is deleted.
     pub content: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct EditArgsDto {
+    /// Path to the file to edit.
     pub path: PathBuf,
+    /// List of edit operations to apply.
     pub ops: Vec<EditOpDto>,
 }
 
@@ -111,43 +117,11 @@ impl Tool for EditTool {
                 changes are written. The entire batch is rejected if any reference is stale \
                 or ranges overlap. Use read_file first to obtain current line numbers and hashes."
                 .to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to the file to edit."
-                    },
-                    "ops": {
-                        "type": "array",
-                        "description": "List of edit operations to apply.",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "start": {
-                                    "type": "string",
-                                    "description": "Start line reference in 'N#XX' format (1-indexed line number and 2-char hash)."
-                                },
-                                "end": {
-                                    "type": "string",
-                                    "description": "Optional end line reference. If omitted, the operation inserts after start."
-                                },
-                                "content": {
-                                    "type": "string",
-                                    "description": "Replacement content. If omitted with an end ref, the range is deleted."
-                                }
-                            },
-                            "required": ["start"]
-                        }
-                    }
-                },
-                "required": ["path", "ops"]
-            }),
+            parameters: schema_for!(EditArgsDto).into(),
         }
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let path = args.path.clone();
         let ops: Result<Vec<EditOp>, EditError> = args
             .ops
             .into_iter()
@@ -161,11 +135,11 @@ impl Tool for EditTool {
             .collect();
         let ops = ops.map_err(EditToolError::from)?;
         let op_count = ops.len();
-        let path_clone = path.clone();
-        tokio::task::spawn_blocking(move || gantry_tools::edit_file(&path_clone, ops))
+        let path = args.path.clone();
+        tokio::task::spawn_blocking(move || gantry_tools::edit_file(&path, ops))
             .await
             .expect("edit_file task panicked")
             .map_err(EditToolError::from)?;
-        Ok(format!("applied {op_count} edit(s) to {}", path.display()))
+        Ok(format!("applied {op_count} edit(s) to {}", args.path.display()))
     }
 }

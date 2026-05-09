@@ -62,6 +62,11 @@ impl Tool for BashTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        Ok(gantry_tools::run_bash(&args.command, args.timeout_ms)?)
+        let command = args.command.clone();
+        Ok(tokio::task::spawn_blocking(move || {
+            gantry_tools::run_bash(&command, args.timeout_ms)
+        })
+        .await
+        .expect("bash task panicked")?)
     }
 }
