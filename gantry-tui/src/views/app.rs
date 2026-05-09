@@ -61,6 +61,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
     let chat = ChatView {
         messages: &model.chat.messages,
         scroll_offset: model.chat.scroll_offset,
+        spinner: view_state.statusline.spinner(),
     };
     frame.render_stateful_widget(chat, chat_area, &mut view_state.chat);
 

@@ -323,6 +323,11 @@ pub enum ChatMessage {
     Assistant {
         content: String,
     },
+    ToolCall {
+        id: String,
+        name: String,
+        done: bool,
+    },
     ToolResult {
         tool_name: String,
         content: String,
@@ -619,6 +624,23 @@ impl ChatModel {
             streaming_message_pushed: false,
             scroll_offset: 0,
             user_is_scrolling: false,
+        }
+    }
+
+    /// Inserts a tool call row with `done: false`. Returns the message index for later lookup.
+    pub fn push_tool_call(&mut self, id: String, name: String) {
+        self.messages.push(ChatMessage::ToolCall { id, name, done: false });
+    }
+
+    /// Marks the tool call with `id` as done.
+    pub fn finish_tool_call(&mut self, id: &str) {
+        for msg in &mut self.messages {
+            if let ChatMessage::ToolCall { id: msg_id, done, .. } = msg
+                && msg_id == id
+            {
+                *done = true;
+                break;
+            }
         }
     }
 

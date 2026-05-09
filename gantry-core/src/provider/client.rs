@@ -9,7 +9,8 @@ use crate::config::{
     OpenAiResponsesProviderConfig,
 };
 use crate::provider::ModelAlias;
-use crate::provider::agent::ConfiguredAgent;
+use crate::provider::ToolCallEvent;
+use crate::provider::agent::{BoxedAgent, ToolCallHook};
 use crate::tools::{BashTool, EditTool, GrepTool, ReadTool, TreeTool, WriteTool};
 
 /// A constructed, ready-to-use provider client that can list models and create agents.
@@ -82,15 +83,21 @@ impl ProviderClient {
         }
     }
 
-    /// Builds a [`ConfiguredAgent`] for the given model alias and optional preamble.
-    pub fn agent(&self, model: &ModelAlias, preamble: Option<&str>) -> Result<ConfiguredAgent> {
+    /// Builds a [`BoxedAgent`] for the given model alias, optional preamble, and hook sender.
+    pub fn agent(
+        &self,
+        model: &ModelAlias,
+        preamble: Option<&str>,
+        hook_tx: tokio::sync::mpsc::UnboundedSender<ToolCallEvent>,
+    ) -> Result<BoxedAgent> {
+        let hook = ToolCallHook::new(hook_tx);
         match self {
             ProviderClient::Ollama(client) => {
-                let mut builder = client.agent(model.as_str());
+                let mut builder = client.agent(model.as_str()).hook(hook);
                 if let Some(p) = preamble {
                     builder = builder.preamble(p);
                 }
-                Ok(ConfiguredAgent::ollama(
+                Ok(Box::new(
                     builder
                         .tool(ReadTool)
                         .tool(WriteTool)
@@ -102,11 +109,11 @@ impl ProviderClient {
                 ))
             }
             ProviderClient::GitHubCopilot { client, .. } => {
-                let mut builder = client.agent(model.as_str());
+                let mut builder = client.agent(model.as_str()).hook(hook);
                 if let Some(p) = preamble {
                     builder = builder.preamble(p);
                 }
-                Ok(ConfiguredAgent::copilot(
+                Ok(Box::new(
                     builder
                         .tool(ReadTool)
                         .tool(WriteTool)
@@ -118,11 +125,11 @@ impl ProviderClient {
                 ))
             }
             ProviderClient::OpenAiCompletions(client) => {
-                let mut builder = client.agent(model.as_str());
+                let mut builder = client.agent(model.as_str()).hook(hook);
                 if let Some(p) = preamble {
                     builder = builder.preamble(p);
                 }
-                Ok(ConfiguredAgent::openai_completions(
+                Ok(Box::new(
                     builder
                         .tool(ReadTool)
                         .tool(WriteTool)
@@ -134,11 +141,11 @@ impl ProviderClient {
                 ))
             }
             ProviderClient::OpenAiResponses(client) => {
-                let mut builder = client.agent(model.as_str());
+                let mut builder = client.agent(model.as_str()).hook(hook);
                 if let Some(p) = preamble {
                     builder = builder.preamble(p);
                 }
-                Ok(ConfiguredAgent::openai_responses(
+                Ok(Box::new(
                     builder
                         .tool(ReadTool)
                         .tool(WriteTool)

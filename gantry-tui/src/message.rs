@@ -9,6 +9,8 @@ pub enum Msg {
     // Stream events from the agent
     StreamItem(Result<ChatStreamItem, StreamingError>),
     StreamDone,
+    ToolCallStarted { name: String, id: String },
+    ToolCallFinished { id: String },
 
     // Streaming result
     StreamResult(Result<(), String>),

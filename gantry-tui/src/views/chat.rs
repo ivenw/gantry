@@ -10,11 +10,15 @@ use ratatui::{
 
 const USER_PREFIX: &str = ">> ";
 const ASSISTANT_PREFIX: &str = "<< ";
+const TOOL_CALL_PREFIX: &str = ".. ";
 const TOOL_RESULT_PREFIX: &str = "~~ ";
+
 
 pub struct ChatView<'a> {
     pub messages: &'a [ChatMessage],
     pub scroll_offset: u16,
+    /// Current spinner character, shared with the statusline throbber.
+    pub spinner: char,
 }
 
 #[derive(Default)]
@@ -69,6 +73,9 @@ impl StatefulWidget for ChatView<'_> {
                             + sender.as_ref().map(|s| s.as_str().len() + 2).unwrap_or(0)
                     }
                     ChatMessage::Assistant { .. } => ASSISTANT_PREFIX.len(),
+                    ChatMessage::ToolCall { name, .. } => {
+                        TOOL_CALL_PREFIX.len() + name.len() + 1
+                    }
                     ChatMessage::ToolResult { tool_name, .. } => {
                         TOOL_RESULT_PREFIX.len() + tool_name.len() + 2
                     }
@@ -152,6 +159,20 @@ impl StatefulWidget for ChatView<'_> {
                         .scroll((clip_top, 0))
                         .render(text_area, buf);
                 }
+                ChatMessage::ToolCall { name, done, .. } => {
+                    let indicator = if *done { "✓" } else { &self.spinner.to_string() };
+                    let line = format!("{}{} {}", TOOL_CALL_PREFIX, indicator, name);
+                    buf.set_string(
+                        area.x,
+                        screen_y,
+                        &line,
+                        Style::default().fg(if *done {
+                            ratatui::style::Color::DarkGray
+                        } else {
+                            ratatui::style::Color::Cyan
+                        }),
+                    );
+                }
                 ChatMessage::ToolResult { tool_name, .. } => {
                     let prefix = format!("{}{}: ", TOOL_RESULT_PREFIX, tool_name);
                     let prefix_len = prefix.len() as u16;
@@ -208,5 +229,6 @@ fn msg_content(message: &ChatMessage) -> &str {
         ChatMessage::User { content, .. }
         | ChatMessage::Assistant { content }
         | ChatMessage::ToolResult { content, .. } => content,
+        ChatMessage::ToolCall { .. } => "",
     }
 }

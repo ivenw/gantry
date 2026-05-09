@@ -185,8 +185,24 @@ impl Runtime {
                 Err(e) => {
                     let _ = tx.send(Msg::StreamResult(Err(e.to_string()))).await;
                 }
-                Ok(mut stream) => {
+                Ok((mut stream, mut hook_rx)) => {
                     is_streaming.store(true, Ordering::SeqCst);
+                    let hook_tx = tx.clone();
+                    tokio::spawn(async move {
+                        while let Some(event) = hook_rx.recv().await {
+                            let msg = match event {
+                                gantry_core::ToolCallEvent::Started { name, id } => {
+                                    Msg::ToolCallStarted { name, id }
+                                }
+                                gantry_core::ToolCallEvent::Finished { id } => {
+                                    Msg::ToolCallFinished { id }
+                                }
+                            };
+                            if hook_tx.send(msg).await.is_err() {
+                                break;
+                            }
+                        }
+                    });
                     while let Some(item) = stream.next().await {
                         if tx.send(Msg::StreamItem(item)).await.is_err() {
                             break;

@@ -1,11 +1,16 @@
+use std::future::Future;
+use std::pin::Pin;
+
 use anyhow::Result;
 use futures::{Stream, StreamExt};
-use rig::agent::{Agent, MultiTurnStreamItem, StreamingError, StreamingResult};
-use rig::completion::Chat;
+use rig::agent::{MultiTurnStreamItem, StreamingError, StreamingResult};
+use rig::completion::CompletionModel;
 use rig::message::Message;
-use rig::providers::{copilot, ollama, openai};
-use rig::streaming::{StreamedAssistantContent, StreamingChat};
-use std::pin::Pin;
+use rig::streaming::StreamedAssistantContent;
+use rig::wasm_compat::WasmCompatSend;
+use tokio::sync::mpsc::UnboundedSender;
+
+use crate::provider::ToolCallEvent;
 
 /// A pinned, boxed, provider-agnostic stream of [`ChatStreamItem`]s.
 pub type ChatStream = Pin<Box<dyn Stream<Item = Result<ChatStreamItem, StreamingError>> + Send>>;
@@ -15,82 +20,86 @@ pub type ChatStream = Pin<Box<dyn Stream<Item = Result<ChatStreamItem, Streaming
 /// [`MultiTurnStreamItem::FinalResponse`].
 pub type ChatStreamItem = MultiTurnStreamItem<()>;
 
-/// A provider-agnostic handle to a configured, ready-to-use agent.
-pub struct ConfiguredAgent {
-    inner: ConfiguredAgentKind,
-}
-
-enum ConfiguredAgentKind {
-    Ollama(Agent<ollama::CompletionModel>),
-    Copilot(Agent<copilot::CompletionModel>),
-    OpenAiCompletions(Agent<openai::completion::CompletionModel>),
-    OpenAiResponses(Agent<openai::responses_api::ResponsesCompletionModel>),
-}
-
-impl ConfiguredAgent {
-    /// Wraps an Ollama agent.
-    pub(super) fn ollama(agent: Agent<ollama::CompletionModel>) -> Self {
-        Self {
-            inner: ConfiguredAgentKind::Ollama(agent),
-        }
-    }
-
-    /// Wraps a GitHub Copilot agent.
-    pub(super) fn copilot(agent: Agent<copilot::CompletionModel>) -> Self {
-        Self {
-            inner: ConfiguredAgentKind::Copilot(agent),
-        }
-    }
-
-    /// Wraps an OpenAI-compatible completions API agent.
-    pub(super) fn openai_completions(agent: Agent<openai::completion::CompletionModel>) -> Self {
-        Self {
-            inner: ConfiguredAgentKind::OpenAiCompletions(agent),
-        }
-    }
-
-    /// Wraps an OpenAI-compatible responses API agent.
-    pub(super) fn openai_responses(
-        agent: Agent<openai::responses_api::ResponsesCompletionModel>,
-    ) -> Self {
-        Self {
-            inner: ConfiguredAgentKind::OpenAiResponses(agent),
-        }
-    }
-
-    /// Sends a single-turn chat and returns the assistant's response text.
-    pub async fn chat(&self, prompt: Message, history: Vec<Message>) -> Result<String> {
-        match &self.inner {
-            ConfiguredAgentKind::Ollama(agent) => Ok(agent.chat(prompt, history).await?),
-            ConfiguredAgentKind::Copilot(agent) => Ok(agent.chat(prompt, history).await?),
-            ConfiguredAgentKind::OpenAiCompletions(agent) => {
-                Ok(agent.chat(prompt, history).await?)
-            }
-            ConfiguredAgentKind::OpenAiResponses(agent) => Ok(agent.chat(prompt, history).await?),
-        }
-    }
-
+/// Object-safe interface over a fully-configured rig agent.
+///
+/// Abstracts over the concrete model and hook types so callers hold a `BoxedAgent` without
+/// carrying any provider-specific generics.
+pub trait AgentT: Send + Sync {
     /// Streams a multi-turn chat, returning a provider-agnostic [`ChatStream`].
-    pub async fn stream_chat(&self, prompt: Message, history: Vec<Message>) -> ChatStream {
-        match &self.inner {
-            ConfiguredAgentKind::Ollama(agent) => {
-                into_chat_stream(agent.stream_chat(prompt, history).multi_turn(5).await)
-            }
-            ConfiguredAgentKind::Copilot(agent) => {
-                into_chat_stream(agent.stream_chat(prompt, history).await)
-            }
-            ConfiguredAgentKind::OpenAiCompletions(agent) => {
-                into_chat_stream(agent.stream_chat(prompt, history).await)
-            }
-            ConfiguredAgentKind::OpenAiResponses(agent) => {
-                into_chat_stream(agent.stream_chat(prompt, history).await)
-            }
-        }
+    fn stream_chat(
+        &self,
+        prompt: Message,
+        history: Vec<Message>,
+    ) -> Pin<Box<dyn Future<Output = ChatStream> + Send + '_>>;
+}
+
+/// A heap-allocated, type-erased agent.
+pub type BoxedAgent = Box<dyn AgentT>;
+
+impl<M, P> AgentT for rig::agent::Agent<M, P>
+where
+    M: CompletionModel + Send + Sync + 'static,
+    M::StreamingResponse: WasmCompatSend,
+    P: rig::agent::PromptHook<M> + Send + Sync + 'static,
+{
+    fn stream_chat(
+        &self,
+        prompt: Message,
+        history: Vec<Message>,
+    ) -> Pin<Box<dyn Future<Output = ChatStream> + Send + '_>> {
+        Box::pin(async move {
+            let stream: StreamingResult<M::StreamingResponse> =
+                rig::streaming::StreamingChat::stream_chat(self, prompt, history).await;
+            into_chat_stream(stream)
+        })
+    }
+}
+
+/// A [`PromptHook`] that forwards tool call lifecycle events over a channel.
+#[derive(Clone)]
+pub struct ToolCallHook {
+    tx: UnboundedSender<ToolCallEvent>,
+}
+
+impl ToolCallHook {
+    /// Creates a new hook that sends events on `tx`.
+    pub fn new(tx: UnboundedSender<ToolCallEvent>) -> Self {
+        Self { tx }
+    }
+}
+
+impl<M: CompletionModel> rig::agent::PromptHook<M> for ToolCallHook {
+    fn on_tool_call(
+        &self,
+        tool_name: &str,
+        _tool_call_id: Option<String>,
+        internal_call_id: &str,
+        _args: &str,
+    ) -> impl Future<Output = rig::agent::ToolCallHookAction> + WasmCompatSend {
+        let _ = self.tx.send(ToolCallEvent::Started {
+            name: tool_name.to_string(),
+            id: internal_call_id.to_string(),
+        });
+        async { rig::agent::ToolCallHookAction::cont() }
+    }
+
+    fn on_tool_result(
+        &self,
+        _tool_name: &str,
+        _tool_call_id: Option<String>,
+        internal_call_id: &str,
+        _args: &str,
+        _result: &str,
+    ) -> impl Future<Output = rig::agent::HookAction> + WasmCompatSend {
+        let _ = self.tx.send(ToolCallEvent::Finished {
+            id: internal_call_id.to_string(),
+        });
+        async { rig::agent::HookAction::cont() }
     }
 }
 
 /// Wraps a [`StreamingResult`] into a [`ChatStream`] by erasing provider-specific payloads.
-fn into_chat_stream<R: 'static>(stream: StreamingResult<R>) -> ChatStream {
+pub(super) fn into_chat_stream<R: 'static>(stream: StreamingResult<R>) -> ChatStream {
     Box::pin(
         stream.map(|item: Result<MultiTurnStreamItem<R>, StreamingError>| item.map(erase_final)),
     )

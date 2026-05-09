@@ -17,6 +17,14 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             }
             None
         }
+        Msg::ToolCallStarted { name, id } => {
+            model.chat.push_tool_call(id, name);
+            None
+        }
+        Msg::ToolCallFinished { id } => {
+            model.chat.finish_tool_call(&id);
+            None
+        }
         Msg::StreamResult(Ok(())) => None,
         Msg::StreamResult(Err(e)) => {
             if let Some(text) = model.chat.cancel_streaming() {

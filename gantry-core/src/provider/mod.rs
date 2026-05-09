@@ -4,6 +4,15 @@ pub mod registry;
 
 use serde::{Deserialize, Serialize};
 
+/// An event emitted by [`agent::ToolCallHook`] during tool execution.
+#[derive(Debug, Clone)]
+pub enum ToolCallEvent {
+    /// Fired immediately before a tool is executed.
+    Started { name: String, id: String },
+    /// Fired immediately after a tool returns its result.
+    Finished { id: String },
+}
+
 /// A resolved provider and model pair used to select a specific model for inference.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelSelection {

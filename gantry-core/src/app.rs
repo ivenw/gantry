@@ -15,7 +15,7 @@ use crate::dirs::{GlobalConfigDir, ProjectRootDir};
 use crate::fs::FsSessionRegistry;
 use crate::provider::agent::ChatStream;
 use crate::provider::registry::ProviderClientRegistry;
-use crate::provider::{ModelAlias, ModelSelection};
+use crate::provider::{ModelAlias, ModelSelection, ToolCallEvent};
 use crate::resource_loader::discover_agents_md;
 use crate::session::registry::SessionRegistry;
 use crate::session::{NodeId, Session, SessionId, SessionTree};
@@ -211,9 +211,14 @@ impl App {
 
     /// Persists `content` as a user message, then streams the agent response.
     ///
-    /// When the returned stream is exhausted the assembled assistant reply is automatically
-    /// appended to the session history. The caller does not need to persist it separately.
-    pub async fn stream_message(app: Arc<Mutex<App>>, content: String) -> Result<ChatStream> {
+    /// Returns the chat stream and a receiver for tool call lifecycle events. When the stream
+    /// is exhausted the assembled assistant reply is automatically appended to the session
+    /// history. The caller does not need to persist it separately.
+    pub async fn stream_message(
+        app: Arc<Mutex<App>>,
+        content: String,
+    ) -> Result<(ChatStream, tokio::sync::mpsc::UnboundedReceiver<ToolCallEvent>)> {
+        let (hook_tx, hook_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut guard = app.lock().await;
         guard.append_message(Message::user(content))?;
         let history: Vec<rig::message::Message> =
@@ -223,14 +228,14 @@ impl App {
             .selection
             .clone()
             .ok_or_else(|| anyhow::anyhow!("no active model selection"))?;
-        let agent = guard.registry.agent(&selection, Some(&system_prompt))?;
+        let agent = guard.registry.agent(&selection, Some(&system_prompt), hook_tx)?;
         let Some(prompt) = history.last().cloned() else {
             anyhow::bail!("no messages to stream");
         };
         let history = history[..history.len() - 1].to_vec();
         drop(guard);
         let inner = agent.stream_chat(prompt, history).await;
-        Ok(Box::pin(AppendOnExhaust::new(inner, app)))
+        Ok((Box::pin(AppendOnExhaust::new(inner, app)), hook_rx))
     }
 }
 

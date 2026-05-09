@@ -24,6 +24,11 @@ impl StatuslineViewState {
     pub fn tick(&mut self) {
         self.throbber.next();
     }
+
+    /// Returns the current spinner frame character.
+    pub fn spinner(&self) -> char {
+        self.throbber.current()
+    }
 }
 
 pub struct StatuslineView {

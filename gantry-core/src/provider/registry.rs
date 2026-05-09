@@ -5,7 +5,8 @@ use anyhow::Result;
 use crate::config::{
     ApiKeyCredential, Credential, CredentialsRepository, ProviderConfig, ProviderConfigRepository,
 };
-use crate::provider::agent::ConfiguredAgent;
+use crate::provider::ToolCallEvent;
+use crate::provider::agent::BoxedAgent;
 use crate::provider::client::ProviderClient;
 use crate::provider::{ModelSelection, ProviderAlias};
 
@@ -48,14 +49,15 @@ impl ProviderClientRegistry {
         Ok(self.cache.get(alias).expect("just inserted"))
     }
 
-    /// Builds a [`ConfiguredAgent`] for the given model selection and optional preamble.
+    /// Builds a [`BoxedAgent`] for the given model selection, optional preamble, and hook sender.
     pub fn agent(
         &mut self,
         selection: &ModelSelection,
         preamble: Option<&str>,
-    ) -> Result<ConfiguredAgent> {
+        hook_tx: tokio::sync::mpsc::UnboundedSender<ToolCallEvent>,
+    ) -> Result<BoxedAgent> {
         self.client(&selection.provider)?
-            .agent(&selection.model, preamble)
+            .agent(&selection.model, preamble, hook_tx)
     }
 
     /// Constructs a fresh [`ProviderClient`] for the given alias.
