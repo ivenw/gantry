@@ -7,6 +7,7 @@ use crate::views::status_message::StatusMessageView;
 use crate::views::statusline::StatuslineView;
 use crate::views::model_picker::ModelPickerViewWidget;
 use crate::views::providers::ProvidersViewWidget;
+use crate::views::sessions::SessionsViewWidget;
 use crate::views::tree::TreeViewWidget;
 
 use ratatui::{
@@ -16,6 +17,11 @@ use ratatui::{
 
 pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) {
     let area = frame.area();
+
+    if let Some(ref sv) = model.sessions_view {
+        frame.render_widget(SessionsViewWidget::new(sv), area);
+        return;
+    }
 
     if let Some(ref tv) = model.tree_view {
         frame.render_widget(TreeViewWidget::new(tv), area);

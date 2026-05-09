@@ -1,4 +1,4 @@
-use gantry_core::{ChatStreamItem, ModelSelection, ProviderAlias, ProviderConfig, SessionTree, StoredCredential, StreamingError};
+use gantry_core::{ChatStreamItem, ModelSelection, ProviderAlias, ProviderConfig, SessionId, SessionInfo, SessionTree, StoredCredential, StreamingError};
 
 use crate::model::ChatMessage;
 
@@ -29,6 +29,10 @@ pub enum Msg {
     },
     ReloadMessages(Vec<ChatMessage>),
     ReloadMessagesWithInput(Vec<ChatMessage>, String),
+
+    // Sessions browser
+    OpenSessionsView(Vec<SessionInfo>, SessionId),
+    ResumeSession(SessionId),
 
     ModelSelectionChanged(Option<ModelSelection>),
 

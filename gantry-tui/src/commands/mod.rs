@@ -2,6 +2,7 @@ pub mod model;
 pub mod new;
 pub mod providers;
 pub mod quit;
+pub mod sessions;
 pub mod tree;
 
 use crate::message::Msg;
@@ -28,6 +29,7 @@ pub enum KnownCommand {
     New,
     Providers,
     Quit,
+    Sessions,
     Tree,
 }
 
@@ -37,6 +39,7 @@ impl KnownCommand {
         KnownCommand::New,
         KnownCommand::Providers,
         KnownCommand::Quit,
+        KnownCommand::Sessions,
         KnownCommand::Tree,
     ];
 
@@ -46,6 +49,7 @@ impl KnownCommand {
             KnownCommand::New => "new",
             KnownCommand::Providers => "providers",
             KnownCommand::Quit => "quit",
+            KnownCommand::Sessions => "sessions",
             KnownCommand::Tree => "tree",
         }
     }
@@ -56,6 +60,7 @@ impl KnownCommand {
             KnownCommand::New => "Start a new session",
             KnownCommand::Providers => "Manage configured providers",
             KnownCommand::Quit => "Quit the application",
+            KnownCommand::Sessions => "Browse and resume sessions",
             KnownCommand::Tree => "Browse the message tree",
         }
     }
@@ -67,6 +72,7 @@ impl KnownCommand {
             KnownCommand::New => Box::new(new::New),
             KnownCommand::Providers => Box::new(providers::Providers),
             KnownCommand::Quit => Box::new(quit::Quit),
+            KnownCommand::Sessions => Box::new(sessions::Sessions),
             KnownCommand::Tree => Box::new(tree::Tree),
         }
     }

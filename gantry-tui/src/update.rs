@@ -4,6 +4,7 @@ use gantry_core::{ChatStreamItem, MultiTurnStreamItem, StreamedAssistantContent,
 
 use crate::message::Msg;
 use crate::model::{CommandEntry, CopilotAuthKind, InputMode, Model, ProviderWizard, ProvidersSubView, WizardProviderKind, branch_rows};
+use gantry_core::SessionId;
 use crate::views::ViewState;
 
 pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg> {
@@ -42,6 +43,12 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
             None
         }
+        Msg::OpenSessionsView(sessions, active_id) => {
+            model.activate_sessions_view(sessions, active_id);
+            None
+        }
+        // ResumeSession is handled in Runtime before update() is called.
+        Msg::ResumeSession(_) => None,
         Msg::OpenTreeView(nodes) => {
             model.activate_tree_view(nodes);
             None
@@ -118,6 +125,10 @@ fn handle_key(
 
     if model.is_providers_view_active() {
         return handle_key_providers_view(model, key);
+    }
+
+    if model.is_sessions_view_active() {
+        return handle_key_sessions_view(model, key);
     }
 
     if model.is_tree_view_active() {
@@ -387,6 +398,31 @@ fn prev_char_boundary(s: &str, cursor: usize) -> usize {
         }
     }
     0
+}
+
+fn handle_key_sessions_view(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
+    match key.code {
+        KeyCode::Esc => {
+            model.deactivate_sessions_view();
+            None
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            model.move_sessions_selection_up();
+            None
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            model.move_sessions_selection_down();
+            None
+        }
+        KeyCode::Enter => {
+            let session_id: Option<SessionId> = model
+                .selected_session()
+                .map(|s| s.id.clone());
+            model.deactivate_sessions_view();
+            session_id.map(Msg::ResumeSession)
+        }
+        _ => None,
+    }
 }
 
 fn handle_key_tree_view(

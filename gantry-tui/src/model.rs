@@ -3,7 +3,7 @@ use nucleo_matcher::{
     Config, Matcher,
 };
 
-use gantry_core::{Branch, ModelSelection, ProviderAlias, ProviderConfig, SessionId, SessionTree, StoredCredential, UserId};
+use gantry_core::{Branch, ModelSelection, ProviderAlias, ProviderConfig, SessionId, SessionInfo, SessionTree, StoredCredential, UserId};
 
 /// The top-level editing mode, analogous to Vim's modal editing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,10 +21,20 @@ pub struct Model {
     pub chat: ChatModel,
     pub input: InputModel,
     pub command_picker: Option<CommandPicker>,
+    pub sessions_view: Option<SessionsView>,
     pub tree_view: Option<TreeView>,
     pub providers_view: Option<ProvidersView>,
     pub model_picker_view: Option<ModelPickerView>,
     pub status_message: Option<String>,
+}
+
+/// State for the sessions browser overlay.
+pub struct SessionsView {
+    pub sessions: Vec<SessionInfo>,
+    /// Index of the highlighted row.
+    pub selected_idx: usize,
+    /// The session that was active when the browser was opened.
+    pub active_session_id: SessionId,
 }
 
 pub struct TreeView {
@@ -378,6 +388,7 @@ impl Model {
             chat: ChatModel::new(),
             input: InputModel::new(),
             command_picker: None,
+            sessions_view: None,
             tree_view: None,
             providers_view: None,
             model_picker_view: None,
@@ -444,6 +455,46 @@ impl Model {
         self.command_picker
             .as_ref()
             .and_then(|p| p.filtered_commands().get(p.selected_idx).cloned())
+    }
+
+    // Sessions view mutations
+
+    pub fn is_sessions_view_active(&self) -> bool {
+        self.sessions_view.is_some()
+    }
+
+    /// Opens the sessions browser, pre-selecting the currently active session.
+    pub fn activate_sessions_view(&mut self, sessions: Vec<SessionInfo>, active_session_id: SessionId) {
+        let selected_idx = sessions
+            .iter()
+            .rposition(|s| s.id == active_session_id)
+            .unwrap_or(sessions.len().saturating_sub(1));
+        self.sessions_view = Some(SessionsView { sessions, selected_idx, active_session_id });
+    }
+
+    pub fn deactivate_sessions_view(&mut self) {
+        self.sessions_view = None;
+    }
+
+    pub fn move_sessions_selection_up(&mut self) {
+        if let Some(ref mut sv) = self.sessions_view
+            && !sv.sessions.is_empty() {
+                sv.selected_idx = sv.selected_idx.checked_sub(1).unwrap_or(sv.sessions.len() - 1);
+            }
+    }
+
+    pub fn move_sessions_selection_down(&mut self) {
+        if let Some(ref mut sv) = self.sessions_view
+            && !sv.sessions.is_empty() {
+                sv.selected_idx = (sv.selected_idx + 1) % sv.sessions.len();
+            }
+    }
+
+    /// Returns the session highlighted in the browser, if any.
+    pub fn selected_session(&self) -> Option<&SessionInfo> {
+        self.sessions_view
+            .as_ref()
+            .and_then(|sv| sv.sessions.get(sv.selected_idx))
     }
 
     // Tree view mutations

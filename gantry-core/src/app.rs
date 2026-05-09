@@ -64,6 +64,18 @@ impl App {
         })
     }
 
+    /// Lists all sessions for this project, sorted by creation time (oldest first).
+    pub fn list_sessions(&self) -> Result<Vec<crate::session::registry::SessionInfo>> {
+        FsSessionRegistry::new(&self.sessions_dir)?.list()
+    }
+
+    /// Switches the active session to the one identified by `session_id`.
+    pub fn resume_session(&mut self, session_id: &SessionId) -> Result<()> {
+        let session_registry = FsSessionRegistry::new(&self.sessions_dir)?;
+        self.session = session_registry.load_session(session_id)?;
+        Ok(())
+    }
+
     /// Returns the ID of the active session.
     pub fn session_id(&self) -> &SessionId {
         &self.session.session_id

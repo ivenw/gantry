@@ -162,6 +162,10 @@ impl Runtime {
                 self.handle_select_model(selection.clone());
                 return None;
             }
+            Msg::ResumeSession(ref session_id) => {
+                self.handle_resume_session(session_id.clone());
+                return None;
+            }
             _ => {}
         }
         update(&mut self.model, &self.view_state, msg)
@@ -285,6 +289,26 @@ impl Runtime {
             }
             Err(e) => {
                 self.model.status_message = Some(e.to_string());
+            }
+        }
+    }
+
+    fn handle_resume_session(&mut self, session_id: gantry_core::SessionId) {
+        let result = self.rt.block_on(async {
+            self.app.lock().await.resume_session(&session_id)
+        });
+        match result {
+            Err(e) => {
+                self.model.status_message = Some(format!("failed to resume session: {e}"));
+            }
+            Ok(()) => {
+                let messages = self.rt.block_on(async {
+                    ChatMessage::messages_from(self.app.lock().await.history())
+                });
+                self.model.chat.messages = messages;
+                self.model.chat.scroll_offset = 0;
+                self.model.chat.user_is_scrolling = false;
+                self.model.session_id = Some(session_id);
             }
         }
     }

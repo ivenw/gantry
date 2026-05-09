@@ -4,6 +4,7 @@ pub mod command_picker;
 pub mod input;
 pub mod model_picker;
 pub mod providers;
+pub mod sessions;
 pub mod status_message;
 pub mod statusline;
 pub mod tree;
