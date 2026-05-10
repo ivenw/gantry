@@ -19,7 +19,7 @@ use crate::metrics::{CharCounts, ContextWindow, Usage};
 use crate::provider::agent::ChatStream;
 use crate::provider::registry::ProviderClientRegistry;
 use crate::provider::{HookEvent, ModelAlias, ModelSelection, PromptHook};
-use crate::resource_loader::load_context_files;
+use crate::resource_loader::{load_context_files, load_skills};
 use crate::session::registry::SessionRegistry;
 use crate::session::{NodeId, Session, SessionId, SessionTree};
 use crate::system_prompt::{BASE_PROMPT, build_system_prompt};
@@ -44,6 +44,8 @@ pub struct App {
     system_prompt: String,
     /// Char counts per agent file, captured when the system prompt was last built.
     agent_file_char_counts: Vec<(PathBuf, usize)>,
+    /// Total chars contributed by the skills catalog, captured when the system prompt was last built.
+    skills_catalog_char_count: usize,
     /// Token usage from the most recently completed stream.
     last_usage: Option<RigUsage>,
     /// Character counts per component, captured just before the most recent request.
@@ -75,7 +77,7 @@ impl App {
             session_registry.create_session()?
         };
         let total_consumption = session.total_consumption();
-        let (system_prompt, agent_file_char_counts) =
+        let (system_prompt, agent_file_char_counts, skills_catalog_char_count) =
             Self::build_system_prompt_with_counts(&project_root_dir);
 
         Ok(Self {
@@ -87,6 +89,7 @@ impl App {
             registry,
             system_prompt,
             agent_file_char_counts,
+            skills_catalog_char_count,
             last_usage: None,
             last_char_counts: None,
             total_consumption,
@@ -284,22 +287,29 @@ impl App {
         Ok(())
     }
 
-    /// Rebuilds the cached system prompt and agent file char counts from disk.
+    /// Rebuilds the cached system prompt, agent file char counts, and skill catalog char count from
+    /// disk.
     pub fn refresh_system_prompt(&mut self) {
-        let (prompt, counts) = Self::build_system_prompt_with_counts(&self.root);
+        let (prompt, counts, skill_chars) = Self::build_system_prompt_with_counts(&self.root);
         self.system_prompt = prompt;
         self.agent_file_char_counts = counts;
+        self.skills_catalog_char_count = skill_chars;
     }
 
     fn build_system_prompt_with_counts(
         project_root: &ProjectRootDir,
-    ) -> (String, Vec<(PathBuf, usize)>) {
+    ) -> (String, Vec<(PathBuf, usize)>, usize) {
         let agent_files = load_context_files(project_root).unwrap_or_default();
+        let skills = load_skills(project_root).unwrap_or_default();
         let counts = agent_files
             .iter()
             .map(|f| (f.path.clone(), f.contents.len()))
             .collect();
-        (build_system_prompt(&agent_files), counts)
+        let skill_chars = skills
+            .iter()
+            .map(|s| s.metadata.name.len() + s.metadata.description.len())
+            .sum();
+        (build_system_prompt(&agent_files, &skills), counts, skill_chars)
     }
 
     /// Returns the tools available for the current request.
@@ -325,6 +335,7 @@ impl App {
         let char_counts = CharCounts {
             base_prompt: BASE_PROMPT.len(),
             agent_files: self.agent_file_char_counts.clone(),
+            skills_catalog: self.skills_catalog_char_count,
             messages: history.iter().fold(0, |acc, m| {
                 acc + match m {
                     rig::message::Message::User { content } => content.iter().fold(0, |a, c| {

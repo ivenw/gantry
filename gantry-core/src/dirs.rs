@@ -113,6 +113,11 @@ impl ProjectRootDir {
     pub fn config_dir(&self) -> ProjectConfigDir {
         ProjectConfigDir::new(self)
     }
+
+    /// Returns the path to `<project_root>/.agents/skills/` (cross-client convention).
+    pub fn agents_skills_dir(&self) -> PathBuf {
+        self.0.join(AGENTS_DIR).join(SKILL_DIR)
+    }
 }
 
 /// The `.gantry/` config directory inside a project root.
@@ -127,5 +132,10 @@ impl ProjectConfigDir {
     /// Returns the path to the project config directory.
     pub fn path(&self) -> &Path {
         &self.0
+    }
+
+    /// Returns the path to `<project_root>/.gantry/skills/`.
+    pub fn skills_dir(&self) -> PathBuf {
+        self.0.join(SKILL_DIR)
     }
 }

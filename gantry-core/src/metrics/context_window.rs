@@ -40,8 +40,10 @@ impl ContextWindow {
             .collect::<Vec<_>>();
         let messages_tokens = scale(char_counts.messages);
 
+        let skills_catalog_tokens = scale(char_counts.skills_catalog);
         let accounted = base_prompt_tokens
             + agent_files_tokens.iter().map(|(_, n)| n).sum::<u32>()
+            + skills_catalog_tokens
             + messages_tokens;
         let other_tokens = total_tokens.saturating_sub(accounted);
 
@@ -132,12 +134,17 @@ impl ContextWindow {
 pub struct CharCounts {
     pub base_prompt: usize,
     pub agent_files: Vec<(PathBuf, usize)>,
+    /// Total chars contributed by the skills catalog section of the system prompt.
+    pub skills_catalog: usize,
     pub messages: usize,
 }
 
 impl CharCounts {
     /// Total character count across all measured components.
     pub fn total(&self) -> usize {
-        self.base_prompt + self.agent_files.iter().map(|(_, n)| n).sum::<usize>() + self.messages
+        self.base_prompt
+            + self.agent_files.iter().map(|(_, n)| n).sum::<usize>()
+            + self.skills_catalog
+            + self.messages
     }
 }
