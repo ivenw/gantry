@@ -44,15 +44,15 @@ pub struct App {
 
 impl App {
     /// Creates an `App` for the given project root, resuming the most recent session or creating a
-    /// new one if none exist. `selection` is the initial model selection, if any.
+    /// new one if none exist. The initial model selection is loaded from `~/.gantry/config.toml`.
     ///
     /// Sessions are stored under `global_config_dir/sessions/<project_name>/`.
     pub fn new(
         global_config_dir: GlobalConfigDir,
         project_rood_dir: ProjectRootDir,
-        selection: Option<ModelSelection>,
         registry: ProviderClientRegistry,
     ) -> Result<Self> {
+        let default_model = registry.providers.catalog.default_model.clone();
         let project_path = project_rood_dir.path().to_path_buf();
         let project_config = ProjectConfig::load(&project_rood_dir.config_file())?;
         let sessions_dir = global_config_dir.sessions_dir(&project_config.name);
@@ -70,7 +70,7 @@ impl App {
             root: project_rood_dir,
             sessions_dir,
             session,
-            selection,
+            selection: default_model,
             registry,
             last_usage: None,
             last_char_counts: None,
@@ -140,14 +140,16 @@ impl App {
         self.selection.as_ref()
     }
 
-    /// Replaces the active model selection.
+    /// Replaces the active model selection and persists it as the default in `config.toml`.
     ///
     /// If `selection.context_length` is `None`, attempts to resolve it from the provider config.
     /// For Ollama providers, the context window is read from `OllamaProviderConfig::context_window`.
+    /// Persistence errors are silently ignored so a failed write never interrupts the session.
     pub fn set_selection(&mut self, mut selection: ModelSelection) {
         if selection.context_length.is_none() {
             selection.context_length = self.resolve_context_length(&selection);
         }
+        let _ = self.registry.providers.save_default_model(&selection);
         self.selection = Some(selection);
     }
 

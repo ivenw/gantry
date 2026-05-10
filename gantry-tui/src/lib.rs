@@ -31,7 +31,7 @@ pub fn run() -> Result<()> {
     let providers = ProviderConfigRepository::load(&global_config_dir.config_file())?;
     let credentials = CredentialsRepository::load(&global_config_dir.credentials_file())?;
     let registry = ProviderClientRegistry::new(providers, credentials)?;
-    let app = App::new(global_config_dir, project_root_dir, None, registry)?;
+    let app = App::new(global_config_dir, project_root_dir, registry)?;
     let app = Arc::new(Mutex::new(app));
 
     let (_terminal_guard, mut terminal) = TerminalGuard::enter()?;

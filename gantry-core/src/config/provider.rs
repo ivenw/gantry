@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::provider::ProviderAlias;
+use crate::provider::{ModelSelection, ProviderAlias};
 
 /// Manages persistence of [`ProviderConfigCatalog`] to and from `config.toml`.
 pub struct ProviderConfigRepository {
@@ -64,8 +64,30 @@ impl ProviderConfigRepository {
             .context("'providers' is not an array of tables")?;
         array.push(entry.as_table().clone());
 
-        atomic_write(&self.path, &doc.to_string())?;
+        super::atomic_write(&self.path, &doc.to_string())?;
         self.catalog.providers.push(config);
+        Ok(())
+    }
+
+    /// Persists `selection` as `default_model` in `config.toml`, preserving all other content.
+    pub fn save_default_model(&mut self, selection: &ModelSelection) -> Result<()> {
+        let raw = if self.path.exists() {
+            std::fs::read_to_string(&self.path)
+                .with_context(|| format!("failed to read {}", self.path.display()))?
+        } else {
+            String::new()
+        };
+
+        let mut doc = raw
+            .parse::<toml_edit::DocumentMut>()
+            .with_context(|| format!("failed to parse {}", self.path.display()))?;
+
+        let entry = toml_edit::ser::to_document(selection)
+            .context("failed to serialize default model")?;
+        doc["default_model"] = toml_edit::Item::Table(entry.as_table().clone());
+
+        super::atomic_write(&self.path, &doc.to_string())?;
+        self.catalog.default_model = Some(selection.clone());
         Ok(())
     }
 
@@ -105,17 +127,20 @@ impl ProviderConfigRepository {
             })?;
 
         array.remove(toml_pos);
-        atomic_write(&self.path, &doc.to_string())?;
+        super::atomic_write(&self.path, &doc.to_string())?;
         self.catalog.providers.remove(pos);
         Ok(())
     }
 }
 
-/// The full set of configured providers, deserialized from `config.toml`.
+/// The full on-disk representation of `config.toml`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProviderConfigCatalog {
     #[serde(default)]
     pub providers: Vec<ProviderConfig>,
+    /// The last selected model, restored as the default on next startup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_model: Option<ModelSelection>,
 }
 
 impl ProviderConfigCatalog {
@@ -202,20 +227,6 @@ pub struct OpenAiResponsesProviderConfig {
     pub base_url: String,
 }
 
-/// Writes `contents` to `path` atomically via a sibling temp file and rename.
-///
-/// Creates parent directories if they do not exist.
-fn atomic_write(path: &Path, contents: &str) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create directory {}", parent.display()))?;
-    }
-    let tmp = path.with_extension("toml.tmp");
-    std::fs::write(&tmp, contents).with_context(|| format!("failed to write {}", tmp.display()))?;
-    std::fs::rename(&tmp, path)
-        .with_context(|| format!("failed to rename {} to {}", tmp.display(), path.display()))?;
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {
