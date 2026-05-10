@@ -11,12 +11,13 @@ use rig::streaming::StreamedAssistantContent;
 use tokio::sync::Mutex;
 
 use crate::config::{ProjectConfig, ProviderConfig};
+use crate::tools::{BashTool, EditTool, GrepTool, ReadTool, TreeTool, WriteTool};
 use crate::dirs::{GlobalConfigDir, ProjectRootDir};
 use crate::fs::FsSessionRegistry;
 use crate::metrics::{CharCounts, ContextWindow, Usage};
 use crate::provider::agent::ChatStream;
 use crate::provider::registry::ProviderClientRegistry;
-use crate::provider::{ModelAlias, ModelSelection, ToolCallEvent};
+use crate::provider::{HookEvent, ModelAlias, ModelSelection, PromptHook};
 use crate::resource_loader::discover_agents_md;
 use crate::session::registry::SessionRegistry;
 use crate::session::{NodeId, Session, SessionId, SessionTree};
@@ -282,7 +283,7 @@ impl App {
         content: String,
     ) -> Result<(
         ChatStream,
-        tokio::sync::mpsc::UnboundedReceiver<ToolCallEvent>,
+        tokio::sync::mpsc::UnboundedReceiver<HookEvent>,
     )> {
         let (hook_tx, hook_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut guard = app.lock().await;
@@ -322,9 +323,18 @@ impl App {
             .selection
             .clone()
             .ok_or_else(|| anyhow::anyhow!("no active model selection"))?;
+        let tools: Vec<Box<dyn rig::tool::ToolDyn>> = vec![
+            Box::new(ReadTool),
+            Box::new(WriteTool),
+            Box::new(EditTool),
+            Box::new(GrepTool),
+            Box::new(TreeTool),
+            Box::new(BashTool),
+        ];
+        let hook = PromptHook::new(hook_tx);
         let agent = guard
             .registry
-            .agent(&selection, Some(&system_prompt), hook_tx)?;
+            .agent(&selection, Some(&system_prompt), hook, tools)?;
         let Some(prompt) = history.last().cloned() else {
             anyhow::bail!("no messages to stream");
         };

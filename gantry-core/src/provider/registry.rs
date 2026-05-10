@@ -2,11 +2,13 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 
+use rig::tool::ToolDyn;
+
 use crate::config::{
     ApiKeyCredential, Credential, CredentialsRepository, ProviderConfig, ProviderConfigRepository,
 };
-use crate::provider::ToolCallEvent;
 use crate::provider::agent::BoxedAgent;
+use crate::provider::PromptHook;
 use crate::provider::client::ProviderClient;
 use crate::provider::{ModelSelection, ProviderAlias};
 
@@ -49,15 +51,16 @@ impl ProviderClientRegistry {
         Ok(self.cache.get(alias).expect("just inserted"))
     }
 
-    /// Builds a [`BoxedAgent`] for the given model selection, optional preamble, and hook sender.
+    /// Builds a [`BoxedAgent`] for the given model selection, optional preamble, hook, and tools.
     pub fn agent(
         &mut self,
         selection: &ModelSelection,
         preamble: Option<&str>,
-        hook_tx: tokio::sync::mpsc::UnboundedSender<ToolCallEvent>,
+        hook: PromptHook,
+        tools: Vec<Box<dyn ToolDyn>>,
     ) -> Result<BoxedAgent> {
         self.client(&selection.provider)?
-            .agent(&selection.model, preamble, hook_tx)
+            .agent(&selection.model, preamble, hook, tools)
     }
 
     /// Constructs a fresh [`ProviderClient`] for the given alias.

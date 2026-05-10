@@ -3,15 +3,14 @@ use rig::client::{CompletionClient, Nothing, ProviderClient as _};
 use rig::model::ModelList;
 use rig::providers::copilot::{self, CopilotAuth};
 use rig::providers::{ollama, openai};
+use rig::tool::ToolDyn;
 
 use crate::config::{
     ApiKeyCredential, Credential, OllamaProviderConfig, OpenAiCompletionsProviderConfig,
     OpenAiResponsesProviderConfig,
 };
-use crate::provider::ModelAlias;
-use crate::provider::ToolCallEvent;
-use crate::provider::agent::{BoxedAgent, ToolCallHook};
-use crate::tools::{BashTool, EditTool, GrepTool, ReadTool, TreeTool, WriteTool};
+use crate::provider::agent::BoxedAgent;
+use crate::provider::{ModelAlias, PromptHook};
 
 /// A constructed, ready-to-use provider client that can list models and create agents.
 pub enum ProviderClient {
@@ -83,81 +82,50 @@ impl ProviderClient {
         }
     }
 
-    /// Builds a [`BoxedAgent`] for the given model alias, optional preamble, and hook sender.
+    /// Builds a [`BoxedAgent`] for the given model alias, optional preamble, hook, and tools.
     pub fn agent(
         &self,
         model: &ModelAlias,
         preamble: Option<&str>,
-        hook_tx: tokio::sync::mpsc::UnboundedSender<ToolCallEvent>,
+        hook: PromptHook,
+        tools: Vec<Box<dyn ToolDyn>>,
     ) -> Result<BoxedAgent> {
-        let hook = ToolCallHook::new(hook_tx);
-        match self {
+        let agent = match self {
             ProviderClient::Ollama(client) => {
-                let mut builder = client.agent(model.as_str()).hook(hook);
-                if let Some(p) = preamble {
-                    builder = builder.preamble(p);
-                }
-                Ok(Box::new(
-                    builder
-                        .tool(ReadTool)
-                        .tool(WriteTool)
-                        .tool(EditTool)
-                        .tool(GrepTool)
-                        .tool(TreeTool)
-                        .tool(BashTool)
-                        .build(),
-                ))
+                configure_agent(client.agent(model.as_str()), hook, preamble, tools)
             }
             ProviderClient::GitHubCopilot { client, .. } => {
-                let mut builder = client.agent(model.as_str()).hook(hook);
-                if let Some(p) = preamble {
-                    builder = builder.preamble(p);
-                }
-                Ok(Box::new(
-                    builder
-                        .tool(ReadTool)
-                        .tool(WriteTool)
-                        .tool(EditTool)
-                        .tool(GrepTool)
-                        .tool(TreeTool)
-                        .tool(BashTool)
-                        .build(),
-                ))
+                configure_agent(client.agent(model.as_str()), hook, preamble, tools)
             }
             ProviderClient::OpenAiCompletions(client) => {
-                let mut builder = client.agent(model.as_str()).hook(hook);
-                if let Some(p) = preamble {
-                    builder = builder.preamble(p);
-                }
-                Ok(Box::new(
-                    builder
-                        .tool(ReadTool)
-                        .tool(WriteTool)
-                        .tool(EditTool)
-                        .tool(GrepTool)
-                        .tool(TreeTool)
-                        .tool(BashTool)
-                        .build(),
-                ))
+                configure_agent(client.agent(model.as_str()), hook, preamble, tools)
             }
             ProviderClient::OpenAiResponses(client) => {
-                let mut builder = client.agent(model.as_str()).hook(hook);
-                if let Some(p) = preamble {
-                    builder = builder.preamble(p);
-                }
-                Ok(Box::new(
-                    builder
-                        .tool(ReadTool)
-                        .tool(WriteTool)
-                        .tool(EditTool)
-                        .tool(GrepTool)
-                        .tool(TreeTool)
-                        .tool(BashTool)
-                        .build(),
-                ))
+                configure_agent(client.agent(model.as_str()), hook, preamble, tools)
             }
-        }
+        };
+        Ok(agent)
     }
+}
+
+/// Applies the shared configuration — hook, preamble, and tools — to any provider's agent builder,
+/// returning a type-erased [`BoxedAgent`].
+fn configure_agent<M, P>(
+    builder: rig::agent::AgentBuilder<M>,
+    hook: P,
+    preamble: Option<&str>,
+    tools: Vec<Box<dyn ToolDyn>>,
+) -> BoxedAgent
+where
+    M: rig::completion::CompletionModel + Send + Sync + 'static,
+    M::StreamingResponse: rig::wasm_compat::WasmCompatSend,
+    P: rig::agent::PromptHook<M> + Send + Sync + 'static,
+{
+    let mut b = builder.hook(hook).tools(tools);
+    if let Some(p) = preamble {
+        b = b.preamble(p);
+    }
+    Box::new(b.build())
 }
 
 const COPILOT_DEFAULT_BASE_URL: &str = "https://api.githubcopilot.com";

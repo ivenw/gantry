@@ -19,7 +19,7 @@ pub use config::{
 pub use dirs::{GlobalConfigDir, ProjectRootDir};
 pub use message::{Message, UserId};
 pub use provider::agent::{ChatStream, ChatStreamItem};
-pub use provider::ToolCallEvent;
+pub use provider::HookEvent;
 pub use provider::registry::ProviderClientRegistry;
 pub use provider::{ModelAlias, ModelSelection, ProviderAlias};
 pub use rig::agent::{MultiTurnStreamItem, StreamingError};

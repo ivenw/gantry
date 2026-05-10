@@ -192,10 +192,10 @@ impl Runtime {
                     tokio::spawn(async move {
                         while let Some(event) = hook_rx.recv().await {
                             let msg = match event {
-                                gantry_core::ToolCallEvent::Started { name, id } => {
+                                gantry_core::HookEvent::ToolCallStarted { name, id } => {
                                     Msg::ToolCallStarted { name, id }
                                 }
-                                gantry_core::ToolCallEvent::Finished { id } => {
+                                gantry_core::HookEvent::ToolCallFinished { id } => {
                                     Msg::ToolCallFinished { id }
                                 }
                             };
