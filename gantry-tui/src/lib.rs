@@ -15,7 +15,7 @@ use crossterm::{
     execute,
 };
 use gantry_core::{
-    App, CredentialsRepository, GlobalConfigDir, ProjectRootDir, ProviderClientRegistry,
+    App, CredentialsRepository, GlobalGantryDir, ProjectRootDir, ProviderClientRegistry,
     ProviderConfigRepository,
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -24,7 +24,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub fn run() -> Result<()> {
-    let global_config_dir = GlobalConfigDir::new()?;
+    let global_config_dir = GlobalGantryDir::new()?;
     let cwd = std::env::current_dir().context("failed to determine current directory")?;
     let project_root_dir = ProjectRootDir::new(&cwd)?;
 

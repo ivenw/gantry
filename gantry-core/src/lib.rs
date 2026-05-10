@@ -1,31 +1,31 @@
 pub mod app;
 pub mod config;
-pub mod providers;
 pub mod dirs;
-pub mod metrics;
 pub mod fs;
 pub mod message;
-pub mod resource_loader;
+pub mod metrics;
 pub mod provider;
+pub mod providers;
+pub mod resource_loader;
 pub mod session;
 pub mod system_prompt;
 pub mod tools;
 
 pub use app::{App, StreamingResponse, stream_message};
 pub use config::{
-    Credential, CredentialsCatalog, CredentialsRepository, CopilotProviderConfig,
-    CortecsProviderConfig, OllamaProviderConfig, OpenAiCompletionsProviderConfig,
+    CopilotProviderConfig, CortecsProviderConfig, Credential, CredentialsCatalog,
+    CredentialsRepository, OllamaProviderConfig, OpenAiCompletionsProviderConfig,
     OpenAiResponsesProviderConfig, ProjectConfig, ProviderConfig, ProviderConfigCatalog,
     ProviderConfigRepository, StoredCredential,
 };
-pub use dirs::{GlobalConfigDir, ProjectRootDir};
+pub use dirs::{GlobalGantryDir, ProjectRootDir};
 pub use message::{Message, UserId};
-pub use provider::agent::{ChatStream, ChatStreamItem};
+pub use metrics::{CharCounts, ContextWindow, Usage};
 pub use provider::HookEvent;
+pub use provider::agent::{ChatStream, ChatStreamItem};
 pub use provider::registry::ProviderClientRegistry;
 pub use provider::{ModelAlias, ModelSelection, ProviderAlias};
 pub use rig::agent::{MultiTurnStreamItem, StreamingError};
-pub use metrics::{CharCounts, Usage, ContextWindow};
 pub use rig::streaming::StreamedAssistantContent;
 
 pub use fs::FsSessionRegistry;

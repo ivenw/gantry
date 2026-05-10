@@ -2,22 +2,24 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-const GLOBAL_CONFIG_DIR: &str = ".gantry";
+const GANTRY_DIR: &str = ".gantry";
 const AGENTS_DIR: &str = ".agents";
 const SKILL_DIR: &str = "skills";
 
 const GLOBAL_CONFIG_FILE: &str = "config.toml";
 const CREDENTIALS_FILE: &str = "credentials.toml";
 
-/// The application's config directory, resolved from the OS home dir with `/.gantry` appended.
-pub struct GlobalConfigDir(PathBuf);
+const PROJECT_CONFIG_FILE: &str = "gantry.toml";
 
-impl GlobalConfigDir {
+/// The application's config directory, resolved from the OS home dir with `/.gantry` appended.
+pub struct GlobalGantryDir(PathBuf);
+
+impl GlobalGantryDir {
     /// Resolves the config directory, returning an error if the OS home dir is unavailable.
     pub fn new() -> Result<Self> {
         let path = dirs::home_dir()
             .context("Could not resolve OS home directory")?
-            .join(GLOBAL_CONFIG_DIR);
+            .join(GANTRY_DIR);
         Ok(Self(path))
     }
 
@@ -51,9 +53,9 @@ impl GlobalConfigDir {
 }
 
 /// A global configuration directory for agents.
-pub struct AgentsDir(PathBuf);
+pub struct GlobalAgentsDir(PathBuf);
 
-impl AgentsDir {
+impl GlobalAgentsDir {
     /// Resolves the config directory, returning an error if the OS home dir is unavailable.
     pub fn new() -> Result<Self> {
         let path = dirs::home_dir()
@@ -71,8 +73,6 @@ impl AgentsDir {
         self.0.join(SKILL_DIR)
     }
 }
-
-const PROJECT_CONFIG_FILE: &str = "gantry.toml";
 
 /// The root directory of a gantry project, identified by the presence of `gantry.toml`.
 pub struct ProjectRootDir(PathBuf);
@@ -110,23 +110,43 @@ impl ProjectRootDir {
     }
 
     /// Returns the `.gantry/` config directory inside this project root.
-    pub fn config_dir(&self) -> ProjectConfigDir {
-        ProjectConfigDir::new(self)
+    pub fn gantry_dir(&self) -> ProjectGantryDir {
+        ProjectGantryDir::new(self)
     }
 
-    /// Returns the path to `<project_root>/.agents/skills/` (cross-client convention).
-    pub fn agents_skills_dir(&self) -> PathBuf {
-        self.0.join(AGENTS_DIR).join(SKILL_DIR)
+    /// Returns the `.agents/` directory inside this project root.
+    pub fn agents_dir(&self) -> ProjectAgentsDir {
+        ProjectAgentsDir::new(self)
+    }
+}
+
+/// The `.agents/` directory inside a project root (cross-client convention).
+pub struct ProjectAgentsDir(PathBuf);
+
+impl ProjectAgentsDir {
+    /// Constructs the agents directory path from a project root.
+    fn new(project_root: &ProjectRootDir) -> Self {
+        Self(project_root.path().join(AGENTS_DIR))
+    }
+
+    /// Returns the path to the project agents directory.
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+
+    /// Returns the path to `<project_root>/.agents/skills/`.
+    pub fn skills_dir(&self) -> PathBuf {
+        self.0.join(SKILL_DIR)
     }
 }
 
 /// The `.gantry/` config directory inside a project root.
-pub struct ProjectConfigDir(PathBuf);
+pub struct ProjectGantryDir(PathBuf);
 
-impl ProjectConfigDir {
+impl ProjectGantryDir {
     /// Constructs the config directory path from a project root.
     fn new(project_root: &ProjectRootDir) -> Self {
-        Self(project_root.path().join(".gantry"))
+        Self(project_root.path().join(GANTRY_DIR))
     }
 
     /// Returns the path to the project config directory.

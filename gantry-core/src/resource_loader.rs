@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde::Deserialize;
 
-use crate::dirs::{AgentsDir, GlobalConfigDir, ProjectRootDir};
+use crate::dirs::{GlobalAgentsDir, GlobalGantryDir, ProjectRootDir};
 
 const CONTEXT_FILE_CANDIDATES: &[&str] = &["AGENTS.md", "CLAUDE.md"];
 const SKILL_FILE_NAME: &str = "SKILL.md";
@@ -25,8 +25,12 @@ pub fn load_context_files(project_root: &ProjectRootDir) -> Result<Vec<ContextFi
     let mut results: Vec<ContextFile> = Vec::new();
 
     let global_candidates = [
-        GlobalConfigDir::new().ok().map(|d| d.path().join("AGENTS.md")),
-        AgentsDir::new().ok().map(|d| d.path().join("AGENTS.md")),
+        GlobalGantryDir::new()
+            .ok()
+            .map(|d| d.path().join("AGENTS.md")),
+        GlobalAgentsDir::new()
+            .ok()
+            .map(|d| d.path().join("AGENTS.md")),
     ];
     for path in global_candidates.into_iter().flatten() {
         if let Ok(file) = load_context_file(&path) {
@@ -91,10 +95,10 @@ pub fn load_skills(project_root: &ProjectRootDir) -> Result<Vec<Skill>> {
     // Collect skills in ascending priority order so that higher-priority entries overwrite lower.
     // Pair each dir with a flag indicating whether it is project-level (higher priority).
     let scan_dirs: Vec<(PathBuf, bool)> = [
-        GlobalConfigDir::new().ok().map(|d| (d.skills_dir(), false)),
-        AgentsDir::new().ok().map(|d| (d.skills_dir(), false)),
-        Some((project_root.config_dir().skills_dir(), true)),
-        Some((project_root.agents_skills_dir(), true)),
+        GlobalGantryDir::new().ok().map(|d| (d.skills_dir(), false)),
+        GlobalAgentsDir::new().ok().map(|d| (d.skills_dir(), false)),
+        Some((project_root.gantry_dir().skills_dir(), true)),
+        Some((project_root.agents_dir().skills_dir(), true)),
     ]
     .into_iter()
     .flatten()
@@ -142,10 +146,7 @@ fn scan_skills_dir(dir: &Path) -> Vec<Skill> {
         let skill_file = path.join(SKILL_FILE_NAME);
         match parse_skill_file(&skill_file) {
             Ok(skill) => skills.push(skill),
-            Err(e) => eprintln!(
-                "gantry: skipping skill at '{}': {e}",
-                skill_file.display()
-            ),
+            Err(e) => eprintln!("gantry: skipping skill at '{}': {e}", skill_file.display()),
         }
     }
     skills
@@ -197,8 +198,8 @@ pub fn parse_skill_file(path: &Path) -> Result<Skill> {
 /// Tries strict parsing first, then falls back to a lenient approach that wraps bare colon-
 /// containing description values in quotes before retrying.
 fn extract_frontmatter(raw: &str, path: &Path) -> Result<(String, String)> {
-    let yaml = slice_frontmatter(raw)
-        .ok_or_else(|| anyhow::anyhow!("no YAML frontmatter found"))?;
+    let yaml =
+        slice_frontmatter(raw).ok_or_else(|| anyhow::anyhow!("no YAML frontmatter found"))?;
 
     let fm: SkillFrontmatter = serde_yaml::from_str(yaml)
         .or_else(|_| serde_yaml::from_str(&lenient_yaml(yaml)))
@@ -225,7 +226,9 @@ fn extract_frontmatter(raw: &str, path: &Path) -> Result<(String, String)> {
 fn slice_frontmatter(raw: &str) -> Option<&str> {
     let rest = raw.strip_prefix("---")?;
     // Accept `---\n` or `---\r\n`
-    let rest = rest.strip_prefix('\n').or_else(|| rest.strip_prefix("\r\n"))?;
+    let rest = rest
+        .strip_prefix('\n')
+        .or_else(|| rest.strip_prefix("\r\n"))?;
     let end = rest.find("\n---")?;
     Some(&rest[..end])
 }

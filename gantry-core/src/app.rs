@@ -13,7 +13,7 @@ use tokio::sync::Mutex;
 use tokio::sync::oneshot;
 
 use crate::config::{ProjectConfig, ProviderConfig};
-use crate::dirs::{GlobalConfigDir, ProjectRootDir};
+use crate::dirs::{GlobalGantryDir, ProjectRootDir};
 use crate::fs::FsSessionRegistry;
 use crate::metrics::{CharCounts, ContextWindow, Usage};
 use crate::provider::agent::ChatStream;
@@ -60,7 +60,7 @@ impl App {
     ///
     /// Sessions are stored under `global_config_dir/sessions/<project_name>/`.
     pub fn new(
-        global_config_dir: GlobalConfigDir,
+        global_config_dir: GlobalGantryDir,
         project_root_dir: ProjectRootDir,
         registry: ProviderClientRegistry,
     ) -> Result<Self> {
@@ -309,7 +309,11 @@ impl App {
             .iter()
             .map(|s| s.metadata.name.len() + s.metadata.description.len())
             .sum();
-        (build_system_prompt(&agent_files, &skills), counts, skill_chars)
+        (
+            build_system_prompt(&agent_files, &skills),
+            counts,
+            skill_chars,
+        )
     }
 
     /// Returns the tools available for the current request.
