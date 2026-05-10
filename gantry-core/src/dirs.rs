@@ -2,6 +2,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+const GLOBAL_CONFIG_DIR: &str = ".gantry";
+const AGENTS_DIR: &str = ".agents";
+const SKILL_DIR: &str = "skills";
+
+const GLOBAL_CONFIG_FILE: &str = "config.toml";
+const CREDENTIALS_FILE: &str = "credentials.toml";
+
 /// The application's config directory, resolved from the OS home dir with `/.gantry` appended.
 pub struct GlobalConfigDir(PathBuf);
 
@@ -10,7 +17,7 @@ impl GlobalConfigDir {
     pub fn new() -> Result<Self> {
         let path = dirs::home_dir()
             .context("Could not resolve OS home directory")?
-            .join(".gantry");
+            .join(GLOBAL_CONFIG_DIR);
         Ok(Self(path))
     }
 
@@ -19,14 +26,18 @@ impl GlobalConfigDir {
         &self.0
     }
 
+    pub fn skills_dir(&self) -> PathBuf {
+        self.0.join(SKILL_DIR)
+    }
+
     /// Returns the path to `~/.gantry/config.toml`.
     pub fn config_file(&self) -> PathBuf {
-        self.0.join("config.toml")
+        self.0.join(GLOBAL_CONFIG_FILE)
     }
 
     /// Returns the path to `~/.gantry/credentials.toml`.
     pub fn credentials_file(&self) -> PathBuf {
-        self.0.join("credentials.toml")
+        self.0.join(CREDENTIALS_FILE)
     }
 
     /// Returns the path to `~/.gantry/sessions/<project_name>/`.
@@ -36,6 +47,28 @@ impl GlobalConfigDir {
     pub fn sessions_dir(&self, project_name: &str) -> PathBuf {
         let sanitized = project_name.replace('/', "_");
         self.0.join("sessions").join(sanitized)
+    }
+}
+
+/// A global configuration directory for agents.
+pub struct AgentsDir(PathBuf);
+
+impl AgentsDir {
+    /// Resolves the config directory, returning an error if the OS home dir is unavailable.
+    pub fn new() -> Result<Self> {
+        let path = dirs::home_dir()
+            .context("Could not resolve OS home directory")?
+            .join(AGENTS_DIR);
+        Ok(Self(path))
+    }
+
+    /// Returns the path to the agents directory.
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+
+    pub fn skills_dir(&self) -> PathBuf {
+        self.0.join(SKILL_DIR)
     }
 }
 

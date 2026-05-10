@@ -13,17 +13,17 @@ use tokio::sync::Mutex;
 use tokio::sync::oneshot;
 
 use crate::config::{ProjectConfig, ProviderConfig};
-use crate::tools::{BashTool, EditTool, GrepTool, ReadTool, TreeTool, WriteTool};
 use crate::dirs::{GlobalConfigDir, ProjectRootDir};
 use crate::fs::FsSessionRegistry;
 use crate::metrics::{CharCounts, ContextWindow, Usage};
 use crate::provider::agent::ChatStream;
 use crate::provider::registry::ProviderClientRegistry;
 use crate::provider::{HookEvent, ModelAlias, ModelSelection, PromptHook};
-use crate::resource_loader::discover_agents_md;
+use crate::resource_loader::load_context_files;
 use crate::session::registry::SessionRegistry;
 use crate::session::{NodeId, Session, SessionId, SessionTree};
 use crate::system_prompt::{BASE_PROMPT, build_system_prompt};
+use crate::tools::{BashTool, EditTool, GrepTool, ReadTool, TreeTool, WriteTool};
 use rig::completion::Usage as RigUsage;
 use rig::tool::ToolDyn;
 
@@ -59,12 +59,12 @@ impl App {
     /// Sessions are stored under `global_config_dir/sessions/<project_name>/`.
     pub fn new(
         global_config_dir: GlobalConfigDir,
-        project_rood_dir: ProjectRootDir,
+        project_root_dir: ProjectRootDir,
         registry: ProviderClientRegistry,
     ) -> Result<Self> {
         let default_model = registry.providers.catalog.default_model.clone();
-        let project_path = project_rood_dir.path().to_path_buf();
-        let project_config = ProjectConfig::load(&project_rood_dir.config_file())?;
+        let project_path = project_root_dir.path().to_path_buf();
+        let project_config = ProjectConfig::load(&project_root_dir.config_file())?;
         let sessions_dir = global_config_dir.sessions_dir(&project_config.name);
         let session_registry = FsSessionRegistry::new(&sessions_dir)?;
         let sessions = session_registry.list()?;
@@ -76,11 +76,11 @@ impl App {
         };
         let total_consumption = session.total_consumption();
         let (system_prompt, agent_file_char_counts) =
-            Self::build_system_prompt_with_counts(&project_path);
+            Self::build_system_prompt_with_counts(&project_root_dir);
 
         Ok(Self {
             project_path,
-            root: project_rood_dir,
+            root: project_root_dir,
             sessions_dir,
             session,
             selection: default_model,
@@ -286,13 +286,15 @@ impl App {
 
     /// Rebuilds the cached system prompt and agent file char counts from disk.
     pub fn refresh_system_prompt(&mut self) {
-        let (prompt, counts) = Self::build_system_prompt_with_counts(&self.project_path);
+        let (prompt, counts) = Self::build_system_prompt_with_counts(&self.root);
         self.system_prompt = prompt;
         self.agent_file_char_counts = counts;
     }
 
-    fn build_system_prompt_with_counts(project_path: &PathBuf) -> (String, Vec<(PathBuf, usize)>) {
-        let agent_files = discover_agents_md(project_path);
+    fn build_system_prompt_with_counts(
+        project_root: &ProjectRootDir,
+    ) -> (String, Vec<(PathBuf, usize)>) {
+        let agent_files = load_context_files(project_root).unwrap_or_default();
         let counts = agent_files
             .iter()
             .map(|f| (f.path.clone(), f.contents.len()))
@@ -350,7 +352,6 @@ impl App {
             .ok_or_else(|| anyhow::anyhow!("no active model selection"))?;
         Ok(PreparedRequest { history, selection })
     }
-
 }
 
 /// Prepared inputs for a single agent request, returned by [`App::prepare_request`].
@@ -385,7 +386,10 @@ impl StreamingResponse {
 pub async fn stream_message(
     app: Arc<Mutex<App>>,
     content: String,
-) -> Result<(StreamingResponse, tokio::sync::mpsc::UnboundedReceiver<HookEvent>)> {
+) -> Result<(
+    StreamingResponse,
+    tokio::sync::mpsc::UnboundedReceiver<HookEvent>,
+)> {
     let (hook_tx, hook_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut guard = app.lock().await;
     let PreparedRequest { history, selection } = guard.prepare_request(content)?;
@@ -411,10 +415,8 @@ pub async fn stream_message(
         if let Some(u) = usage {
             let consumption = Usage::from(&u);
             if !text.is_empty() {
-                let _ = guard.append_message_with_usage(
-                    Message::assistant(text),
-                    Some(consumption.clone()),
-                );
+                let _ = guard
+                    .append_message_with_usage(Message::assistant(text), Some(consumption.clone()));
             }
             guard.total_consumption += consumption;
             guard.last_usage = Some(u);
