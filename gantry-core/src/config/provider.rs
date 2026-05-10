@@ -248,7 +248,9 @@ mod tests {
             providers: vec![ProviderConfig::Ollama(OllamaProviderConfig {
                 alias: ProviderAlias::new("ollama"),
                 base_url: None,
+                context_length: None,
             })],
+            default_model: None,
         }
     }
 
@@ -265,6 +267,7 @@ mod tests {
             .push(ProviderConfig::Ollama(OllamaProviderConfig {
                 alias: ProviderAlias::new("ollama"),
                 base_url: None,
+                context_length: None,
             }));
         assert!(catalog.validate().is_err());
     }
@@ -278,6 +281,7 @@ mod tests {
         repo.add_provider(ProviderConfig::Ollama(OllamaProviderConfig {
             alias: ProviderAlias::new("local"),
             base_url: None,
+            context_length: None,
         }))
         .unwrap();
 
@@ -303,12 +307,14 @@ mod tests {
         repo.add_provider(ProviderConfig::Ollama(OllamaProviderConfig {
             alias: ProviderAlias::new("local"),
             base_url: None,
+            context_length: None,
         }))
         .unwrap();
         let err = repo
             .add_provider(ProviderConfig::Ollama(OllamaProviderConfig {
                 alias: ProviderAlias::new("local"),
                 base_url: None,
+                context_length: None,
             }))
             .unwrap_err();
         assert!(err.to_string().contains("already exists"));
