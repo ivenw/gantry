@@ -13,7 +13,7 @@ use tokio::sync::Mutex;
 use crate::config::{ProjectConfig, ProviderConfig};
 use crate::dirs::{GlobalConfigDir, ProjectRootDir};
 use crate::fs::FsSessionRegistry;
-use crate::metrics::{CharCounts, ContextWindow};
+use crate::metrics::{CharCounts, ContextWindow, RequestUsage};
 use crate::provider::agent::ChatStream;
 use crate::provider::registry::ProviderClientRegistry;
 use crate::provider::{ModelAlias, ModelSelection, ToolCallEvent};
@@ -104,6 +104,19 @@ impl App {
     /// Appends a message to the active session, persisting it to disk.
     pub fn append_message(&mut self, msg: Message) -> Result<()> {
         self.session.append_message(msg)
+    }
+
+    /// Appends a message with token usage to the active session, persisting it to disk.
+    pub fn append_message_with_usage(&mut self, msg: Message, usage: Option<RequestUsage>) -> Result<()> {
+        self.session.append_message_with_usage(msg, usage)
+    }
+
+    /// Returns all request usage records on the active branch, in chronological order.
+    pub fn usage_history(&self) -> Vec<RequestUsage> {
+        self.session
+            .all_nodes()
+            .filter_map(|n| n.usage.clone())
+            .collect()
     }
 
     /// Returns the ordered messages on the active branch.
@@ -367,11 +380,17 @@ impl Stream for AppendOnExhaust {
                 // Spawn a detached task so we can persist without blocking the stream poll.
                 tokio::spawn(async move {
                     let mut guard = app.lock().await;
-                    if !text.is_empty() {
-                        let _ = guard.append_message(Message::assistant(text));
-                    }
                     if let Some(u) = usage {
+                        let request_usage = RequestUsage::from(&u);
+                        if !text.is_empty() {
+                            let _ = guard.append_message_with_usage(
+                                Message::assistant(text),
+                                Some(request_usage),
+                            );
+                        }
                         guard.last_usage = Some(u);
+                    } else if !text.is_empty() {
+                        let _ = guard.append_message(Message::assistant(text));
                     }
                 });
                 Poll::Ready(None)

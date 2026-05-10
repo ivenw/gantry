@@ -26,7 +26,7 @@ impl<'a> UsageViewWidget<'a> {
     /// Computes the total height needed to render the overlay at the given width.
     pub fn calc_height(&self) -> u16 {
         let cw = &self.state.context_window;
-        let agent_file_rows = cw.breakdown.agent_files_tokens.len() as u16;
+        let agent_file_rows = cw.agent_files_tokens.len() as u16;
         let remaining_row = if cw.context_length.is_some() { 1 } else { 0 };
         // borders(2) + bar(1) + blank(1) + header(1) + system_prompt(1) + base_prompt(1) + agent_files(N) + messages(1) + other(1) + remaining(0|1)
         2 + 1 + 1 + 1 + 1 + 1 + agent_file_rows + 1 + 1 + remaining_row
@@ -81,9 +81,9 @@ fn render_bar(buf: &mut Buffer, x: u16, y: u16, width: u16, cw: &ContextWindow) 
 
     let scale = |tokens: u64| -> u16 { ((tokens as f32 / ctx) * w).round() as u16 };
 
-    let sys_cols = scale(cw.breakdown.system_prompt_tokens());
-    let msg_cols = scale(cw.breakdown.messages_tokens);
-    let other_cols = scale(cw.breakdown.other_tokens);
+    let sys_cols = scale(cw.system_prompt_tokens());
+    let msg_cols = scale(cw.messages_tokens);
+    let other_cols = scale(cw.other_tokens);
     let rem_cols = width.saturating_sub(sys_cols + msg_cols + other_cols);
 
     let mut cursor = x;
@@ -122,13 +122,13 @@ fn render_breakdown(buf: &mut Buffer, x: u16, y: u16, width: u16, cw: &ContextWi
     row += 1;
 
     // System prompt section.
-    let sys_tokens = cw.breakdown.system_prompt_tokens();
+    let sys_tokens = cw.system_prompt_tokens();
     let sys_pct = cw.system_prompt_fraction() * 100.0;
     render_row(buf, x, row, width, "System prompt", sys_tokens, sys_pct, COLOR_SYSTEM, 0);
     row += 1;
 
     // Base prompt sub-row (indented).
-    let bp_tokens = cw.breakdown.base_prompt_tokens;
+    let bp_tokens = cw.base_prompt_tokens;
     let bp_pct = cw.base_prompt_fraction() * 100.0;
     render_row(buf, x, row, width, "Base prompt", bp_tokens, bp_pct, COLOR_SYSTEM, 2);
     row += 1;
@@ -140,7 +140,6 @@ fn render_breakdown(buf: &mut Buffer, x: u16, y: u16, width: u16, cw: &ContextWi
             .and_then(|n| n.to_str())
             .unwrap_or("unknown");
         let tokens = cw
-            .breakdown
             .agent_files_tokens
             .iter()
             .find(|(p, _)| p == &path)
@@ -151,13 +150,13 @@ fn render_breakdown(buf: &mut Buffer, x: u16, y: u16, width: u16, cw: &ContextWi
     }
 
     // Messages row.
-    let msg_tokens = cw.breakdown.messages_tokens;
+    let msg_tokens = cw.messages_tokens;
     let msg_pct = cw.messages_fraction() * 100.0;
     render_row(buf, x, row, width, "Messages", msg_tokens, msg_pct, COLOR_MESSAGES, 0);
     row += 1;
 
     // Other row.
-    let other_tokens = cw.breakdown.other_tokens;
+    let other_tokens = cw.other_tokens;
     let other_pct = cw.other_fraction() * 100.0;
     render_row(buf, x, row, width, "Other", other_tokens, other_pct, COLOR_OTHER, 0);
 

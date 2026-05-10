@@ -263,8 +263,8 @@ mod tests {
         let id = SessionId::new();
         let history = FsSessionHistory::create(&dir_path, &id).unwrap();
 
-        let n1 = Node::new(Message::user("hello"), None);
-        let n2 = Node::new(Message::assistant("hi there"), Some(n1.id.clone()));
+        let n1 = Node::new(Message::user("hello"), None, None);
+        let n2 = Node::new(Message::assistant("hi there"), Some(n1.id.clone()), None);
 
         history.append(&n1).unwrap();
         history.append(&n2).unwrap();
@@ -302,7 +302,7 @@ mod tests {
         let id = SessionId::new();
         let history = FsSessionHistory::create(&dir_path, &id).unwrap();
 
-        let node = Node::new(Message::tool_result("call-abc", "output"), None);
+        let node = Node::new(Message::tool_result("call-abc", "output"), None, None);
         history.append(&node).unwrap();
 
         let loaded = history.nodes().unwrap();

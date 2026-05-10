@@ -9,11 +9,15 @@ impl Command for Usage {
         let tx = ctx.msg_tx;
         let app = ctx.app.clone();
         ctx.rt_handle.spawn(async move {
-            match app.lock().await.context_window() {
+            let guard = app.lock().await;
+            match guard.context_window() {
                 Some(cw) => {
-                    let _ = tx.send(Msg::OpenUsageView(cw)).await;
+                    let history = guard.usage_history();
+                    drop(guard);
+                    let _ = tx.send(Msg::OpenUsageView(cw, history)).await;
                 }
                 None => {
+                    drop(guard);
                     let _ = tx
                         .send(Msg::SetStatus(
                             "no context window data yet — send a message first".to_string(),

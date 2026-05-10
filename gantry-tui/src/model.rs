@@ -4,8 +4,8 @@ use nucleo_matcher::{
 };
 
 use gantry_core::{
-    Branch, ContextWindow, ModelSelection, ProviderAlias, ProviderConfig, SessionId, SessionInfo,
-    SessionTree, StoredCredential, UserId,
+    Branch, ContextWindow, ModelSelection, ProviderAlias, ProviderConfig, RequestUsage, SessionId,
+    SessionInfo, SessionTree, StoredCredential, UserId,
 };
 
 /// The top-level editing mode, analogous to Vim's modal editing.
@@ -37,6 +37,8 @@ pub struct Model {
 /// State for the context window usage overlay.
 pub struct UsageView {
     pub context_window: ContextWindow,
+    /// Per-request usage history for this session, oldest first.
+    pub history: Vec<RequestUsage>,
 }
 
 /// State for the sessions browser overlay.
@@ -622,8 +624,8 @@ impl Model {
     }
 
     /// Activates the context window usage overlay with the given snapshot.
-    pub fn activate_usage_view(&mut self, context_window: ContextWindow) {
-        self.usage_view = Some(UsageView { context_window });
+    pub fn activate_usage_view(&mut self, context_window: ContextWindow, history: Vec<RequestUsage>) {
+        self.usage_view = Some(UsageView { context_window, history });
     }
 
     /// Closes the context window usage overlay.

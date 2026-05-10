@@ -23,7 +23,7 @@ pub use provider::ToolCallEvent;
 pub use provider::registry::ProviderClientRegistry;
 pub use provider::{ModelAlias, ModelSelection, ProviderAlias};
 pub use rig::agent::{MultiTurnStreamItem, StreamingError};
-pub use metrics::{CharCounts, ContextWindow, TokenBreakdown};
+pub use metrics::{CharCounts, ContextWindow, RequestUsage};
 pub use rig::completion::Usage;
 pub use rig::streaming::StreamedAssistantContent;
 

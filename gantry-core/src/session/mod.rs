@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::message::Message;
+use crate::metrics::RequestUsage;
 
 use crate::session::tree::build_branch;
 
@@ -131,7 +132,18 @@ impl<H: SessionHistory> Session<H> {
 
     /// Appends a [`Message`] to the session as a new node, persisting it to history.
     pub fn append_message(&mut self, message: Message) -> Result<()> {
-        let node = Node::new(message, self.current_leaf_id.clone());
+        self.append_message_with_usage(message, None)
+    }
+
+    /// Appends a [`Message`] with optional token usage, persisting it to history.
+    ///
+    /// `usage` should be `Some` for assistant messages produced by a model response.
+    pub fn append_message_with_usage(
+        &mut self,
+        message: Message,
+        usage: Option<RequestUsage>,
+    ) -> Result<()> {
+        let node = Node::new(message, self.current_leaf_id.clone(), usage);
         self.history
             .append(&node)
             .with_context(|| format!("failed to persist node to session {}", self.session_id))?;
@@ -207,16 +219,20 @@ pub struct Node {
     pub parent_id: Option<NodeId>,
     pub timestamp: Timestamp,
     pub message: Message,
+    /// Token usage for the request that produced this node, set on assistant nodes only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<RequestUsage>,
 }
 
 impl Node {
     /// Creates a new node with a fresh ID, the current timestamp, and the given message.
-    pub fn new(message: Message, parent_id: Option<NodeId>) -> Self {
+    pub fn new(message: Message, parent_id: Option<NodeId>, usage: Option<RequestUsage>) -> Self {
         Self {
             id: NodeId::new(),
             parent_id,
             timestamp: Timestamp::now(),
             message,
+            usage,
         }
     }
 }

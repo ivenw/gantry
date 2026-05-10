@@ -92,8 +92,8 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
         }
         // SelectModel is handled in Runtime before update() is called.
         Msg::SelectModel(_) => None,
-        Msg::OpenUsageView(cw) => {
-            model.activate_usage_view(cw);
+        Msg::OpenUsageView(cw, history) => {
+            model.activate_usage_view(cw, history);
             None
         }
         Msg::Quit | Msg::SendMessage(_) | Msg::InterruptStream | Msg::ExecuteCommand(_) | Msg::BranchTo(_) | Msg::BranchToWithInput { .. } => None,
