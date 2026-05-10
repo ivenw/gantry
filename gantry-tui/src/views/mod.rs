@@ -8,6 +8,7 @@ pub mod sessions;
 pub mod status_message;
 pub mod statusline;
 pub mod tree;
+pub mod usage;
 
 pub use app::render;
 

@@ -4,6 +4,7 @@ pub mod providers;
 pub mod quit;
 pub mod sessions;
 pub mod tree;
+pub mod usage;
 
 use crate::message::Msg;
 use gantry_core::App;
@@ -31,6 +32,7 @@ pub enum KnownCommand {
     Quit,
     Sessions,
     Tree,
+    Usage,
 }
 
 impl KnownCommand {
@@ -41,6 +43,7 @@ impl KnownCommand {
         KnownCommand::Quit,
         KnownCommand::Sessions,
         KnownCommand::Tree,
+        KnownCommand::Usage,
     ];
 
     pub const fn name(&self) -> &'static str {
@@ -51,6 +54,7 @@ impl KnownCommand {
             KnownCommand::Quit => "quit",
             KnownCommand::Sessions => "sessions",
             KnownCommand::Tree => "tree",
+            KnownCommand::Usage => "usage",
         }
     }
 
@@ -62,6 +66,7 @@ impl KnownCommand {
             KnownCommand::Quit => "Quit the application",
             KnownCommand::Sessions => "Browse and resume sessions",
             KnownCommand::Tree => "Browse the message tree",
+            KnownCommand::Usage => "Show context window usage",
         }
     }
 
@@ -74,6 +79,7 @@ impl KnownCommand {
             KnownCommand::Quit => Box::new(quit::Quit),
             KnownCommand::Sessions => Box::new(sessions::Sessions),
             KnownCommand::Tree => Box::new(tree::Tree),
+            KnownCommand::Usage => Box::new(usage::Usage),
         }
     }
 }

@@ -171,7 +171,7 @@ pub struct OllamaProviderConfig {
     pub base_url: Option<String>,
     /// Context window size in tokens. Ollama uses a server/model-load-time setting rather than
     /// per-model metadata, so this must be configured explicitly if context tracking is desired.
-    pub context_window: Option<u32>,
+    pub context_length: Option<u32>,
 }
 
 /// Configuration for a GitHub Copilot provider instance.

@@ -3,12 +3,13 @@ use crate::views::ViewState;
 use crate::views::chat::ChatView;
 use crate::views::command_picker::CommandPickerView;
 use crate::views::input::InputView;
-use crate::views::status_message::StatusMessageView;
-use crate::views::statusline::StatuslineView;
 use crate::views::model_picker::ModelPickerViewWidget;
 use crate::views::providers::ProvidersViewWidget;
 use crate::views::sessions::SessionsViewWidget;
+use crate::views::status_message::StatusMessageView;
+use crate::views::statusline::StatuslineView;
 use crate::views::tree::TreeViewWidget;
+use crate::views::usage::UsageViewWidget;
 
 use ratatui::{
     Frame,
@@ -38,7 +39,9 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
         return;
     }
 
-    let input_height = if let Some(ref picker) = model.command_picker {
+    let input_height = if let Some(ref uv) = model.usage_view {
+        UsageViewWidget::new(uv).calc_height()
+    } else if let Some(ref picker) = model.command_picker {
         CommandPickerView::new(picker).calc_height(area.width)
     } else {
         InputView::new(&model.input.value, model.input.cursor).calc_height(area.width)
@@ -65,7 +68,9 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
     };
     frame.render_stateful_widget(chat, chat_area, &mut view_state.chat);
 
-    if let Some(ref picker) = model.command_picker {
+    if let Some(ref uv) = model.usage_view {
+        frame.render_widget(UsageViewWidget::new(uv), input_area);
+    } else if let Some(ref picker) = model.command_picker {
         frame.render_widget(CommandPickerView::new(picker), input_area);
     } else {
         frame.render_widget(

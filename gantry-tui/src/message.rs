@@ -37,6 +37,7 @@ pub enum Msg {
     ResumeSession(SessionId),
 
     ContextWindowUpdated(ContextWindow),
+    OpenUsageView(ContextWindow),
 
     // Providers overlay
     OpenProvidersView(Vec<ProviderConfig>),

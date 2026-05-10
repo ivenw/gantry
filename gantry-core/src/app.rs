@@ -145,7 +145,7 @@ impl App {
             .iter()
             .find(|p| p.alias() == &selection.provider)
             .and_then(|p| match p {
-                ProviderConfig::Ollama(cfg) => cfg.context_window,
+                ProviderConfig::Ollama(cfg) => cfg.context_length,
                 _ => None,
             })
     }

@@ -1,9 +1,12 @@
 use nucleo_matcher::{
-    pattern::{AtomKind, CaseMatching, Normalization, Pattern},
     Config, Matcher,
+    pattern::{AtomKind, CaseMatching, Normalization, Pattern},
 };
 
-use gantry_core::{Branch, ContextWindow, ModelSelection, ProviderAlias, ProviderConfig, SessionId, SessionInfo, SessionTree, StoredCredential, UserId};
+use gantry_core::{
+    Branch, ContextWindow, ModelSelection, ProviderAlias, ProviderConfig, SessionId, SessionInfo,
+    SessionTree, StoredCredential, UserId,
+};
 
 /// The top-level editing mode, analogous to Vim's modal editing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,9 +28,15 @@ pub struct Model {
     pub tree_view: Option<TreeView>,
     pub providers_view: Option<ProvidersView>,
     pub model_picker_view: Option<ModelPickerView>,
+    pub usage_view: Option<UsageView>,
     pub status_message: Option<String>,
     /// Context window snapshot from the most recently completed stream.
     pub context_window: Option<ContextWindow>,
+}
+
+/// State for the context window usage overlay.
+pub struct UsageView {
+    pub context_window: ContextWindow,
 }
 
 /// State for the sessions browser overlay.
@@ -83,11 +92,19 @@ pub struct WizardField {
 
 impl WizardField {
     pub fn required(label: &'static str) -> Self {
-        Self { label, value: String::new(), required: true }
+        Self {
+            label,
+            value: String::new(),
+            required: true,
+        }
     }
 
     pub fn optional(label: &'static str) -> Self {
-        Self { label, value: String::new(), required: false }
+        Self {
+            label,
+            value: String::new(),
+            required: false,
+        }
     }
 }
 
@@ -208,7 +225,14 @@ impl ProviderWizard {
                 WizardField::required("API Key"),
             ],
         };
-        Self { kind, copilot_auth, fields, focused_idx: 0, cursor: 0, error: None }
+        Self {
+            kind,
+            copilot_auth,
+            fields,
+            focused_idx: 0,
+            cursor: 0,
+            error: None,
+        }
     }
 
     /// Returns the number of rows in the wizard (fields + confirm).
@@ -238,8 +262,12 @@ impl ProviderWizard {
                 let base_url = self.fields[1].value.trim();
                 let config = ProviderConfig::Ollama(gantry_core::OllamaProviderConfig {
                     alias,
-                    base_url: if base_url.is_empty() { None } else { Some(base_url.to_string()) },
-                    context_window: None,
+                    base_url: if base_url.is_empty() {
+                        None
+                    } else {
+                        Some(base_url.to_string())
+                    },
+                    context_length: None,
                 });
                 Ok((config, None))
             }
@@ -266,19 +294,19 @@ impl ProviderWizard {
             WizardProviderKind::OpenAiCompletions => {
                 let base_url = self.fields[1].value.trim().to_string();
                 let api_key = self.fields[2].value.trim().to_string();
-                let config = ProviderConfig::OpenAiCompletions(gantry_core::OpenAiCompletionsProviderConfig {
-                    alias,
-                    base_url,
-                });
+                let config = ProviderConfig::OpenAiCompletions(
+                    gantry_core::OpenAiCompletionsProviderConfig { alias, base_url },
+                );
                 Ok((config, Some(StoredCredential::ApiKey { value: api_key })))
             }
             WizardProviderKind::OpenAiResponses => {
                 let base_url = self.fields[1].value.trim().to_string();
                 let api_key = self.fields[2].value.trim().to_string();
-                let config = ProviderConfig::OpenAiResponses(gantry_core::OpenAiResponsesProviderConfig {
-                    alias,
-                    base_url,
-                });
+                let config =
+                    ProviderConfig::OpenAiResponses(gantry_core::OpenAiResponsesProviderConfig {
+                        alias,
+                        base_url,
+                    });
                 Ok((config, Some(StoredCredential::ApiKey { value: api_key })))
             }
         }
@@ -395,6 +423,7 @@ impl Model {
             tree_view: None,
             providers_view: None,
             model_picker_view: None,
+            usage_view: None,
             status_message: None,
             context_window: None,
         }
@@ -468,12 +497,20 @@ impl Model {
     }
 
     /// Opens the sessions browser, pre-selecting the currently active session.
-    pub fn activate_sessions_view(&mut self, sessions: Vec<SessionInfo>, active_session_id: SessionId) {
+    pub fn activate_sessions_view(
+        &mut self,
+        sessions: Vec<SessionInfo>,
+        active_session_id: SessionId,
+    ) {
         let selected_idx = sessions
             .iter()
             .rposition(|s| s.id == active_session_id)
             .unwrap_or(sessions.len().saturating_sub(1));
-        self.sessions_view = Some(SessionsView { sessions, selected_idx, active_session_id });
+        self.sessions_view = Some(SessionsView {
+            sessions,
+            selected_idx,
+            active_session_id,
+        });
     }
 
     pub fn deactivate_sessions_view(&mut self) {
@@ -482,16 +519,21 @@ impl Model {
 
     pub fn move_sessions_selection_up(&mut self) {
         if let Some(ref mut sv) = self.sessions_view
-            && !sv.sessions.is_empty() {
-                sv.selected_idx = sv.selected_idx.checked_sub(1).unwrap_or(sv.sessions.len() - 1);
-            }
+            && !sv.sessions.is_empty()
+        {
+            sv.selected_idx = sv
+                .selected_idx
+                .checked_sub(1)
+                .unwrap_or(sv.sessions.len() - 1);
+        }
     }
 
     pub fn move_sessions_selection_down(&mut self) {
         if let Some(ref mut sv) = self.sessions_view
-            && !sv.sessions.is_empty() {
-                sv.selected_idx = (sv.selected_idx + 1) % sv.sessions.len();
-            }
+            && !sv.sessions.is_empty()
+        {
+            sv.selected_idx = (sv.selected_idx + 1) % sv.sessions.len();
+        }
     }
 
     /// Returns the session highlighted in the browser, if any.
@@ -563,25 +605,49 @@ impl Model {
             .as_ref()
             .and_then(|s| models.iter().position(|m| m == s))
             .unwrap_or(0);
-        self.model_picker_view = Some(ModelPickerView { models, selected_idx, active_selection });
+        self.model_picker_view = Some(ModelPickerView {
+            models,
+            selected_idx,
+            active_selection,
+        });
     }
 
     pub fn deactivate_model_picker_view(&mut self) {
         self.model_picker_view = None;
     }
 
+    /// Returns `true` if the context window usage overlay is currently shown.
+    pub fn is_usage_view_active(&self) -> bool {
+        self.usage_view.is_some()
+    }
+
+    /// Activates the context window usage overlay with the given snapshot.
+    pub fn activate_usage_view(&mut self, context_window: ContextWindow) {
+        self.usage_view = Some(UsageView { context_window });
+    }
+
+    /// Closes the context window usage overlay.
+    pub fn deactivate_usage_view(&mut self) {
+        self.usage_view = None;
+    }
+
     pub fn move_model_picker_selection_up(&mut self) {
         if let Some(ref mut mv) = self.model_picker_view
-            && !mv.models.is_empty() {
-                mv.selected_idx = mv.selected_idx.checked_sub(1).unwrap_or(mv.models.len() - 1);
-            }
+            && !mv.models.is_empty()
+        {
+            mv.selected_idx = mv
+                .selected_idx
+                .checked_sub(1)
+                .unwrap_or(mv.models.len() - 1);
+        }
     }
 
     pub fn move_model_picker_selection_down(&mut self) {
         if let Some(ref mut mv) = self.model_picker_view
-            && !mv.models.is_empty() {
-                mv.selected_idx = (mv.selected_idx + 1) % mv.models.len();
-            }
+            && !mv.models.is_empty()
+        {
+            mv.selected_idx = (mv.selected_idx + 1) % mv.models.len();
+        }
     }
 
     /// Returns the currently highlighted model selection in the model picker, if any.
@@ -639,13 +705,19 @@ impl ChatModel {
 
     /// Inserts a tool call row with `done: false`. Returns the message index for later lookup.
     pub fn push_tool_call(&mut self, id: String, name: String) {
-        self.messages.push(ChatMessage::ToolCall { id, name, done: false });
+        self.messages.push(ChatMessage::ToolCall {
+            id,
+            name,
+            done: false,
+        });
     }
 
     /// Marks the tool call with `id` as done.
     pub fn finish_tool_call(&mut self, id: &str) {
         for msg in &mut self.messages {
-            if let ChatMessage::ToolCall { id: msg_id, done, .. } = msg
+            if let ChatMessage::ToolCall {
+                id: msg_id, done, ..
+            } = msg
                 && msg_id == id
             {
                 *done = true;
@@ -703,9 +775,10 @@ impl ChatModel {
         // Remove any partial assistant message that was pushed during streaming.
         if self.streaming_message_pushed
             && let Some(idx) = self.streaming_message_idx
-                && idx < self.messages.len() {
-                    self.messages.remove(idx);
-                }
+            && idx < self.messages.len()
+        {
+            self.messages.remove(idx);
+        }
         // Remove the optimistic user message that was added just before streaming started.
         // It sits immediately before the (now-removed) assistant message.
         let user_idx = self
@@ -822,13 +895,21 @@ impl CommandPicker {
         }
 
         let mut matcher = Matcher::new(Config::DEFAULT);
-        let pattern = Pattern::new(&self.filter, CaseMatching::Smart, Normalization::Smart, AtomKind::Fuzzy);
+        let pattern = Pattern::new(
+            &self.filter,
+            CaseMatching::Smart,
+            Normalization::Smart,
+            AtomKind::Fuzzy,
+        );
 
         let mut scored: Vec<(u32, &CommandEntry)> = self
             .commands
             .iter()
             .filter_map(|cmd| {
-                let score = pattern.score(nucleo_matcher::Utf32Str::new(&cmd.name, &mut Vec::new()), &mut matcher)?;
+                let score = pattern.score(
+                    nucleo_matcher::Utf32Str::new(&cmd.name, &mut Vec::new()),
+                    &mut matcher,
+                )?;
                 Some((score, cmd))
             })
             .collect();

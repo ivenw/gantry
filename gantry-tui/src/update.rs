@@ -92,6 +92,10 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
         }
         // SelectModel is handled in Runtime before update() is called.
         Msg::SelectModel(_) => None,
+        Msg::OpenUsageView(cw) => {
+            model.activate_usage_view(cw);
+            None
+        }
         Msg::Quit | Msg::SendMessage(_) | Msg::InterruptStream | Msg::ExecuteCommand(_) | Msg::BranchTo(_) | Msg::BranchToWithInput { .. } => None,
     }
 }
@@ -137,6 +141,10 @@ fn handle_key(
         return handle_key_tree_view(model, key);
     }
 
+    if model.is_usage_view_active() {
+        return handle_key_usage_view(model, key);
+    }
+
     if model.is_command_picker_active() {
         return handle_key_command_picker(model, key);
     }
@@ -145,6 +153,13 @@ fn handle_key(
         InputMode::Normal => handle_key_normal(model, view_state, key),
         InputMode::Insert => handle_key_insert(model, view_state, key),
     }
+}
+
+fn handle_key_usage_view(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
+    if key.code == KeyCode::Esc {
+        model.deactivate_usage_view();
+    }
+    None
 }
 
 fn handle_key_model_picker(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
