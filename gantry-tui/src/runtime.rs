@@ -25,6 +25,7 @@ pub struct Runtime {
     view_state: ViewState,
     stream_task: Option<JoinHandle<()>>,
     is_streaming: Arc<AtomicBool>,
+    cancel_stream: Arc<AtomicBool>,
 }
 
 impl Runtime {
@@ -56,6 +57,7 @@ impl Runtime {
             view_state: ViewState::default(),
             stream_task: None,
             is_streaming: Arc::new(AtomicBool::new(false)),
+            cancel_stream: Arc::new(AtomicBool::new(false)),
         })
     }
 
@@ -172,21 +174,26 @@ impl Runtime {
     }
 
     fn spawn_send_message(&mut self, input: String) {
+        // Cancel any in-flight stream before starting a new one.
+        self.cancel_stream.store(true, Ordering::SeqCst);
         if let Some(old) = self.stream_task.take() {
             old.abort();
         }
 
         let tx = self.msg_tx.clone();
         let app = self.app.clone();
+        let app_ref = self.app.clone();
         let is_streaming = self.is_streaming.clone();
 
+        let cancel = self.cancel_stream.clone();
+        cancel.store(false, Ordering::SeqCst);
+
         let task = self.rt.spawn(async move {
-            let app_ref = app.clone();
-            match App::stream_message(app, input).await {
+            match gantry_core::stream_message(app, input).await {
                 Err(e) => {
                     let _ = tx.send(Msg::StreamError(e.to_string())).await;
                 }
-                Ok((mut stream, mut hook_rx)) => {
+                Ok((mut response, mut hook_rx)) => {
                     is_streaming.store(true, Ordering::SeqCst);
                     let hook_tx = tx.clone();
                     tokio::spawn(async move {
@@ -204,11 +211,12 @@ impl Runtime {
                             }
                         }
                     });
-                    while let Some(item) = stream.next().await {
-                        if tx.send(Msg::StreamItem(item)).await.is_err() {
+                    while let Some(item) = response.stream.next().await {
+                        if cancel.load(Ordering::SeqCst) || tx.send(Msg::StreamItem(item)).await.is_err() {
                             break;
                         }
                     }
+                    response.commit().await;
                     if let Some(cw) = app_ref.lock().await.context_window() {
                         let _ = tx.send(Msg::ContextWindowUpdated(cw)).await;
                     }
@@ -221,9 +229,8 @@ impl Runtime {
     }
 
     fn interrupt_stream(&mut self) {
-        if let Some(task) = self.stream_task.take() {
-            task.abort();
-        }
+        self.cancel_stream.store(true, Ordering::SeqCst);
+        self.stream_task.take();
         self.is_streaming.store(false, Ordering::SeqCst);
     }
 

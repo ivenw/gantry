@@ -7,8 +7,10 @@ use crate::message::Message;
 use anyhow::Result;
 use futures::Stream;
 use rig::agent::{MultiTurnStreamItem, StreamingError};
+use rig::message::{AssistantContent, UserContent};
 use rig::streaming::StreamedAssistantContent;
 use tokio::sync::Mutex;
+use tokio::sync::oneshot;
 
 use crate::config::{ProjectConfig, ProviderConfig};
 use crate::tools::{BashTool, EditTool, GrepTool, ReadTool, TreeTool, WriteTool};
@@ -23,6 +25,7 @@ use crate::session::registry::SessionRegistry;
 use crate::session::{NodeId, Session, SessionId, SessionTree};
 use crate::system_prompt::{BASE_PROMPT, build_system_prompt};
 use rig::completion::Usage as RigUsage;
+use rig::tool::ToolDyn;
 
 type FsSession = Session<crate::fs::session_registry::FsSessionHistory>;
 
@@ -37,6 +40,10 @@ pub struct App {
     session: FsSession,
     pub selection: Option<ModelSelection>,
     registry: ProviderClientRegistry,
+    /// Cached system prompt (preamble), rebuilt by [`App::refresh_system_prompt`].
+    system_prompt: String,
+    /// Char counts per agent file, captured when the system prompt was last built.
+    agent_file_char_counts: Vec<(PathBuf, usize)>,
     /// Token usage from the most recently completed stream.
     last_usage: Option<RigUsage>,
     /// Character counts per component, captured just before the most recent request.
@@ -68,6 +75,8 @@ impl App {
             session_registry.create_session()?
         };
         let total_consumption = session.total_consumption();
+        let (system_prompt, agent_file_char_counts) =
+            Self::build_system_prompt_with_counts(&project_path);
 
         Ok(Self {
             project_path,
@@ -76,6 +85,8 @@ impl App {
             session,
             selection: default_model,
             registry,
+            system_prompt,
+            agent_file_char_counts,
             last_usage: None,
             last_char_counts: None,
             total_consumption,
@@ -273,43 +284,57 @@ impl App {
         Ok(())
     }
 
-    /// Persists `content` as a user message, then streams the agent response.
+    /// Rebuilds the cached system prompt and agent file char counts from disk.
+    pub fn refresh_system_prompt(&mut self) {
+        let (prompt, counts) = Self::build_system_prompt_with_counts(&self.project_path);
+        self.system_prompt = prompt;
+        self.agent_file_char_counts = counts;
+    }
+
+    fn build_system_prompt_with_counts(project_path: &PathBuf) -> (String, Vec<(PathBuf, usize)>) {
+        let agent_files = discover_agents_md(project_path);
+        let counts = agent_files
+            .iter()
+            .map(|f| (f.path.clone(), f.contents.len()))
+            .collect();
+        (build_system_prompt(&agent_files), counts)
+    }
+
+    /// Returns the tools available for the current request.
+    pub fn tools(&self) -> Vec<Box<dyn ToolDyn>> {
+        vec![
+            Box::new(ReadTool),
+            Box::new(WriteTool),
+            Box::new(EditTool),
+            Box::new(GrepTool),
+            Box::new(TreeTool),
+            Box::new(BashTool),
+        ]
+    }
+
+    /// Appends `content` as a user message, captures char counts, and returns the prepared
+    /// history and model selection needed to dispatch a request.
     ///
-    /// Returns the chat stream and a receiver for tool call lifecycle events. When the stream
-    /// is exhausted the assembled assistant reply is automatically appended to the session
-    /// history. The caller does not need to persist it separately.
-    pub async fn stream_message(
-        app: Arc<Mutex<App>>,
-        content: String,
-    ) -> Result<(
-        ChatStream,
-        tokio::sync::mpsc::UnboundedReceiver<HookEvent>,
-    )> {
-        let (hook_tx, hook_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut guard = app.lock().await;
-        guard.append_message(Message::user(content))?;
+    /// Fails if no model selection is active.
+    pub fn prepare_request(&mut self, content: String) -> Result<PreparedRequest> {
+        self.append_message(Message::user(content))?;
         let history: Vec<rig::message::Message> =
-            guard.history().into_iter().map(Into::into).collect();
-        let agent_files = discover_agents_md(&guard.project_path);
-        let system_prompt = build_system_prompt(&agent_files);
+            self.history().into_iter().map(Into::into).collect();
         let char_counts = CharCounts {
             base_prompt: BASE_PROMPT.len(),
-            agent_files: agent_files
-                .iter()
-                .map(|f| (f.path.clone(), f.contents.len()))
-                .collect(),
+            agent_files: self.agent_file_char_counts.clone(),
             messages: history.iter().fold(0, |acc, m| {
                 acc + match m {
                     rig::message::Message::User { content } => content.iter().fold(0, |a, c| {
                         a + match c {
-                            rig::message::UserContent::Text(t) => t.text.len(),
+                            UserContent::Text(t) => t.text.len(),
                             _ => 0,
                         }
                     }),
                     rig::message::Message::Assistant { content, .. } => {
                         content.iter().fold(0, |a, c| {
                             a + match c {
-                                rig::message::AssistantContent::Text(t) => t.text.len(),
+                                AssistantContent::Text(t) => t.text.len(),
                                 _ => 0,
                             }
                         })
@@ -318,64 +343,133 @@ impl App {
                 }
             }),
         };
-        guard.last_char_counts = Some(char_counts);
-        let selection = guard
+        self.last_char_counts = Some(char_counts);
+        let selection = self
             .selection
             .clone()
             .ok_or_else(|| anyhow::anyhow!("no active model selection"))?;
-        let tools: Vec<Box<dyn rig::tool::ToolDyn>> = vec![
-            Box::new(ReadTool),
-            Box::new(WriteTool),
-            Box::new(EditTool),
-            Box::new(GrepTool),
-            Box::new(TreeTool),
-            Box::new(BashTool),
-        ];
-        let hook = PromptHook::new(hook_tx);
-        let agent = guard
-            .registry
-            .agent(&selection, Some(&system_prompt), hook, tools)?;
-        let Some(prompt) = history.last().cloned() else {
-            anyhow::bail!("no messages to stream");
-        };
-        let history = history[..history.len() - 1].to_vec();
-        drop(guard);
-        let inner = agent.stream_chat(prompt, history).await;
-        Ok((Box::pin(AppendOnExhaust::new(inner, app)), hook_rx))
+        Ok(PreparedRequest { history, selection })
+    }
+
+}
+
+/// Prepared inputs for a single agent request, returned by [`App::prepare_request`].
+pub struct PreparedRequest {
+    pub history: Vec<rig::message::Message>,
+    pub selection: ModelSelection,
+}
+
+/// Returned by [`stream_message`]. Holds the live stream and the deferred commit.
+pub struct StreamingResponse {
+    /// Yields streamed assistant content as it arrives.
+    pub stream: ChatStream,
+    commit_future: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>,
+}
+
+impl StreamingResponse {
+    /// Drops the stream and persists the buffered assistant reply to the session.
+    ///
+    /// Must be called after the stream is consumed or abandoned. Safe to call after an
+    /// interrupt — whatever was buffered up to that point will be persisted.
+    pub async fn commit(self) {
+        drop(self.stream);
+        self.commit_future.await;
     }
 }
 
-/// Wraps a [`ChatStream`], accumulating streamed text and appending the complete assistant
-/// message to the session once the inner stream is exhausted. Also captures token usage from
-/// the [`MultiTurnStreamItem::FinalResponse`] and stores it on the [`App`].
-struct AppendOnExhaust {
-    inner: ChatStream,
+/// Persists `content` as a user message, then streams the agent response.
+///
+/// Returns a [`StreamingResponse`] and a receiver for tool call lifecycle events. The caller
+/// must call [`StreamingResponse::commit`] after the stream is done or abandoned to persist
+/// the assistant reply and update token usage.
+pub async fn stream_message(
     app: Arc<Mutex<App>>,
-    buffer: String,
-    usage: Option<RigUsage>,
-    done: bool,
+    content: String,
+) -> Result<(StreamingResponse, tokio::sync::mpsc::UnboundedReceiver<HookEvent>)> {
+    let (hook_tx, hook_rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut guard = app.lock().await;
+    let PreparedRequest { history, selection } = guard.prepare_request(content)?;
+    let system_prompt = guard.system_prompt.clone();
+    let tools = guard.tools();
+    let hook = PromptHook::new(hook_tx);
+    let agent = guard
+        .registry
+        .agent(&selection, Some(&system_prompt), hook, tools)?;
+    let Some(prompt) = history.last().cloned() else {
+        anyhow::bail!("no messages to stream");
+    };
+    let history = history[..history.len() - 1].to_vec();
+    drop(guard);
+    let (commit_tx, commit_rx) = oneshot::channel::<(String, Option<RigUsage>)>();
+    let inner = agent.stream_chat(prompt, history).await;
+    let stream = Box::pin(BufferingStream::new(inner, commit_tx));
+    let commit_future = async move {
+        let Ok((text, usage)) = commit_rx.await else {
+            return;
+        };
+        let mut guard = app.lock().await;
+        if let Some(u) = usage {
+            let consumption = Usage::from(&u);
+            if !text.is_empty() {
+                let _ = guard.append_message_with_usage(
+                    Message::assistant(text),
+                    Some(consumption.clone()),
+                );
+            }
+            guard.total_consumption += consumption;
+            guard.last_usage = Some(u);
+        } else if !text.is_empty() {
+            let _ = guard.append_message(Message::assistant(text));
+        }
+    };
+    Ok((
+        StreamingResponse {
+            stream,
+            commit_future: Box::pin(commit_future),
+        },
+        hook_rx,
+    ))
 }
 
-impl AppendOnExhaust {
-    fn new(inner: ChatStream, app: Arc<Mutex<App>>) -> Self {
+/// Wraps a [`ChatStream`], accumulating streamed text and usage. On drop (whether the stream
+/// was fully consumed or interrupted), sends the buffer through a oneshot channel so the
+/// caller's commit future can persist the assistant reply.
+struct BufferingStream {
+    inner: ChatStream,
+    commit_tx: Option<oneshot::Sender<(String, Option<RigUsage>)>>,
+    buffer: String,
+    usage: Option<RigUsage>,
+}
+
+impl BufferingStream {
+    fn new(inner: ChatStream, commit_tx: oneshot::Sender<(String, Option<RigUsage>)>) -> Self {
         Self {
             inner,
-            app,
+            commit_tx: Some(commit_tx),
             buffer: String::new(),
             usage: None,
-            done: false,
+        }
+    }
+
+    fn send_commit(&mut self) {
+        if let Some(tx) = self.commit_tx.take() {
+            let text = std::mem::take(&mut self.buffer);
+            let usage = self.usage.take();
+            let _ = tx.send((text, usage));
         }
     }
 }
 
-impl Stream for AppendOnExhaust {
+impl Drop for BufferingStream {
+    fn drop(&mut self) {
+        self.send_commit();
+    }
+}
+
+impl Stream for BufferingStream {
     type Item = Result<MultiTurnStreamItem<()>, StreamingError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.done {
-            return Poll::Ready(None);
-        }
-
         match Pin::new(&mut self.inner).poll_next(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Some(item)) => {
@@ -393,27 +487,7 @@ impl Stream for AppendOnExhaust {
                 Poll::Ready(Some(item))
             }
             Poll::Ready(None) => {
-                self.done = true;
-                let text = std::mem::take(&mut self.buffer);
-                let usage = self.usage.take();
-                let app = self.app.clone();
-                // Spawn a detached task so we can persist without blocking the stream poll.
-                tokio::spawn(async move {
-                    let mut guard = app.lock().await;
-                    if let Some(u) = usage {
-                        let consumption = Usage::from(&u);
-                        if !text.is_empty() {
-                            let _ = guard.append_message_with_usage(
-                                Message::assistant(text),
-                                Some(consumption.clone()),
-                            );
-                        }
-                        guard.total_consumption += consumption;
-                        guard.last_usage = Some(u);
-                    } else if !text.is_empty() {
-                        let _ = guard.append_message(Message::assistant(text));
-                    }
-                });
+                self.send_commit();
                 Poll::Ready(None)
             }
         }

@@ -11,7 +11,7 @@ pub mod session;
 pub mod system_prompt;
 pub mod tools;
 
-pub use app::App;
+pub use app::{App, StreamingResponse, stream_message};
 pub use config::{
     Credential, CredentialsCatalog, CredentialsRepository, CopilotProviderConfig,
     CortecsProviderConfig, OllamaProviderConfig, OpenAiCompletionsProviderConfig,
