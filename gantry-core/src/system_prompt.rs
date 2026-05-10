@@ -1,6 +1,6 @@
 use crate::resource_loader::AgentFile;
 
-const BASE_PROMPT: &str = "You are an expert coding assistant operating inside a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files. DON'T use emojis.";
+pub const BASE_PROMPT: &str = "You are an expert coding assistant operating inside a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files. DON'T use emojis.";
 
 /// Constructs the system prompt. If `agent_files` is empty, returns only the base prompt.
 /// Otherwise appends a `# Context` section with each file's contents under a `## <path>` heading.

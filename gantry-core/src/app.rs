@@ -13,14 +13,14 @@ use tokio::sync::Mutex;
 use crate::config::{ProjectConfig, ProviderConfig};
 use crate::dirs::{GlobalConfigDir, ProjectRootDir};
 use crate::fs::FsSessionRegistry;
-use crate::metrics::ContextWindow;
+use crate::metrics::{CharCounts, ContextWindow};
 use crate::provider::agent::ChatStream;
 use crate::provider::registry::ProviderClientRegistry;
 use crate::provider::{ModelAlias, ModelSelection, ToolCallEvent};
 use crate::resource_loader::discover_agents_md;
 use crate::session::registry::SessionRegistry;
 use crate::session::{NodeId, Session, SessionId, SessionTree};
-use crate::system_prompt::build_system_prompt;
+use crate::system_prompt::{BASE_PROMPT, build_system_prompt};
 use rig::completion::Usage;
 
 type FsSession = Session<crate::fs::session_registry::FsSessionHistory>;
@@ -38,6 +38,8 @@ pub struct App {
     registry: ProviderClientRegistry,
     /// Token usage from the most recently completed stream.
     last_usage: Option<Usage>,
+    /// Character counts per component, captured just before the most recent request.
+    last_char_counts: Option<CharCounts>,
 }
 
 impl App {
@@ -71,6 +73,7 @@ impl App {
             selection,
             registry,
             last_usage: None,
+            last_char_counts: None,
         })
     }
 
@@ -150,10 +153,13 @@ impl App {
     /// Returns a context window snapshot for the most recent request, or `None` if no request has
     /// been made yet. Combines last usage with the configured context length, if available.
     pub fn context_window(&self) -> Option<ContextWindow> {
-        self.last_usage.as_ref().map(|usage| {
-            let context_length = self.selection.as_ref().and_then(|s| s.context_length);
-            ContextWindow::new(usage, context_length)
-        })
+        let usage = self.last_usage.as_ref()?;
+        let char_counts = self.last_char_counts.as_ref()?;
+        if usage.total_tokens == 0 {
+            return None;
+        }
+        let context_length = self.selection.as_ref().and_then(|s| s.context_length);
+        Some(ContextWindow::new(usage, context_length, char_counts))
     }
 
     /// Returns all configured providers.
@@ -260,7 +266,35 @@ impl App {
         guard.append_message(Message::user(content))?;
         let history: Vec<rig::message::Message> =
             guard.history().into_iter().map(Into::into).collect();
-        let system_prompt = build_system_prompt(&discover_agents_md(&guard.project_path));
+        let agent_files = discover_agents_md(&guard.project_path);
+        let system_prompt = build_system_prompt(&agent_files);
+        let char_counts = CharCounts {
+            base_prompt: BASE_PROMPT.len(),
+            agent_files: agent_files
+                .iter()
+                .map(|f| (f.path.clone(), f.contents.len()))
+                .collect(),
+            messages: history.iter().fold(0, |acc, m| {
+                acc + match m {
+                    rig::message::Message::User { content } => content.iter().fold(0, |a, c| {
+                        a + match c {
+                            rig::message::UserContent::Text(t) => t.text.len(),
+                            _ => 0,
+                        }
+                    }),
+                    rig::message::Message::Assistant { content, .. } => {
+                        content.iter().fold(0, |a, c| {
+                            a + match c {
+                                rig::message::AssistantContent::Text(t) => t.text.len(),
+                                _ => 0,
+                            }
+                        })
+                    }
+                    rig::message::Message::System { content } => content.len(),
+                }
+            }),
+        };
+        guard.last_char_counts = Some(char_counts);
         let selection = guard
             .selection
             .clone()

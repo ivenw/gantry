@@ -1,3 +1,3 @@
 pub mod context_window;
 
-pub use context_window::ContextWindow;
+pub use context_window::{CharCounts, ContextWindow, TokenBreakdown};
