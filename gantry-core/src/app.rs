@@ -13,6 +13,7 @@ use tokio::sync::Mutex;
 use crate::config::{ProjectConfig, ProviderConfig};
 use crate::dirs::{GlobalConfigDir, ProjectRootDir};
 use crate::fs::FsSessionRegistry;
+use crate::metrics::ContextWindow;
 use crate::provider::agent::ChatStream;
 use crate::provider::registry::ProviderClientRegistry;
 use crate::provider::{ModelAlias, ModelSelection, ToolCallEvent};
@@ -146,9 +147,13 @@ impl App {
             })
     }
 
-    /// Returns the token usage from the most recently completed stream, if any.
-    pub fn last_usage(&self) -> Option<&Usage> {
-        self.last_usage.as_ref()
+    /// Returns a context window snapshot for the most recent request, or `None` if no request has
+    /// been made yet. Combines last usage with the configured context length, if available.
+    pub fn context_window(&self) -> Option<ContextWindow> {
+        self.last_usage.as_ref().map(|usage| {
+            let context_length = self.selection.as_ref().and_then(|s| s.context_length);
+            ContextWindow::new(usage, context_length)
+        })
     }
 
     /// Returns all configured providers.
@@ -246,7 +251,10 @@ impl App {
     pub async fn stream_message(
         app: Arc<Mutex<App>>,
         content: String,
-    ) -> Result<(ChatStream, tokio::sync::mpsc::UnboundedReceiver<ToolCallEvent>)> {
+    ) -> Result<(
+        ChatStream,
+        tokio::sync::mpsc::UnboundedReceiver<ToolCallEvent>,
+    )> {
         let (hook_tx, hook_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut guard = app.lock().await;
         guard.append_message(Message::user(content))?;
@@ -257,7 +265,9 @@ impl App {
             .selection
             .clone()
             .ok_or_else(|| anyhow::anyhow!("no active model selection"))?;
-        let agent = guard.registry.agent(&selection, Some(&system_prompt), hook_tx)?;
+        let agent = guard
+            .registry
+            .agent(&selection, Some(&system_prompt), hook_tx)?;
         let Some(prompt) = history.last().cloned() else {
             anyhow::bail!("no messages to stream");
         };

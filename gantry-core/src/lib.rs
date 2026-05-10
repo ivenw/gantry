@@ -1,6 +1,7 @@
 pub mod app;
 pub mod config;
 pub mod dirs;
+pub mod metrics;
 pub mod fs;
 pub mod message;
 pub mod resource_loader;
@@ -22,6 +23,7 @@ pub use provider::ToolCallEvent;
 pub use provider::registry::ProviderClientRegistry;
 pub use provider::{ModelAlias, ModelSelection, ProviderAlias};
 pub use rig::agent::{MultiTurnStreamItem, StreamingError};
+pub use metrics::ContextWindow;
 pub use rig::completion::Usage;
 pub use rig::streaming::StreamedAssistantContent;
 

@@ -76,8 +76,8 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             model.deactivate_tree_view();
             None
         }
-        Msg::UsageUpdated(usage) => {
-            model.last_usage = Some(usage);
+        Msg::ContextWindowUpdated(cw) => {
+            model.context_window = Some(cw);
             None
         }
         Msg::OpenProvidersView(providers) => {

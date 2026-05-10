@@ -3,7 +3,7 @@ use nucleo_matcher::{
     Config, Matcher,
 };
 
-use gantry_core::{Branch, ModelSelection, ProviderAlias, ProviderConfig, SessionId, SessionInfo, SessionTree, StoredCredential, Usage, UserId};
+use gantry_core::{Branch, ContextWindow, ModelSelection, ProviderAlias, ProviderConfig, SessionId, SessionInfo, SessionTree, StoredCredential, UserId};
 
 /// The top-level editing mode, analogous to Vim's modal editing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,8 +26,8 @@ pub struct Model {
     pub providers_view: Option<ProvidersView>,
     pub model_picker_view: Option<ModelPickerView>,
     pub status_message: Option<String>,
-    /// Token usage from the most recently completed stream.
-    pub last_usage: Option<Usage>,
+    /// Context window snapshot from the most recently completed stream.
+    pub context_window: Option<ContextWindow>,
 }
 
 /// State for the sessions browser overlay.
@@ -396,7 +396,7 @@ impl Model {
             providers_view: None,
             model_picker_view: None,
             status_message: None,
-            last_usage: None,
+            context_window: None,
         }
     }
 

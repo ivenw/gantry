@@ -181,6 +181,7 @@ impl Runtime {
         let is_streaming = self.is_streaming.clone();
 
         let task = self.rt.spawn(async move {
+            let app_ref = app.clone();
             match App::stream_message(app, input).await {
                 Err(e) => {
                     let _ = tx.send(Msg::StreamError(e.to_string())).await;
@@ -204,15 +205,12 @@ impl Runtime {
                         }
                     });
                     while let Some(item) = stream.next().await {
-                        if let Ok(gantry_core::MultiTurnStreamItem::FinalResponse(ref f)) = item {
-                            let usage = f.usage();
-                            if usage.input_tokens > 0 || usage.output_tokens > 0 {
-                                let _ = tx.send(Msg::UsageUpdated(usage)).await;
-                            }
-                        }
                         if tx.send(Msg::StreamItem(item)).await.is_err() {
                             break;
                         }
+                    }
+                    if let Some(cw) = app_ref.lock().await.context_window() {
+                        let _ = tx.send(Msg::ContextWindowUpdated(cw)).await;
                     }
                     is_streaming.store(false, Ordering::SeqCst);
                     let _ = tx.send(Msg::StreamDone).await;

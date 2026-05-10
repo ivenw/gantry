@@ -1,6 +1,6 @@
 use crate::effects::throbber::{Throbber, ThrobberStyle};
 use crate::model::InputMode;
-use gantry_core::Usage;
+use gantry_core::ContextWindow;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -35,22 +35,15 @@ impl StatuslineViewState {
 pub struct StatuslineView {
     mode: InputMode,
     is_streaming: bool,
-    last_usage: Option<Usage>,
-    context_length: Option<u32>,
+    context_window: Option<ContextWindow>,
 }
 
 impl StatuslineView {
-    pub fn new(
-        mode: InputMode,
-        is_streaming: bool,
-        last_usage: Option<Usage>,
-        context_length: Option<u32>,
-    ) -> Self {
+    pub fn new(mode: InputMode, is_streaming: bool, context_window: Option<ContextWindow>) -> Self {
         Self {
             mode,
             is_streaming,
-            last_usage,
-            context_length,
+            context_window,
         }
     }
 }
@@ -68,14 +61,11 @@ impl StatefulWidget for StatuslineView {
             }
         };
 
-        let text = match self.last_usage {
-            Some(usage) => {
-                let tokens_used = usage.input_tokens + usage.output_tokens;
-                match self.context_length {
-                    Some(ctx) => format!("{mode_text}  {tokens_used}/{ctx} ctx"),
-                    None => format!("{mode_text}  {tokens_used} ctx tokens"),
-                }
-            }
+        let text = match self.context_window {
+            Some(cw) => match cw.context_length {
+                Some(ctx) => format!("{mode_text}  {}/{ctx} ctx", cw.total_tokens),
+                None => format!("{mode_text}  {} ctx tokens", cw.total_tokens),
+            },
             None => mode_text,
         };
 
