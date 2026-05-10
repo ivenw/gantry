@@ -85,6 +85,10 @@ impl ProviderClientRegistry {
                 let credential = self.required_api_key_credential(&config.alias)?;
                 ProviderClient::openai_responses(config, &credential)
             }
+            ProviderConfig::Cortecs(config) => {
+                let credential = self.required_api_key_credential(&config.alias)?;
+                ProviderClient::cortecs(config, &credential)
+            }
         }
     }
 

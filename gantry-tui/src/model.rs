@@ -160,6 +160,7 @@ pub enum WizardProviderKind {
     Copilot,
     OpenAiCompletions,
     OpenAiResponses,
+    Cortecs,
 }
 
 impl WizardProviderKind {
@@ -170,6 +171,7 @@ impl WizardProviderKind {
             Self::Copilot => "GitHub Copilot",
             Self::OpenAiCompletions => "OpenAI Completions",
             Self::OpenAiResponses => "OpenAI Responses",
+            Self::Cortecs => "Cortecs",
         }
     }
 
@@ -178,6 +180,7 @@ impl WizardProviderKind {
         Self::Copilot,
         Self::OpenAiCompletions,
         Self::OpenAiResponses,
+        Self::Cortecs,
     ];
 }
 
@@ -224,6 +227,10 @@ impl ProviderWizard {
             WizardProviderKind::OpenAiResponses => vec![
                 WizardField::required("Alias"),
                 WizardField::required("Base URL"),
+                WizardField::required("API Key"),
+            ],
+            WizardProviderKind::Cortecs => vec![
+                WizardField::required("Alias"),
                 WizardField::required("API Key"),
             ],
         };
@@ -309,6 +316,12 @@ impl ProviderWizard {
                         alias,
                         base_url,
                     });
+                Ok((config, Some(StoredCredential::ApiKey { value: api_key })))
+            }
+            WizardProviderKind::Cortecs => {
+                let api_key = self.fields[1].value.trim().to_string();
+                let config =
+                    ProviderConfig::Cortecs(gantry_core::CortecsProviderConfig { alias });
                 Ok((config, Some(StoredCredential::ApiKey { value: api_key })))
             }
         }

@@ -174,6 +174,7 @@ pub enum ProviderConfig {
     Copilot(CopilotProviderConfig),
     OpenAiCompletions(OpenAiCompletionsProviderConfig),
     OpenAiResponses(OpenAiResponsesProviderConfig),
+    Cortecs(CortecsProviderConfig),
 }
 
 impl ProviderConfig {
@@ -184,6 +185,7 @@ impl ProviderConfig {
             ProviderConfig::Copilot(config) => &config.alias,
             ProviderConfig::OpenAiCompletions(config) => &config.alias,
             ProviderConfig::OpenAiResponses(config) => &config.alias,
+            ProviderConfig::Cortecs(config) => &config.alias,
         }
     }
 }
@@ -225,6 +227,15 @@ pub struct OpenAiResponsesProviderConfig {
     pub alias: ProviderAlias,
     /// Base URL of the OpenAI-compatible responses endpoint.
     pub base_url: String,
+}
+
+/// Configuration for a Cortecs provider instance.
+///
+/// Cortecs exposes an OpenAI-compatible completions endpoint and supports API key auth.
+/// Requires an `api_key` credential stored under this provider's alias.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CortecsProviderConfig {
+    pub alias: ProviderAlias,
 }
 
 

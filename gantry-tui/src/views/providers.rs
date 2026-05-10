@@ -270,5 +270,6 @@ fn provider_type_label(config: &gantry_core::ProviderConfig) -> &'static str {
         gantry_core::ProviderConfig::Copilot(_) => "copilot",
         gantry_core::ProviderConfig::OpenAiCompletions(_) => "openai-completions",
         gantry_core::ProviderConfig::OpenAiResponses(_) => "openai-responses",
+        gantry_core::ProviderConfig::Cortecs(_) => "cortecs",
     }
 }

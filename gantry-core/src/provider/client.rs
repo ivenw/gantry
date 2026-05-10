@@ -1,16 +1,17 @@
 use anyhow::Result;
-use rig::client::{CompletionClient, Nothing, ProviderClient as _};
+use rig::client::{CompletionClient, ModelListingClient as _, Nothing, ProviderClient as _};
 use rig::model::ModelList;
 use rig::providers::copilot::{self, CopilotAuth};
 use rig::providers::{ollama, openai};
 use rig::tool::ToolDyn;
 
 use crate::config::{
-    ApiKeyCredential, Credential, OllamaProviderConfig, OpenAiCompletionsProviderConfig,
-    OpenAiResponsesProviderConfig,
+    ApiKeyCredential, CortecsProviderConfig, Credential, OllamaProviderConfig,
+    OpenAiCompletionsProviderConfig, OpenAiResponsesProviderConfig,
 };
 use crate::provider::agent::BoxedAgent;
 use crate::provider::{ModelAlias, PromptHook};
+use crate::providers::cortecs;
 
 /// A constructed, ready-to-use provider client that can list models and create agents.
 pub enum ProviderClient {
@@ -21,6 +22,7 @@ pub enum ProviderClient {
     },
     OpenAiCompletions(openai::CompletionsClient),
     OpenAiResponses(openai::Client),
+    Cortecs(cortecs::Client),
 }
 
 impl ProviderClient {
@@ -54,6 +56,17 @@ impl ProviderClient {
         Ok(Self::OpenAiResponses(client))
     }
 
+    pub(crate) fn cortecs(
+        config: &CortecsProviderConfig,
+        credential: &ApiKeyCredential,
+    ) -> Result<Self> {
+        let _ = config;
+        let client = cortecs::Client::builder()
+            .api_key(&credential.value)
+            .build()?;
+        Ok(Self::Cortecs(client))
+    }
+
     pub(crate) fn github_copilot(credential: &Credential) -> Result<Self> {
         let auth = match credential {
             Credential::ApiKey(c) => CopilotAuth::ApiKey(c.value.clone()),
@@ -69,13 +82,12 @@ impl ProviderClient {
     ///
     /// Returns an error for providers that do not support model listing.
     pub async fn list_models(&self) -> Result<ModelList> {
-        use rig::client::ModelListingClient as _;
-
         match self {
             ProviderClient::Ollama(client) => Ok(client.list_models().await?),
             ProviderClient::GitHubCopilot { credential, .. } => {
                 fetch_copilot_models(credential).await
             }
+            ProviderClient::Cortecs(client) => Ok(client.list_models().await?),
             ProviderClient::OpenAiCompletions(_) | ProviderClient::OpenAiResponses(_) => Err(
                 anyhow::anyhow!("model listing is not supported for OpenAI-compatible providers"),
             ),
@@ -101,6 +113,9 @@ impl ProviderClient {
                 configure_agent(client.agent(model.as_str()), hook, preamble, tools)
             }
             ProviderClient::OpenAiResponses(client) => {
+                configure_agent(client.agent(model.as_str()), hook, preamble, tools)
+            }
+            ProviderClient::Cortecs(client) => {
                 configure_agent(client.agent(model.as_str()), hook, preamble, tools)
             }
         };

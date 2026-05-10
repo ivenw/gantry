@@ -8,8 +8,9 @@ pub use credentials::{
 };
 pub use project::ProjectConfig;
 pub use provider::{
-    CopilotProviderConfig, OllamaProviderConfig, OpenAiCompletionsProviderConfig,
-    OpenAiResponsesProviderConfig, ProviderConfig, ProviderConfigCatalog, ProviderConfigRepository,
+    CopilotProviderConfig, CortecsProviderConfig, OllamaProviderConfig,
+    OpenAiCompletionsProviderConfig, OpenAiResponsesProviderConfig, ProviderConfig,
+    ProviderConfigCatalog, ProviderConfigRepository,
 };
 
 use std::path::Path;

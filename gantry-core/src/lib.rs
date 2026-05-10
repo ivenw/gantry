@@ -1,5 +1,6 @@
 pub mod app;
 pub mod config;
+pub mod providers;
 pub mod dirs;
 pub mod metrics;
 pub mod fs;
@@ -13,8 +14,9 @@ pub mod tools;
 pub use app::App;
 pub use config::{
     Credential, CredentialsCatalog, CredentialsRepository, CopilotProviderConfig,
-    OllamaProviderConfig, OpenAiCompletionsProviderConfig, OpenAiResponsesProviderConfig,
-    ProjectConfig, ProviderConfig, ProviderConfigCatalog, ProviderConfigRepository, StoredCredential,
+    CortecsProviderConfig, OllamaProviderConfig, OpenAiCompletionsProviderConfig,
+    OpenAiResponsesProviderConfig, ProjectConfig, ProviderConfig, ProviderConfigCatalog,
+    ProviderConfigRepository, StoredCredential,
 };
 pub use dirs::{GlobalConfigDir, ProjectRootDir};
 pub use message::{Message, UserId};
