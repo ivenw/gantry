@@ -27,9 +27,8 @@ impl<'a> UsageViewWidget<'a> {
     pub fn calc_height(&self) -> u16 {
         let cw = &self.state.context_window;
         let agent_file_rows = cw.agent_files_tokens.len() as u16;
-        let remaining_row = if cw.context_length.is_some() { 1 } else { 0 };
-        // borders(2) + bar(1) + blank(1) + header(1) + system_prompt(1) + base_prompt(1) + agent_files(N) + messages(1) + other(1) + remaining(0|1)
-        2 + 1 + 1 + 1 + 1 + 1 + agent_file_rows + 1 + 1 + remaining_row
+        // borders(2) + bar(1) + blank(1) + header(1) + system_prompt(1) + base_prompt(1) + agent_files(N) + messages(1) + other(1) + remaining(1)
+        2 + 1 + 1 + 1 + 1 + 1 + agent_file_rows + 1 + 1 + 1
     }
 }
 
@@ -75,11 +74,10 @@ fn render_bar(buf: &mut Buffer, x: u16, y: u16, width: u16, cw: &ContextWindow) 
         return;
     }
 
-    let total = cw.total_tokens as f32;
-    let ctx = cw.context_length.map(|c| c as f32).unwrap_or(total);
+    let ctx = cw.max_tokens as f32;
     let w = width as f32;
 
-    let scale = |tokens: u64| -> u16 { ((tokens as f32 / ctx) * w).round() as u16 };
+    let scale = |tokens: u32| -> u16 { ((tokens as f32 / ctx) * w).round() as u16 };
 
     let sys_cols = scale(cw.system_prompt_tokens());
     let msg_cols = scale(cw.messages_tokens);
@@ -105,19 +103,14 @@ fn fill_bar(buf: &mut Buffer, x: u16, y: u16, width: u16, color: Color) {
 /// Renders the token breakdown table below the bar.
 fn render_breakdown(buf: &mut Buffer, x: u16, y: u16, width: u16, cw: &ContextWindow) {
     let total = cw.total_tokens;
-    let ctx_len = cw.context_length;
     let mut row = y;
 
-    // Header: total tokens / context length (or just total).
-    let header = match ctx_len {
-        Some(ctx) => format!(
-            "{} / {} tokens used  ({:.1}%)",
-            fmt_tokens(total),
-            fmt_tokens(ctx as u64),
-            cw.usage_fraction().unwrap_or(0.0) * 100.0,
-        ),
-        None => format!("{} tokens used", fmt_tokens(total)),
-    };
+    let header = format!(
+        "{} / {} tokens used  ({:.1}%)",
+        fmt_tokens(total),
+        fmt_tokens(cw.max_tokens),
+        cw.usage_fraction() * 100.0,
+    );
     buf.set_string(x, row, &header, Style::default().fg(Color::White));
     row += 1;
 
@@ -160,20 +153,17 @@ fn render_breakdown(buf: &mut Buffer, x: u16, y: u16, width: u16, cw: &ContextWi
     let other_pct = cw.other_fraction() * 100.0;
     render_row(buf, x, row, width, "Other", other_tokens, other_pct, COLOR_OTHER, 0);
 
-    // Remaining row (only if context length is known).
-    if let (Some(rem), Some(rem_frac)) = (cw.remaining_tokens(), cw.remaining_fraction()) {
-        render_row(
-            buf,
-            x,
-            row + 1,
-            width,
-            "Remaining",
-            rem,
-            rem_frac * 100.0,
-            COLOR_REMAINING,
-            0,
-        );
-    }
+    render_row(
+        buf,
+        x,
+        row + 1,
+        width,
+        "Remaining",
+        cw.remaining_tokens(),
+        cw.remaining_fraction() * 100.0,
+        COLOR_REMAINING,
+        0,
+    );
 }
 
 /// Renders a single labeled row with a right-aligned token count and percentage.
@@ -183,7 +173,7 @@ fn render_row(
     y: u16,
     width: u16,
     label: &str,
-    tokens: u64,
+    tokens: u32,
     pct: f32,
     color: Color,
     indent: u16,
@@ -208,7 +198,7 @@ fn render_row(
 }
 
 /// Formats a token count, abbreviating values ≥ 1000 as e.g. `12.3k`.
-fn fmt_tokens(n: u64) -> String {
+fn fmt_tokens(n: u32) -> String {
     if n >= 1000 {
         let k = n as f64 / 1000.0;
         // One significant digit in the fractional part.

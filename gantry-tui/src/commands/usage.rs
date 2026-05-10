@@ -12,9 +12,9 @@ impl Command for Usage {
             let guard = app.lock().await;
             match guard.context_window() {
                 Some(cw) => {
-                    let history = guard.usage_history();
+                    let consumption = guard.total_consumption().clone();
                     drop(guard);
-                    let _ = tx.send(Msg::OpenUsageView(cw, history)).await;
+                    let _ = tx.send(Msg::OpenUsageView(cw, consumption)).await;
                 }
                 None => {
                     drop(guard);

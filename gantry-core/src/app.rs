@@ -13,7 +13,7 @@ use tokio::sync::Mutex;
 use crate::config::{ProjectConfig, ProviderConfig};
 use crate::dirs::{GlobalConfigDir, ProjectRootDir};
 use crate::fs::FsSessionRegistry;
-use crate::metrics::{CharCounts, ContextWindow, RequestUsage};
+use crate::metrics::{CharCounts, ContextWindow, Usage};
 use crate::provider::agent::ChatStream;
 use crate::provider::registry::ProviderClientRegistry;
 use crate::provider::{ModelAlias, ModelSelection, ToolCallEvent};
@@ -21,7 +21,7 @@ use crate::resource_loader::discover_agents_md;
 use crate::session::registry::SessionRegistry;
 use crate::session::{NodeId, Session, SessionId, SessionTree};
 use crate::system_prompt::{BASE_PROMPT, build_system_prompt};
-use rig::completion::Usage;
+use rig::completion::Usage as RigUsage;
 
 type FsSession = Session<crate::fs::session_registry::FsSessionHistory>;
 
@@ -37,9 +37,11 @@ pub struct App {
     pub selection: Option<ModelSelection>,
     registry: ProviderClientRegistry,
     /// Token usage from the most recently completed stream.
-    last_usage: Option<Usage>,
+    last_usage: Option<RigUsage>,
     /// Character counts per component, captured just before the most recent request.
     last_char_counts: Option<CharCounts>,
+    /// Accumulated token consumption across all nodes in the active session.
+    total_consumption: Usage,
 }
 
 impl App {
@@ -64,6 +66,7 @@ impl App {
         } else {
             session_registry.create_session()?
         };
+        let total_consumption = session.total_consumption();
 
         Ok(Self {
             project_path,
@@ -74,6 +77,7 @@ impl App {
             registry,
             last_usage: None,
             last_char_counts: None,
+            total_consumption,
         })
     }
 
@@ -86,6 +90,9 @@ impl App {
     pub fn resume_session(&mut self, session_id: &SessionId) -> Result<()> {
         let session_registry = FsSessionRegistry::new(&self.sessions_dir)?;
         self.session = session_registry.load_session(session_id)?;
+        self.total_consumption = self.session.total_consumption();
+        self.last_usage = None;
+        self.last_char_counts = None;
         Ok(())
     }
 
@@ -98,6 +105,9 @@ impl App {
     pub fn new_session(&mut self) -> Result<()> {
         let session_registry = FsSessionRegistry::new(&self.sessions_dir)?;
         self.session = session_registry.create_session()?;
+        self.total_consumption = Usage::default();
+        self.last_usage = None;
+        self.last_char_counts = None;
         Ok(())
     }
 
@@ -107,16 +117,13 @@ impl App {
     }
 
     /// Appends a message with token usage to the active session, persisting it to disk.
-    pub fn append_message_with_usage(&mut self, msg: Message, usage: Option<RequestUsage>) -> Result<()> {
+    pub fn append_message_with_usage(&mut self, msg: Message, usage: Option<Usage>) -> Result<()> {
         self.session.append_message_with_usage(msg, usage)
     }
 
-    /// Returns all request usage records on the active branch, in chronological order.
-    pub fn usage_history(&self) -> Vec<RequestUsage> {
-        self.session
-            .all_nodes()
-            .filter_map(|n| n.usage.clone())
-            .collect()
+    /// Returns the accumulated token consumption across all nodes in the active session.
+    pub fn total_consumption(&self) -> &Usage {
+        &self.total_consumption
     }
 
     /// Returns the ordered messages on the active branch.
@@ -166,15 +173,16 @@ impl App {
     }
 
     /// Returns a context window snapshot for the most recent request, or `None` if no request has
-    /// been made yet. Combines last usage with the configured context length, if available.
+    /// been made yet or the model's max tokens are unknown. Combines last usage with the configured
+    /// max tokens.
     pub fn context_window(&self) -> Option<ContextWindow> {
         let usage = self.last_usage.as_ref()?;
         let char_counts = self.last_char_counts.as_ref()?;
         if usage.total_tokens == 0 {
             return None;
         }
-        let context_length = self.selection.as_ref().and_then(|s| s.context_length);
-        Some(ContextWindow::new(usage, context_length, char_counts))
+        let max_tokens = self.selection.as_ref().and_then(|s| s.context_length)?;
+        Some(ContextWindow::new(usage, max_tokens, char_counts))
     }
 
     /// Returns all configured providers.
@@ -334,7 +342,7 @@ struct AppendOnExhaust {
     inner: ChatStream,
     app: Arc<Mutex<App>>,
     buffer: String,
-    usage: Option<Usage>,
+    usage: Option<RigUsage>,
     done: bool,
 }
 
@@ -383,13 +391,14 @@ impl Stream for AppendOnExhaust {
                 tokio::spawn(async move {
                     let mut guard = app.lock().await;
                     if let Some(u) = usage {
-                        let request_usage = RequestUsage::from(&u);
+                        let consumption = Usage::from(&u);
                         if !text.is_empty() {
                             let _ = guard.append_message_with_usage(
                                 Message::assistant(text),
-                                Some(request_usage),
+                                Some(consumption.clone()),
                             );
                         }
+                        guard.total_consumption += consumption;
                         guard.last_usage = Some(u);
                     } else if !text.is_empty() {
                         let _ = guard.append_message(Message::assistant(text));

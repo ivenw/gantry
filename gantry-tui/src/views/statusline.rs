@@ -62,10 +62,7 @@ impl StatefulWidget for StatuslineView {
         };
 
         let text = match self.context_window {
-            Some(cw) => match cw.context_length {
-                Some(ctx) => format!("{mode_text}  {}/{ctx} ctx", cw.total_tokens),
-                None => format!("{mode_text}  {} ctx tokens", cw.total_tokens),
-            },
+            Some(cw) => format!("{mode_text}  {}/{} ctx", cw.total_tokens, cw.max_tokens),
             None => mode_text,
         };
 

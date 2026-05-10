@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::message::Message;
-use crate::metrics::RequestUsage;
+use crate::metrics::Usage;
 
 use crate::session::tree::build_branch;
 
@@ -141,7 +141,7 @@ impl<H: SessionHistory> Session<H> {
     pub fn append_message_with_usage(
         &mut self,
         message: Message,
-        usage: Option<RequestUsage>,
+        usage: Option<Usage>,
     ) -> Result<()> {
         let node = Node::new(message, self.current_leaf_id.clone(), usage);
         self.history
@@ -195,6 +195,17 @@ impl<H: SessionHistory> Session<H> {
         self.nodes.values()
     }
 
+    /// Sums token consumption across all nodes in the session, regardless of branch.
+    pub fn total_consumption(&self) -> Usage {
+        self.nodes
+            .values()
+            .filter_map(|n| n.usage.clone())
+            .fold(Usage::default(), |mut acc, c| {
+                acc += c;
+                acc
+            })
+    }
+
     /// Builds and returns the session tree for UI rendering.
     ///
     /// Returns `None` if the session has no nodes.
@@ -221,12 +232,12 @@ pub struct Node {
     pub message: Message,
     /// Token usage for the request that produced this node, set on assistant nodes only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage: Option<RequestUsage>,
+    pub usage: Option<Usage>,
 }
 
 impl Node {
     /// Creates a new node with a fresh ID, the current timestamp, and the given message.
-    pub fn new(message: Message, parent_id: Option<NodeId>, usage: Option<RequestUsage>) -> Self {
+    pub fn new(message: Message, parent_id: Option<NodeId>, usage: Option<Usage>) -> Self {
         Self {
             id: NodeId::new(),
             parent_id,

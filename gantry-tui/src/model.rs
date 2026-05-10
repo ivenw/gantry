@@ -4,7 +4,7 @@ use nucleo_matcher::{
 };
 
 use gantry_core::{
-    Branch, ContextWindow, ModelSelection, ProviderAlias, ProviderConfig, RequestUsage, SessionId,
+    Branch, ContextWindow, ModelSelection, ProviderAlias, ProviderConfig, Usage, SessionId,
     SessionInfo, SessionTree, StoredCredential, UserId,
 };
 
@@ -37,8 +37,8 @@ pub struct Model {
 /// State for the context window usage overlay.
 pub struct UsageView {
     pub context_window: ContextWindow,
-    /// Per-request usage history for this session, oldest first.
-    pub history: Vec<RequestUsage>,
+    /// Accumulated token consumption across all nodes in the session.
+    pub consumption: Usage,
 }
 
 /// State for the sessions browser overlay.
@@ -624,8 +624,8 @@ impl Model {
     }
 
     /// Activates the context window usage overlay with the given snapshot.
-    pub fn activate_usage_view(&mut self, context_window: ContextWindow, history: Vec<RequestUsage>) {
-        self.usage_view = Some(UsageView { context_window, history });
+    pub fn activate_usage_view(&mut self, context_window: ContextWindow, consumption: Usage) {
+        self.usage_view = Some(UsageView { context_window, consumption });
     }
 
     /// Closes the context window usage overlay.
