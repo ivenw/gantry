@@ -353,9 +353,10 @@ impl App {
             return paths;
         }
 
+        let normalized_query = query.replace(['/', '-', '_'], " ");
         let mut matcher = Matcher::new(Config::DEFAULT);
         let pattern = Pattern::new(
-            query,
+            &normalized_query,
             CaseMatching::Smart,
             Normalization::Smart,
             AtomKind::Fuzzy,
@@ -365,30 +366,23 @@ impl App {
             .into_iter()
             .filter_map(|p| {
                 let rel = p.strip_prefix(&self.project_path).unwrap_or(&p);
-                // Score each path component individually and take the best, so that a query
-                // matching a shallow component (e.g. "gantry-tools") is not outscored by a deep
-                // path whose final component happens to be a perfect suffix (e.g. "core/src/tools").
-                // Find the shallowest component that scores against the query, then use the
-                // score within that depth tier. This prevents a deeply nested exact match
-                // (e.g. "core/src/tools") from outranking a shallow partial match ("gantry-tools").
-                let (match_depth, score) = rel
-                    .components()
-                    .enumerate()
-                    .filter_map(|(i, c)| {
-                        let s = c.as_os_str().to_string_lossy();
-                        let score = pattern.score(
-                            nucleo_matcher::Utf32Str::new(&s, &mut Vec::new()),
-                            &mut matcher,
-                        )?;
-                        Some((i, score))
-                    })
-                    .min_by_key(|(depth, _)| *depth)?;
-                Some((score, match_depth, p))
+                // Normalize path separators and word-boundary chars to spaces so that a query
+                // like "tools edit" or "tools-edit" scores against "gantry-tools/src/edit.rs"
+                // as if it were "gantry tools src edit.rs", enabling cross-component matching.
+                let normalized = rel
+                    .to_string_lossy()
+                    .replace(['/', '-', '_'], " ");
+                let depth = rel.components().count().saturating_sub(1);
+                let score = pattern.score(
+                    nucleo_matcher::Utf32Str::new(&normalized, &mut Vec::new()),
+                    &mut matcher,
+                )?;
+                Some((score, depth, p))
             })
             .collect();
 
-        // Sort by ascending match depth first (shallowest match wins), then descending score.
-        scored.sort_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)));
+        // Sort by descending score, then ascending depth as tiebreaker.
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
         scored.into_iter().map(|(_, _, p)| p).collect()
     }
 
