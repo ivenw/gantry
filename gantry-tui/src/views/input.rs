@@ -150,7 +150,10 @@ impl Widget for InputView<'_> {
 
         // Render tokens one span at a time, tracking col/row to handle wrapping.
         // Trailing picker_filter_len bytes of the raw display string are highlighted as pending filter input.
-        let filter_start_byte = self.raw_display.len().saturating_sub(self.picker_filter_len);
+        let filter_start_byte = self
+            .raw_display
+            .len()
+            .saturating_sub(self.picker_filter_len);
         let mut raw_byte = 0usize;
         let mut col = 0usize;
         let mut row = 0usize;

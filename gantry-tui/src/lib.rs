@@ -1,11 +1,11 @@
 #![allow(dead_code)]
 
 mod commands;
-pub mod theme;
 pub mod effects;
 mod message;
 mod model;
 mod runtime;
+pub mod theme;
 mod update;
 mod views;
 

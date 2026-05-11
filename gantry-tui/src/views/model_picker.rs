@@ -9,7 +9,7 @@ use ratatui::{
 use crate::model::ModelPickerView;
 use crate::theme;
 
-use super::table::{ColumnSpec, TableView, highlighted_line};
+use super::table::{TableView, highlighted_line};
 
 pub const MAX_VISIBLE: usize = 10;
 
@@ -89,16 +89,17 @@ impl Widget for ModelPickerWidget<'_> {
         let max_visible = list.height as usize;
 
         // Scroll window: keep selected_idx visible.
-        let scroll_offset = if count <= max_visible {
+        let start = if count <= max_visible {
             0
         } else {
             (selected + 1).saturating_sub(max_visible)
         };
 
-        // Build rows for the full list so TableView measures widths across all entries.
         let rows: Vec<Vec<Line>> = filtered
             .iter()
             .enumerate()
+            .skip(start)
+            .take(max_visible)
             .map(|(i, entry)| {
                 let is_cursor = i == selected;
                 let model_str = entry.selection.model.as_str().to_owned();
@@ -117,8 +118,6 @@ impl Widget for ModelPickerWidget<'_> {
             })
             .collect();
 
-        let columns = vec![ColumnSpec::new(4, None), ColumnSpec::new(0, None)];
-        let col_widths = vec![self.state.model_col_width, 0];
-        TableView::new(columns, rows, scroll_offset, col_widths).render(list, buf);
+        TableView::new(vec![self.state.model_col_width], 4, rows).render(list, buf);
     }
 }

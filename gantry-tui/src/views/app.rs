@@ -4,7 +4,7 @@ use crate::views::attachment_picker::AttachmentPickerView;
 use crate::views::chat::ChatView;
 use crate::views::command_picker::CommandPickerView;
 use crate::views::input::InputView;
-use crate::views::model_picker::ModelPickerViewWidget;
+use crate::views::model_picker::ModelPickerWidget;
 use crate::views::providers::ProvidersViewWidget;
 use crate::views::sessions::SessionsViewWidget;
 use crate::views::status_message::StatusMessageView;
@@ -35,15 +35,12 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
         return;
     }
 
-    if let Some(ref mv) = model.model_picker_view {
-        frame.render_widget(ModelPickerViewWidget::new(mv), area);
-        return;
-    }
-
     let input_height = if let Some(ref uv) = model.usage_view {
         UsageViewWidget::new(uv).height()
     } else if let Some(ref picker) = model.command_picker {
         CommandPickerView::new(picker).height()
+    } else if let Some(ref mv) = model.model_picker_view {
+        ModelPickerWidget::new(mv).height()
     } else {
         InputView::new(&model.input, &model.cwd).height(area.width)
     };
@@ -79,6 +76,8 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
         frame.render_widget(UsageViewWidget::new(uv), input_area);
     } else if let Some(ref picker) = model.command_picker {
         frame.render_widget(CommandPickerView::new(picker), input_area);
+    } else if let Some(ref mv) = model.model_picker_view {
+        frame.render_widget(ModelPickerWidget::new(mv), input_area);
     } else {
         // Input is always visible; compute picker_filter_len for highlight when picker is active.
         let picker_filter_len = model

@@ -85,10 +85,25 @@ pub enum ProvidersSubView {
 /// State for the model picker overlay.
 pub struct ModelPickerView {
     pub models: Vec<ModelSelection>,
+    pub filter: String,
     /// Index of the cursor row (keyboard highlight).
     pub selected_idx: usize,
     /// The model that was active when the picker was opened, used to mark the current selection.
     pub active_selection: Option<ModelSelection>,
+    /// Cached fuzzy-filtered results; recomputed on every filter change.
+    pub filtered: Vec<ModelEntry>,
+    /// Maximum model alias width across the full unfiltered list; stable for the lifetime of the picker.
+    pub model_col_width: u16,
+}
+
+/// A filtered model entry with fuzzy-match highlight indices.
+#[derive(Clone)]
+pub struct ModelEntry {
+    pub selection: ModelSelection,
+    /// Matched character indices into the display label from the last fuzzy filter.
+    pub indices: Vec<u32>,
+    /// Whether this entry is the active (currently selected) model.
+    pub is_active: bool,
 }
 
 /// A field in the provider wizard — a label, an editable string value, and whether it is required.
@@ -433,6 +448,10 @@ pub struct CommandPicker {
     pub commands: Vec<CommandEntry>,
     pub filter: String,
     pub selected_idx: usize,
+    /// Cached fuzzy-filtered results; recomputed on every filter change.
+    pub filtered: Vec<CommandEntry>,
+    /// Maximum command name width across the full unfiltered list; stable for the lifetime of the picker.
+    pub cmd_col_width: u16,
 }
 
 #[derive(Clone)]
@@ -449,6 +468,11 @@ pub struct AttachmentPicker {
     pub kind: AttachmentPickerKind,
     pub filter: String,
     pub selected_idx: usize,
+    /// Maximum name width across all results in the current result set; recomputed when results change.
+    ///
+    /// For path pickers this is always 0 (single column). For skill pickers it stabilises the
+    /// name column width across scroll.
+    pub name_col_width: u16,
 }
 
 /// Discriminates between path and skill attachment pickers.
@@ -464,16 +488,41 @@ impl AttachmentPicker {
             kind: AttachmentPickerKind::Path(results),
             filter: String::new(),
             selected_idx: 0,
+            name_col_width: 0,
         }
     }
 
     /// Creates a new skill picker with the given search results.
     pub fn new_skill(results: Vec<SkillSearchResult>) -> Self {
+        let name_col_width = results
+            .iter()
+            .map(|r| r.skill.metadata.name.chars().count() as u16)
+            .max()
+            .unwrap_or(0);
         Self {
             kind: AttachmentPickerKind::Skill(results),
             filter: String::new(),
             selected_idx: 0,
+            name_col_width,
         }
+    }
+
+    /// Replaces the path results and recomputes stable column widths.
+    pub fn set_path_results(&mut self, results: Vec<PathSearchResult>) {
+        self.kind = AttachmentPickerKind::Path(results);
+        self.name_col_width = 0;
+        self.selected_idx = 0;
+    }
+
+    /// Replaces the skill results and recomputes the stable name column width.
+    pub fn set_skill_results(&mut self, results: Vec<SkillSearchResult>) {
+        self.name_col_width = results
+            .iter()
+            .map(|r| r.skill.metadata.name.chars().count() as u16)
+            .max()
+            .unwrap_or(0);
+        self.kind = AttachmentPickerKind::Skill(results);
+        self.selected_idx = 0;
     }
 
     /// Returns the number of items currently displayed.
@@ -521,11 +570,20 @@ impl Model {
 
     // Command picker mutations
     pub fn activate_command_picker(&mut self, commands: Vec<CommandEntry>) {
-        self.command_picker = Some(CommandPicker {
+        let cmd_col_width = commands
+            .iter()
+            .map(|c| c.name.chars().count() as u16)
+            .max()
+            .unwrap_or(0);
+        let mut picker = CommandPicker {
             commands,
             filter: String::new(),
             selected_idx: 0,
-        });
+            filtered: Vec::new(),
+            cmd_col_width,
+        };
+        picker.refilter();
+        self.command_picker = Some(picker);
     }
 
     pub fn deactivate_command_picker(&mut self) {
@@ -537,6 +595,7 @@ impl Model {
         if let Some(ref mut picker) = self.command_picker {
             picker.filter.push(c);
             picker.selected_idx = 0;
+            picker.refilter();
         }
     }
 
@@ -545,31 +604,35 @@ impl Model {
         if let Some(ref mut picker) = self.command_picker {
             picker.filter.pop();
             picker.selected_idx = 0;
+            picker.refilter();
         }
     }
 
+    /// Moves the command picker cursor up, wrapping from the first to the last entry.
     pub fn move_command_selection_up(&mut self) {
         if let Some(ref mut picker) = self.command_picker {
-            let count = picker.filtered_commands().len();
+            let count = picker.filtered.len();
             if count > 0 {
                 picker.selected_idx = picker.selected_idx.checked_sub(1).unwrap_or(count - 1);
             }
         }
     }
 
+    /// Moves the command picker cursor down, wrapping from the last to the first entry.
     pub fn move_command_selection_down(&mut self) {
         if let Some(ref mut picker) = self.command_picker {
-            let count = picker.filtered_commands().len();
+            let count = picker.filtered.len();
             if count > 0 {
                 picker.selected_idx = (picker.selected_idx + 1) % count;
             }
         }
     }
 
+    /// Returns the currently highlighted command in the command picker, if any.
     pub fn selected_command(&self) -> Option<CommandEntry> {
         self.command_picker
             .as_ref()
-            .and_then(|p| p.filtered_commands().get(p.selected_idx).cloned())
+            .and_then(|p| p.filtered.get(p.selected_idx).cloned())
     }
 
     // Attachment picker mutations
@@ -788,17 +851,28 @@ impl Model {
         self.model_picker_view.is_some()
     }
 
+    /// Opens the model picker with the given list of available models.
     pub fn activate_model_picker_view(&mut self, models: Vec<ModelSelection>) {
         let active_selection = self.selection.clone();
         let selected_idx = active_selection
             .as_ref()
             .and_then(|s| models.iter().position(|m| m == s))
             .unwrap_or(0);
-        self.model_picker_view = Some(ModelPickerView {
+        let model_col_width = models
+            .iter()
+            .map(|s| s.model.as_str().chars().count() as u16)
+            .max()
+            .unwrap_or(0);
+        let mut picker = ModelPickerView {
             models,
+            filter: String::new(),
             selected_idx,
             active_selection,
-        });
+            filtered: Vec::new(),
+            model_col_width,
+        };
+        picker.refilter();
+        self.model_picker_view = Some(picker);
     }
 
     pub fn deactivate_model_picker_view(&mut self) {
@@ -823,30 +897,51 @@ impl Model {
         self.usage_view = None;
     }
 
-    pub fn move_model_picker_selection_up(&mut self) {
-        if let Some(ref mut mv) = self.model_picker_view
-            && !mv.models.is_empty()
-        {
-            mv.selected_idx = mv
-                .selected_idx
-                .checked_sub(1)
-                .unwrap_or(mv.models.len() - 1);
+    /// Appends a character to the model picker filter string and resets the cursor to the top.
+    pub fn model_picker_filter_push(&mut self, c: char) {
+        if let Some(ref mut mv) = self.model_picker_view {
+            mv.filter.push(c);
+            mv.selected_idx = 0;
+            mv.refilter();
         }
     }
 
+    /// Removes the last character from the model picker filter string and resets the cursor.
+    pub fn model_picker_filter_pop(&mut self) {
+        if let Some(ref mut mv) = self.model_picker_view {
+            mv.filter.pop();
+            mv.selected_idx = 0;
+            mv.refilter();
+        }
+    }
+
+    /// Moves the model picker cursor up, wrapping from the first to the last entry.
+    pub fn move_model_picker_selection_up(&mut self) {
+        if let Some(ref mut mv) = self.model_picker_view {
+            let count = mv.filtered.len();
+            if count > 0 {
+                mv.selected_idx = mv.selected_idx.checked_sub(1).unwrap_or(count - 1);
+            }
+        }
+    }
+
+    /// Moves the model picker cursor down, wrapping from the last to the first entry.
     pub fn move_model_picker_selection_down(&mut self) {
-        if let Some(ref mut mv) = self.model_picker_view
-            && !mv.models.is_empty()
-        {
-            mv.selected_idx = (mv.selected_idx + 1) % mv.models.len();
+        if let Some(ref mut mv) = self.model_picker_view {
+            let count = mv.filtered.len();
+            if count > 0 {
+                mv.selected_idx = (mv.selected_idx + 1) % count;
+            }
         }
     }
 
     /// Returns the currently highlighted model selection in the model picker, if any.
-    pub fn selected_model_in_picker(&self) -> Option<&ModelSelection> {
-        self.model_picker_view
-            .as_ref()
-            .and_then(|mv| mv.models.get(mv.selected_idx))
+    pub fn selected_model_in_picker(&self) -> Option<ModelSelection> {
+        self.model_picker_view.as_ref().and_then(|mv| {
+            mv.filtered
+                .get(mv.selected_idx)
+                .map(|e| e.selection.clone())
+        })
     }
 
     pub fn selected_tree_node(&self) -> Option<&Branch> {
@@ -1445,13 +1540,15 @@ impl InputModel {
 }
 
 impl CommandPicker {
-    /// Returns commands matching `filter`, sorted by descending nucleo score.
+    /// Recomputes `self.filtered` from the current filter string.
     ///
-    /// Commands with no match are excluded. When the filter is empty all commands
-    /// are returned in their original order.
-    pub fn filtered_commands(&self) -> Vec<CommandEntry> {
+    /// Call this after any mutation to `filter` or `commands`. When the filter is empty all
+    /// commands are included in their original order. Otherwise entries are sorted by
+    /// descending nucleo score and non-matching entries are excluded.
+    pub fn refilter(&mut self) {
         if self.filter.is_empty() {
-            return self.commands.clone();
+            self.filtered = self.commands.clone();
+            return;
         }
 
         let mut matcher = Matcher::new(Config::DEFAULT);
@@ -1481,6 +1578,64 @@ impl CommandPicker {
             .collect();
 
         scored.sort_by(|a, b| b.0.cmp(&a.0));
-        scored.into_iter().map(|(_, cmd)| cmd).collect()
+        self.filtered = scored.into_iter().map(|(_, cmd)| cmd).collect();
+    }
+}
+
+impl ModelPickerView {
+    /// Recomputes `self.filtered` from the current filter string.
+    ///
+    /// Call this after any mutation to `filter` or `models`. When the filter is empty all
+    /// models are included in their original order. Otherwise entries are sorted by
+    /// descending nucleo score and non-matching entries are excluded.
+    pub fn refilter(&mut self) {
+        let active = &self.active_selection;
+
+        if self.filter.is_empty() {
+            self.filtered = self
+                .models
+                .iter()
+                .map(|s| ModelEntry {
+                    is_active: active.as_ref() == Some(s),
+                    selection: s.clone(),
+                    indices: Vec::new(),
+                })
+                .collect();
+            return;
+        }
+
+        let mut matcher = Matcher::new(Config::DEFAULT);
+        let pattern = Pattern::new(
+            &self.filter,
+            CaseMatching::Smart,
+            Normalization::Smart,
+            AtomKind::Fuzzy,
+        );
+
+        let mut buf = Vec::new();
+        let mut scored: Vec<(u32, ModelEntry)> = self
+            .models
+            .iter()
+            .filter_map(|s| {
+                let mut indices = Vec::new();
+                let score = pattern.indices(
+                    nucleo_matcher::Utf32Str::new(s.model.as_str(), &mut buf),
+                    &mut matcher,
+                    &mut indices,
+                )?;
+                indices.sort_unstable();
+                Some((
+                    score,
+                    ModelEntry {
+                        is_active: active.as_ref() == Some(s),
+                        selection: s.clone(),
+                        indices,
+                    },
+                ))
+            })
+            .collect();
+
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        self.filtered = scored.into_iter().map(|(_, e)| e).collect();
     }
 }

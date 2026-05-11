@@ -98,15 +98,13 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
         }
         Msg::SetPathPickerResults(results) => {
             if let Some(ref mut picker) = model.attachment_picker {
-                picker.kind = crate::model::AttachmentPickerKind::Path(results);
-                picker.selected_idx = 0;
+                picker.set_path_results(results);
             }
             None
         }
         Msg::SetSkillPickerResults(results) => {
             if let Some(ref mut picker) = model.attachment_picker {
-                picker.kind = crate::model::AttachmentPickerKind::Skill(results);
-                picker.selected_idx = 0;
+                picker.set_skill_results(results);
             }
             None
         }
@@ -194,21 +192,26 @@ fn handle_key_model_picker(model: &mut Model, key: crossterm::event::KeyEvent) -
             model.deactivate_model_picker_view();
             None
         }
-        KeyCode::Up | KeyCode::Char('k') => {
+        KeyCode::Up => {
             model.move_model_picker_selection_up();
             None
         }
-        KeyCode::Down | KeyCode::Char('j') => {
+        KeyCode::Down => {
             model.move_model_picker_selection_down();
             None
         }
+        KeyCode::Backspace => {
+            model.model_picker_filter_pop();
+            None
+        }
         KeyCode::Enter => {
-            let msg = model
-                .selected_model_in_picker()
-                .cloned()
-                .map(Msg::SelectModel);
+            let msg = model.selected_model_in_picker().map(Msg::SelectModel);
             model.deactivate_model_picker_view();
             msg
+        }
+        KeyCode::Char(c) => {
+            model.model_picker_filter_push(c);
+            None
         }
         _ => None,
     }

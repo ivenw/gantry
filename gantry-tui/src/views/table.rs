@@ -5,68 +5,30 @@ use ratatui::{
     widgets::Widget,
 };
 
-/// Specifies layout constraints for a single column.
-#[derive(Default)]
-pub struct ColumnSpec {
-    /// Minimum number of spaces between this column and the next. Ignored for the last column.
-    min_gap: u16,
-    /// Maximum rendered width of this column in characters. Overflow is truncated.
-    max_width: Option<u16>,
-}
-
-impl ColumnSpec {
-    /// Creates a `ColumnSpec` with the given minimum gap and optional maximum width.
-    pub fn new(min_gap: u16, max_width: Option<u16>) -> Self {
-        Self { min_gap, max_width }
-    }
-}
-
 /// A fixed-layout multi-column table widget with per-cell span styling.
 ///
-/// Column widths are computed once at construction from the widest cell in each column,
-/// clamped to `max_width` if set. Cells are provided in row-major order as `Vec<Line>`,
-/// allowing arbitrary per-character styling (e.g. fuzzy-match highlights).
+/// Column widths are provided for the first N-1 columns; the last column fills the remaining
+/// render area. A uniform gap is inserted between every column. Rows are passed pre-sliced
+/// to the visible window — no internal scroll offset.
 pub struct TableView<'a> {
-    columns: Vec<ColumnSpec>,
-    rows: Vec<Vec<Line<'a>>>,
+    /// Widths for all columns except the last, which fills remaining space.
     col_widths: Vec<u16>,
+    /// Uniform gap in characters between every adjacent pair of columns.
+    gap: u16,
+    rows: Vec<Vec<Line<'a>>>,
 }
 
 impl<'a> TableView<'a> {
-    /// Creates a `TableView` from column specs and row-major cell data.
+    /// Creates a `TableView`.
     ///
-    /// Column widths are derived from the widest cell in each column, then clamped to
-    /// `max_width`. Rows with fewer cells than columns are padded; extra cells are ignored.
-    pub fn new(columns: Vec<ColumnSpec>, rows: Vec<Vec<Line<'a>>>) -> Self {
-        let n = columns.len();
-        let mut col_widths = vec![0u16; n];
-
-        for row in &rows {
-            debug_assert_eq!(
-                row.len(),
-                n,
-                "row has {} cells but table has {} columns",
-                row.len(),
-                n
-            );
-            for (col_idx, cell) in row.iter().enumerate().take(n) {
-                let w = line_width(cell) as u16;
-                if w > col_widths[col_idx] {
-                    col_widths[col_idx] = w;
-                }
-            }
-        }
-
-        for (col_idx, spec) in columns.iter().enumerate() {
-            if let Some(max) = spec.max_width {
-                col_widths[col_idx] = col_widths[col_idx].min(max);
-            }
-        }
-
+    /// `col_widths` must contain exactly N-1 entries for an N-column table. Passing more widths
+    /// than columns is allowed; extra entries are ignored. Passing a single-column table with an
+    /// empty `col_widths` is valid — the sole column fills the entire area.
+    pub fn new(col_widths: Vec<u16>, gap: u16, rows: Vec<Vec<Line<'a>>>) -> Self {
         Self {
-            columns,
-            rows,
             col_widths,
+            gap,
+            rows,
         }
     }
 }
@@ -81,28 +43,36 @@ impl Widget for TableView<'_> {
             let y = area.y + row_idx as u16;
             let mut x = area.x;
 
-            for (col_idx, spec) in self.columns.iter().enumerate() {
-                let col_width = self.col_widths[col_idx];
+            let num_cols = row.len();
+            for col_idx in 0..num_cols {
                 let remaining = area.width.saturating_sub(x.saturating_sub(area.x));
                 if remaining == 0 {
                     break;
                 }
 
-                let render_width = col_width.min(remaining);
-                let cell = row.get(col_idx);
-                let chars_written = render_cell(buf, x, y, render_width, cell);
+                let is_last = col_idx + 1 == num_cols;
+                let col_width = if is_last {
+                    remaining
+                } else {
+                    self.col_widths
+                        .get(col_idx)
+                        .copied()
+                        .unwrap_or(0)
+                        .min(remaining)
+                };
+
+                let chars_written = render_cell(buf, x, y, col_width, row.get(col_idx));
 
                 // Pad cell to full column width with spaces.
-                for pad in chars_written..render_width as usize {
+                for pad in chars_written..col_width as usize {
                     buf.set_string(x + pad as u16, y, " ", ratatui::style::Style::default());
                 }
 
-                x += render_width;
+                x += col_width;
 
-                // Gap after all columns except the last.
-                if col_idx + 1 < self.columns.len() {
-                    let gap = spec
-                        .min_gap
+                if !is_last {
+                    let gap = self
+                        .gap
                         .min(area.width.saturating_sub(x.saturating_sub(area.x)));
                     for g in 0..gap {
                         buf.set_string(x + g, y, " ", ratatui::style::Style::default());
