@@ -4,13 +4,13 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
-    widgets::{Block, BorderType, Borders, Widget},
+    widgets::Widget,
 };
 
 use crate::model::{AttachmentPicker, AttachmentPickerKind};
 
 const COLOR_TEXT: Color = Color::Gray;
-const COLOR_MATCH: Color = Color::Cyan;
+const COLOR_MATCH: Color = Color::LightYellow;
 
 pub struct AttachmentPickerView<'a> {
     state: &'a AttachmentPicker,
@@ -18,58 +18,22 @@ pub struct AttachmentPickerView<'a> {
 }
 
 impl<'a> AttachmentPickerView<'a> {
+    /// Creates an `AttachmentPickerView` from picker state and the project root for path display.
     pub fn new(state: &'a AttachmentPicker, project_root: &'a Path) -> Self {
         Self {
             state,
             project_root,
         }
     }
-
-    /// Calculates the height required to render the picker.
-    pub fn calc_height(&self) -> u16 {
-        let rows = self.state.len().max(1).min(10) as u16;
-        rows + 2 // borders
-    }
 }
 
 impl Widget for AttachmentPickerView<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let title = match &self.state.kind {
-            AttachmentPickerKind::Path(_) => {
-                if self.state.filter.is_empty() {
-                    " + Files ".to_string()
-                } else {
-                    format!(" + Files: {} ", self.state.filter)
-                }
-            }
-            AttachmentPickerKind::Skill(_) => {
-                if self.state.filter.is_empty() {
-                    " / Skills ".to_string()
-                } else {
-                    format!(" / Skills: {} ", self.state.filter)
-                }
-            }
-        };
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(BorderType::Plain)
-            .border_style(Style::default().fg(Color::DarkGray))
-            .title(title);
-        block.render(area, buf);
-
-        let inner = Rect::new(
-            area.x + 1,
-            area.y + 1,
-            area.width.saturating_sub(2),
-            area.height.saturating_sub(2),
-        );
-
-        if inner.width == 0 || inner.height == 0 {
+        if area.width == 0 || area.height == 0 {
             return;
         }
 
-        let max_visible = inner.height as usize;
+        let max_visible = area.height as usize;
         let selected = self.state.selected_idx;
         let count = self.state.len();
 
@@ -115,8 +79,8 @@ impl Widget for AttachmentPickerView<'_> {
 
         if rows.is_empty() {
             buf.set_string(
-                inner.x,
-                inner.y,
+                area.x,
+                area.y,
                 "No results",
                 Style::default().fg(Color::DarkGray),
             );
@@ -129,16 +93,16 @@ impl Widget for AttachmentPickerView<'_> {
 
             if is_selected {
                 // Selected row: solid highlight, no per-character styling.
-                let padded = format!("{:<width$}", row.label, width = inner.width as usize);
+                let padded = format!("{:<width$}", row.label, width = area.width as usize);
                 buf.set_string(
-                    inner.x,
-                    inner.y + row_idx as u16,
+                    area.x,
+                    area.y + row_idx as u16,
                     &padded,
-                    Style::default().fg(Color::Black).bg(Color::Cyan),
+                    Style::default().bold().fg(Color::LightYellow),
                 );
             } else {
                 // Unselected row: render character-by-character, highlighting matches.
-                let padded = format!("{:<width$}", row.label, width = inner.width as usize);
+                let padded = format!("{:<width$}", row.label, width = area.width as usize);
                 for (char_idx, ch) in padded.chars().enumerate() {
                     let style = if row.indices.contains(&(char_idx as u32)) {
                         Style::default().fg(COLOR_MATCH)
@@ -146,8 +110,8 @@ impl Widget for AttachmentPickerView<'_> {
                         Style::default().fg(COLOR_TEXT)
                     };
                     buf.set_string(
-                        inner.x + char_idx as u16,
-                        inner.y + row_idx as u16,
+                        area.x + char_idx as u16,
+                        area.y + row_idx as u16,
                         &ch.to_string(),
                         style,
                     );

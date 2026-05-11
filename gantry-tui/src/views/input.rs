@@ -16,6 +16,9 @@ pub struct InputView<'a> {
     cursor: usize,
     /// Flat display string (sigils inlined) derived from tokens.
     flat: String,
+    /// Number of trailing bytes in the flat string that belong to an active picker filter (sigil + query).
+    /// These characters are rendered in LightYellow to indicate the pending picker state.
+    picker_filter_len: usize,
 }
 
 impl<'a> InputView<'a> {
@@ -26,7 +29,14 @@ impl<'a> InputView<'a> {
             tokens,
             cursor,
             flat,
+            picker_filter_len: 0,
         }
+    }
+
+    /// Sets the number of trailing bytes that represent an active picker filter, for highlight rendering.
+    pub fn with_picker_filter_len(mut self, len: usize) -> Self {
+        self.picker_filter_len = len;
+        self
     }
 
     /// Returns the widget height required to fit the content within `width` terminal columns.
@@ -136,11 +146,14 @@ impl Widget for InputView<'_> {
         let text_width = text_area.width as usize;
 
         // Render tokens one span at a time, tracking col/row to handle wrapping.
+        // Trailing picker_filter_len bytes of the flat string are highlighted as pending filter input.
+        let filter_start_byte = self.flat.len().saturating_sub(self.picker_filter_len);
+        let mut flat_byte = 0usize;
         let mut col = 0usize;
         let mut row = 0usize;
         for token in self.tokens {
             let sigil_buf;
-            let (text, style) = match token {
+            let (text, base_style) = match token {
                 InputToken::Text(t) => (t.as_str(), Style::default().fg(Color::White)),
                 InputToken::Path(p) => {
                     sigil_buf = format!("+{}", p.display());
@@ -153,6 +166,13 @@ impl Widget for InputView<'_> {
             };
 
             for c in text.chars() {
+                let style = if self.picker_filter_len > 0 && flat_byte >= filter_start_byte {
+                    Style::default().fg(Color::LightYellow)
+                } else {
+                    base_style
+                };
+                flat_byte += c.len_utf8();
+
                 if row >= text_area.height as usize {
                     break;
                 }

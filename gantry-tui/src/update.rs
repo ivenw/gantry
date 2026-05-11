@@ -524,9 +524,11 @@ fn handle_key_attachment_picker(
         }
         KeyCode::Enter => {
             let token = model.selected_attachment();
+            let filter_len = model.attachment_picker_filter().map(|f| f.len()).unwrap_or(0);
             model.deactivate_attachment_picker();
             if let Some(token) = token {
-                model.input.insert_attachment(token);
+                // +1 for the sigil character that was inserted into the input on activation.
+                model.input.replace_filter_with_attachment(1 + filter_len, token);
             }
             None
         }
@@ -536,6 +538,18 @@ fn handle_key_attachment_picker(
         }
         KeyCode::Down => {
             model.move_attachment_selection_down();
+            None
+        }
+        KeyCode::Char('c') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+            let is_empty = model.attachment_picker_filter().map(|f| f.is_empty()).unwrap_or(true);
+            if is_empty {
+                // Remove the sigil from the input and close the picker cleanly.
+                model.input.delete_before_cursor();
+                model.deactivate_attachment_picker();
+            } else {
+                model.attachment_picker_filter_clear();
+                return Some(Msg::RefineAttachmentPicker(String::new()));
+            }
             None
         }
         KeyCode::Char(c) => {

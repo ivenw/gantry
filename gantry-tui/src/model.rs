@@ -570,39 +570,60 @@ impl Model {
         self.attachment_picker.is_some()
     }
 
-    /// Opens the attachment picker with the given path results.
+    /// Opens the path attachment picker, inserting `+` into the input to seed the filter display.
     pub fn activate_path_picker(&mut self, results: Vec<PathSearchResult>) {
+        self.input.insert('+');
         self.attachment_picker = Some(AttachmentPicker::new_path(results));
     }
 
-    /// Opens the attachment picker with the given skill results.
+    /// Opens the skill attachment picker, inserting `/` into the input to seed the filter display.
     pub fn activate_skill_picker(&mut self, results: Vec<SkillSearchResult>) {
+        self.input.insert('/');
         self.attachment_picker = Some(AttachmentPicker::new_skill(results));
     }
 
+    /// Closes the attachment picker, leaving the typed sigil and filter text in the input as-is.
     pub fn deactivate_attachment_picker(&mut self) {
         self.attachment_picker = None;
     }
 
-    /// Appends a character to the attachment picker filter string and re-runs the search.
+    /// Appends a character to the attachment picker filter string and mirrors it into the input.
     ///
     /// Search results are replaced by the caller via `Msg::RefineAttachmentPicker` after
-    /// the new query is known; this method only updates the visual filter string.
+    /// the new query is known; this method only updates the filter string and input.
     pub fn attachment_picker_filter_push(&mut self, c: char) {
         if let Some(ref mut picker) = self.attachment_picker {
             picker.filter.push(c);
             picker.selected_idx = 0;
         }
+        self.input.insert(c);
     }
 
-    /// Removes the last character from the attachment picker filter string.
+    /// Clears the attachment picker filter string and removes all filter characters from the input.
+    pub fn attachment_picker_filter_clear(&mut self) {
+        if let Some(ref mut picker) = self.attachment_picker {
+            let len = picker.filter.len();
+            picker.filter.clear();
+            picker.selected_idx = 0;
+            for _ in 0..len {
+                self.input.delete_before_cursor();
+            }
+        }
+    }
+
+    /// Removes the last character from the attachment picker filter string and from the input.
+    ///
+    /// Returns `false` when the filter was already empty, signalling the caller to close the picker.
     pub fn attachment_picker_filter_pop(&mut self) -> bool {
         if let Some(ref mut picker) = self.attachment_picker {
             if picker.filter.is_empty() {
+                // Remove the sigil from the input.
+                self.input.delete_before_cursor();
                 return false;
             }
             picker.filter.pop();
             picker.selected_idx = 0;
+            self.input.delete_before_cursor();
             true
         } else {
             false
@@ -1184,6 +1205,25 @@ impl InputModel {
             }
         }
         self.normalize();
+    }
+
+    /// Replaces the trailing `sigil_and_filter_len` bytes before the cursor with an attachment token.
+    ///
+    /// Used when the user confirms a picker selection: the sigil + filter text already in the
+    /// input is stripped and the chosen token is inserted in its place.
+    pub fn replace_filter_with_attachment(&mut self, sigil_and_filter_len: usize, token: InputToken) {
+        if let InputCursor::InText { token_idx, byte_offset } = self.cursor.clone() {
+            if let InputToken::Text(ref mut text) = self.tokens[token_idx] {
+                let strip_start = byte_offset.saturating_sub(sigil_and_filter_len);
+                let tail = text.split_off(byte_offset);
+                text.truncate(strip_start);
+                let attach_idx = token_idx + 1;
+                self.tokens.insert(attach_idx, token);
+                self.tokens.insert(attach_idx + 1, InputToken::Text(format!(" {tail}")));
+                self.cursor = InputCursor::InText { token_idx: attach_idx + 1, byte_offset: 1 };
+                self.normalize();
+            }
+        }
     }
 
     /// Returns a display string with attachment sigils (`+path`, `/skill`) inlined.

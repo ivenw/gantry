@@ -45,10 +45,14 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
         UsageViewWidget::new(uv).calc_height()
     } else if let Some(ref picker) = model.command_picker {
         CommandPickerView::new(picker).calc_height(area.width)
-    } else if let Some(ref picker) = model.attachment_picker {
-        AttachmentPickerView::new(picker, &model.project_path).calc_height()
     } else {
         InputView::new(&model.input.tokens, input_cursor).calc_height(area.width)
+    };
+
+    let statusline_height = if let Some(ref picker) = model.attachment_picker {
+        picker.len().max(1).min(10) as u16
+    } else {
+        1
     };
 
     let chunks = Layout::default()
@@ -57,7 +61,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
             Constraint::Min(1),
             Constraint::Length(1),
             Constraint::Length(input_height),
-            Constraint::Length(1),
+            Constraint::Length(statusline_height),
         ])
         .split(area);
 
@@ -76,19 +80,24 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
         frame.render_widget(UsageViewWidget::new(uv), input_area);
     } else if let Some(ref picker) = model.command_picker {
         frame.render_widget(CommandPickerView::new(picker), input_area);
-    } else if let Some(ref picker) = model.attachment_picker {
-        frame.render_widget(
-            AttachmentPickerView::new(picker, &model.project_path),
-            input_area,
-        );
     } else {
+        // Input is always visible; compute picker_filter_len for highlight when picker is active.
+        let picker_filter_len = model.attachment_picker.as_ref()
+            .map(|p| 1 + p.filter.len())  // sigil + filter chars
+            .unwrap_or(0);
         frame.render_widget(
-            InputView::new(&model.input.tokens, input_cursor),
+            InputView::new(&model.input.tokens, input_cursor)
+                .with_picker_filter_len(picker_filter_len),
             input_area,
         );
     }
 
-    if let Some(ref msg) = model.status_message {
+    if let Some(ref picker) = model.attachment_picker {
+        frame.render_widget(
+            AttachmentPickerView::new(picker, &model.project_path),
+            statusline_area,
+        );
+    } else if let Some(ref msg) = model.status_message {
         frame.render_widget(StatusMessageView::new(msg), statusline_area);
     } else {
         frame.render_stateful_widget(
