@@ -22,7 +22,11 @@ impl<'a> InputView<'a> {
     /// Creates an `InputView` from a token slice and the cursor's byte offset in the flat display string.
     pub fn new(tokens: &'a [InputToken], cursor: usize) -> Self {
         let flat = flat_display(tokens);
-        Self { tokens, cursor, flat }
+        Self {
+            tokens,
+            cursor,
+            flat,
+        }
     }
 
     /// Returns the widget height required to fit the content within `width` terminal columns.
@@ -180,7 +184,7 @@ impl Widget for InputView<'_> {
             && cursor_y < text_area.bottom()
             && let Some(cell) = buf.cell_mut((cursor_x, cursor_y))
         {
-            cell.set_char('█').set_style(Style::default().fg(Color::White));
+            cell.set_style(Style::default().fg(Color::Black).bg(Color::White));
         }
     }
 }
