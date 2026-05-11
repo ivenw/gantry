@@ -4,8 +4,8 @@ use nucleo_matcher::{
 };
 
 use gantry_core::{
-    Branch, ContextWindow, InputToken, ModelSelection, ProviderAlias, ProviderConfig, Usage,
-    SessionId, SessionInfo, SessionTree, StoredCredential, UserId,
+    Branch, ContextWindow, InputToken, ModelSelection, ProviderAlias, ProviderConfig, Skill,
+    Usage, SessionId, SessionInfo, SessionTree, StoredCredential, UserId,
 };
 
 /// The top-level editing mode, analogous to Vim's modal editing.
@@ -23,7 +23,9 @@ pub struct Model {
     pub mode: InputMode,
     pub chat: ChatModel,
     pub input: InputModel,
+    pub project_path: std::path::PathBuf,
     pub command_picker: Option<CommandPicker>,
+    pub attachment_picker: Option<AttachmentPicker>,
     pub sessions_view: Option<SessionsView>,
     pub tree_view: Option<TreeView>,
     pub providers_view: Option<ProvidersView>,
@@ -434,6 +436,51 @@ pub struct CommandEntry {
     pub command: std::sync::Arc<dyn crate::commands::Command>,
 }
 
+/// A fuzzy-find picker for file/directory or skill attachments.
+pub struct AttachmentPicker {
+    pub kind: AttachmentPickerKind,
+    pub filter: String,
+    pub selected_idx: usize,
+}
+
+/// Discriminates between path and skill attachment pickers.
+pub enum AttachmentPickerKind {
+    Path(Vec<std::path::PathBuf>),
+    Skill(Vec<Skill>),
+}
+
+impl AttachmentPicker {
+    /// Creates a new path picker with the given search results.
+    pub fn new_path(paths: Vec<std::path::PathBuf>) -> Self {
+        Self {
+            kind: AttachmentPickerKind::Path(paths),
+            filter: String::new(),
+            selected_idx: 0,
+        }
+    }
+
+    /// Creates a new skill picker with the given search results.
+    pub fn new_skill(skills: Vec<Skill>) -> Self {
+        Self {
+            kind: AttachmentPickerKind::Skill(skills),
+            filter: String::new(),
+            selected_idx: 0,
+        }
+    }
+
+    /// Returns the number of items currently displayed.
+    pub fn len(&self) -> usize {
+        match &self.kind {
+            AttachmentPickerKind::Path(paths) => paths.len(),
+            AttachmentPickerKind::Skill(skills) => skills.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
 impl Model {
     pub fn new() -> Self {
         Self {
@@ -442,7 +489,9 @@ impl Model {
             mode: InputMode::Normal,
             chat: ChatModel::new(),
             input: InputModel::new(),
+            project_path: std::path::PathBuf::new(),
             command_picker: None,
+            attachment_picker: None,
             sessions_view: None,
             tree_view: None,
             providers_view: None,
@@ -512,6 +561,92 @@ impl Model {
         self.command_picker
             .as_ref()
             .and_then(|p| p.filtered_commands().get(p.selected_idx).cloned())
+    }
+
+    // Attachment picker mutations
+
+    pub fn is_attachment_picker_active(&self) -> bool {
+        self.attachment_picker.is_some()
+    }
+
+    /// Opens the attachment picker with the given path results.
+    pub fn activate_path_picker(&mut self, paths: Vec<std::path::PathBuf>) {
+        self.attachment_picker = Some(AttachmentPicker::new_path(paths));
+    }
+
+    /// Opens the attachment picker with the given skill results.
+    pub fn activate_skill_picker(&mut self, skills: Vec<Skill>) {
+        self.attachment_picker = Some(AttachmentPicker::new_skill(skills));
+    }
+
+    pub fn deactivate_attachment_picker(&mut self) {
+        self.attachment_picker = None;
+    }
+
+    /// Appends a character to the attachment picker filter string and re-runs the search.
+    ///
+    /// Search results are replaced by the caller via `Msg::RefineAttachmentPicker` after
+    /// the new query is known; this method only updates the visual filter string.
+    pub fn attachment_picker_filter_push(&mut self, c: char) {
+        if let Some(ref mut picker) = self.attachment_picker {
+            picker.filter.push(c);
+            picker.selected_idx = 0;
+        }
+    }
+
+    /// Removes the last character from the attachment picker filter string.
+    pub fn attachment_picker_filter_pop(&mut self) -> bool {
+        if let Some(ref mut picker) = self.attachment_picker {
+            if picker.filter.is_empty() {
+                return false;
+            }
+            picker.filter.pop();
+            picker.selected_idx = 0;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Returns the current filter string of the attachment picker.
+    pub fn attachment_picker_filter(&self) -> Option<&str> {
+        self.attachment_picker.as_ref().map(|p| p.filter.as_str())
+    }
+
+    pub fn move_attachment_selection_up(&mut self) {
+        if let Some(ref mut picker) = self.attachment_picker {
+            let count = picker.len();
+            if count > 0 {
+                picker.selected_idx = picker.selected_idx.checked_sub(1).unwrap_or(count - 1);
+            }
+        }
+    }
+
+    pub fn move_attachment_selection_down(&mut self) {
+        if let Some(ref mut picker) = self.attachment_picker {
+            let count = picker.len();
+            if count > 0 {
+                picker.selected_idx = (picker.selected_idx + 1) % count;
+            }
+        }
+    }
+
+    /// Returns the selected attachment token, if any item is selected.
+    pub fn selected_attachment(&self) -> Option<InputToken> {
+        let picker = self.attachment_picker.as_ref()?;
+        match &picker.kind {
+            AttachmentPickerKind::Path(paths) => {
+                let path = paths.get(picker.selected_idx)?;
+                Some(InputToken::Path(path.clone()))
+            }
+            AttachmentPickerKind::Skill(skills) => {
+                let skill = skills.get(picker.selected_idx)?;
+                Some(InputToken::Skill {
+                    name: skill.metadata.name.clone(),
+                    path: skill.skill_file.clone(),
+                })
+            }
+        }
     }
 
     // Sessions view mutations

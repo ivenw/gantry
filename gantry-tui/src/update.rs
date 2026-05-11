@@ -94,7 +94,21 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             model.activate_usage_view(cw, history);
             None
         }
-        Msg::Quit | Msg::SendMessage(_) | Msg::InterruptStream | Msg::ExecuteCommand(_) | Msg::BranchTo(_) | Msg::BranchToWithInput { .. } => None,
+        Msg::SetPathPickerResults(paths) => {
+            if let Some(ref mut picker) = model.attachment_picker {
+                picker.kind = crate::model::AttachmentPickerKind::Path(paths);
+                picker.selected_idx = 0;
+            }
+            None
+        }
+        Msg::SetSkillPickerResults(skills) => {
+            if let Some(ref mut picker) = model.attachment_picker {
+                picker.kind = crate::model::AttachmentPickerKind::Skill(skills);
+                picker.selected_idx = 0;
+            }
+            None
+        }
+        Msg::Quit | Msg::SendMessage(_) | Msg::InterruptStream | Msg::ExecuteCommand(_) | Msg::BranchTo(_) | Msg::BranchToWithInput { .. } | Msg::OpenPathPicker(_) | Msg::OpenSkillPicker(_) | Msg::RefineAttachmentPicker(_) => None,
     }
 }
 
@@ -145,6 +159,10 @@ fn handle_key(
 
     if model.is_command_picker_active() {
         return handle_key_command_picker(model, key);
+    }
+
+    if model.is_attachment_picker_active() {
+        return handle_key_attachment_picker(model, key);
     }
 
     match model.mode {
@@ -485,6 +503,50 @@ fn handle_key_command_picker(
     }
 }
 
+fn handle_key_attachment_picker(
+    model: &mut Model,
+    key: crossterm::event::KeyEvent,
+) -> Option<Msg> {
+    match key.code {
+        KeyCode::Esc => {
+            model.deactivate_attachment_picker();
+            None
+        }
+        KeyCode::Backspace => {
+            // Pop one filter char; close the picker if the filter is already empty.
+            let had_chars = model.attachment_picker_filter_pop();
+            if !had_chars {
+                model.deactivate_attachment_picker();
+                return None;
+            }
+            let query = model.attachment_picker_filter().unwrap_or("").to_string();
+            Some(Msg::RefineAttachmentPicker(query))
+        }
+        KeyCode::Enter => {
+            let token = model.selected_attachment();
+            model.deactivate_attachment_picker();
+            if let Some(token) = token {
+                model.input.insert_attachment(token);
+            }
+            None
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            model.move_attachment_selection_up();
+            None
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            model.move_attachment_selection_down();
+            None
+        }
+        KeyCode::Char(c) => {
+            model.attachment_picker_filter_push(c);
+            let query = model.attachment_picker_filter().unwrap_or("").to_string();
+            Some(Msg::RefineAttachmentPicker(query))
+        }
+        _ => None,
+    }
+}
+
 fn handle_key_normal(
     model: &mut Model,
     view_state: &ViewState,
@@ -549,6 +611,12 @@ fn handle_key_insert(
         KeyCode::Char(c) => {
             if model.status_message.is_some() {
                 model.status_message = None;
+            }
+            if c == '+' {
+                return Some(Msg::OpenPathPicker(String::new()));
+            }
+            if c == '/' && model.input.is_blank() {
+                return Some(Msg::OpenSkillPicker(String::new()));
             }
             model.input.insert(c);
             None

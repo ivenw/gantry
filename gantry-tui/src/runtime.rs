@@ -36,17 +36,19 @@ impl Runtime {
 
         let mut model = Model::new();
 
-        let (session_id, existing_messages, selection) = {
+        let (session_id, existing_messages, selection, project_path) = {
             let app = rt.block_on(app.lock());
             (
                 app.session_id().clone(),
                 ChatMessage::messages_from(app.history()),
                 app.selection().cloned(),
+                app.project_path.clone(),
             )
         };
         model.session_id = Some(session_id);
         model.chat.messages = existing_messages;
         model.selection = selection;
+        model.project_path = project_path;
 
         Ok(Self {
             model,
@@ -151,6 +153,37 @@ impl Runtime {
             }
             Msg::SendMessage(ref tokens) => {
                 self.spawn_send_message(tokens.clone());
+            }
+            Msg::OpenPathPicker(ref query) => {
+                let paths = self.rt.block_on(async {
+                    self.app.lock().await.search_paths(query)
+                });
+                self.model.activate_path_picker(paths);
+                return None;
+            }
+            Msg::OpenSkillPicker(ref query) => {
+                let skills = self.rt.block_on(async {
+                    self.app.lock().await.search_skills(query)
+                });
+                self.model.activate_skill_picker(skills);
+                return None;
+            }
+            Msg::RefineAttachmentPicker(ref query) => {
+                let is_skill = matches!(
+                    self.model.attachment_picker.as_ref().map(|p| &p.kind),
+                    Some(crate::model::AttachmentPickerKind::Skill(_))
+                );
+                if is_skill {
+                    let skills = self.rt.block_on(async {
+                        self.app.lock().await.search_skills(query)
+                    });
+                    return Some(Msg::SetSkillPickerResults(skills));
+                } else {
+                    let paths = self.rt.block_on(async {
+                        self.app.lock().await.search_paths(query)
+                    });
+                    return Some(Msg::SetPathPickerResults(paths));
+                }
             }
             Msg::AddProvider(ref config, ref credential) => {
                 self.handle_add_provider(config.clone(), credential.clone());

@@ -1,4 +1,5 @@
 pub mod app;
+pub mod attachment_picker;
 pub mod chat;
 pub mod command_picker;
 pub mod input;
