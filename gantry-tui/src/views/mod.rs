@@ -8,6 +8,7 @@ pub mod providers;
 pub mod sessions;
 pub mod status_message;
 pub mod statusline;
+pub mod table;
 pub mod tree;
 pub mod usage;
 
