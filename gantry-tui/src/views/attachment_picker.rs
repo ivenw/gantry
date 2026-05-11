@@ -9,6 +9,9 @@ use ratatui::{
 
 use crate::model::{AttachmentPicker, AttachmentPickerKind};
 
+const COLOR_TEXT: Color = Color::Gray;
+const COLOR_MATCH: Color = Color::Cyan;
+
 pub struct AttachmentPickerView<'a> {
     state: &'a AttachmentPicker,
     project_root: &'a Path,
@@ -16,7 +19,10 @@ pub struct AttachmentPickerView<'a> {
 
 impl<'a> AttachmentPickerView<'a> {
     pub fn new(state: &'a AttachmentPicker, project_root: &'a Path) -> Self {
-        Self { state, project_root }
+        Self {
+            state,
+            project_root,
+        }
     }
 
     /// Calculates the height required to render the picker.
@@ -76,27 +82,38 @@ impl Widget for AttachmentPickerView<'_> {
             0
         };
 
-        let labels: Vec<String> = match &self.state.kind {
-            AttachmentPickerKind::Path(paths) => paths
+        struct Row {
+            label: String,
+            indices: Vec<u32>,
+        }
+
+        let rows: Vec<Row> = match &self.state.kind {
+            AttachmentPickerKind::Path(results) => results
                 .iter()
                 .skip(start)
                 .take(max_visible)
-                .map(|p| {
-                    p.strip_prefix(self.project_root)
-                        .unwrap_or(p)
+                .map(|r| Row {
+                    label: r
+                        .path
+                        .strip_prefix(self.project_root)
+                        .unwrap_or(&r.path)
                         .display()
-                        .to_string()
+                        .to_string(),
+                    indices: r.indices.clone(),
                 })
                 .collect(),
-            AttachmentPickerKind::Skill(skills) => skills
+            AttachmentPickerKind::Skill(results) => results
                 .iter()
                 .skip(start)
                 .take(max_visible)
-                .map(|s| s.metadata.name.clone())
+                .map(|r| Row {
+                    label: r.skill.metadata.name.clone(),
+                    indices: r.indices.clone(),
+                })
                 .collect(),
         };
 
-        if labels.is_empty() {
+        if rows.is_empty() {
             buf.set_string(
                 inner.x,
                 inner.y,
@@ -106,18 +123,36 @@ impl Widget for AttachmentPickerView<'_> {
             return;
         }
 
-        for (row_idx, label) in labels.iter().enumerate() {
+        for (row_idx, row) in rows.iter().enumerate() {
             let abs_idx = start + row_idx;
             let is_selected = abs_idx == selected;
-            let style = if is_selected {
-                Style::default().fg(Color::Black).bg(Color::LightGreen)
-            } else {
-                Style::default().fg(Color::White)
-            };
 
-            // Pad to fill the row so the highlight spans the full width.
-            let padded = format!("{:<width$}", label, width = inner.width as usize);
-            buf.set_string(inner.x, inner.y + row_idx as u16, &padded, style);
+            if is_selected {
+                // Selected row: solid highlight, no per-character styling.
+                let padded = format!("{:<width$}", row.label, width = inner.width as usize);
+                buf.set_string(
+                    inner.x,
+                    inner.y + row_idx as u16,
+                    &padded,
+                    Style::default().fg(Color::Black).bg(Color::Cyan),
+                );
+            } else {
+                // Unselected row: render character-by-character, highlighting matches.
+                let padded = format!("{:<width$}", row.label, width = inner.width as usize);
+                for (char_idx, ch) in padded.chars().enumerate() {
+                    let style = if row.indices.contains(&(char_idx as u32)) {
+                        Style::default().fg(COLOR_MATCH)
+                    } else {
+                        Style::default().fg(COLOR_TEXT)
+                    };
+                    buf.set_string(
+                        inner.x + char_idx as u16,
+                        inner.y + row_idx as u16,
+                        &ch.to_string(),
+                        style,
+                    );
+                }
+            }
         }
     }
 }

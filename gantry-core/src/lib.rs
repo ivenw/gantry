@@ -12,7 +12,7 @@ pub mod session;
 pub mod system_prompt;
 pub mod tools;
 
-pub use app::{App, StreamingResponse, stream_message};
+pub use app::{App, PathSearchResult, SkillSearchResult, StreamingResponse, stream_message};
 pub use input::InputToken;
 pub use resource_loader::{Skill, SkillMetadata};
 pub use config::{

@@ -339,8 +339,9 @@ impl App {
     /// Returns all file and directory paths under the project root matching `query`.
     ///
     /// Walks the project root respecting `.gitignore`. Results are sorted by descending
-    /// nucleo score; all paths are returned when `query` is empty.
-    pub fn search_paths(&self, query: &str) -> Vec<PathBuf> {
+    /// nucleo score; all paths are returned when `query` is empty. Each result includes
+    /// the matched character indices into the normalized relative path string.
+    pub fn search_paths(&self, query: &str) -> Vec<PathSearchResult> {
         let paths: Vec<PathBuf> = WalkBuilder::new(&self.project_path)
             .hidden(true)
             .build()
@@ -350,7 +351,10 @@ impl App {
             .collect();
 
         if query.is_empty() {
-            return paths;
+            return paths
+                .into_iter()
+                .map(|path| PathSearchResult { path, indices: vec![] })
+                .collect();
         }
 
         let normalized_query = query.replace(['/', '-', '_'], " ");
@@ -362,7 +366,7 @@ impl App {
             AtomKind::Fuzzy,
         );
 
-        let mut scored: Vec<(u32, usize, PathBuf)> = paths
+        let mut scored: Vec<(u32, usize, PathBuf, Vec<u32>)> = paths
             .into_iter()
             .filter_map(|p| {
                 let rel = p.strip_prefix(&self.project_path).unwrap_or(&p);
@@ -373,51 +377,69 @@ impl App {
                     .to_string_lossy()
                     .replace(['/', '-', '_'], " ");
                 let depth = rel.components().count().saturating_sub(1);
-                let score = pattern.score(
+                let mut indices = Vec::new();
+                let score = pattern.indices(
                     nucleo_matcher::Utf32Str::new(&normalized, &mut Vec::new()),
                     &mut matcher,
+                    &mut indices,
                 )?;
-                Some((score, depth, p))
+                indices.sort_unstable();
+                Some((score, depth, p, indices))
             })
             .collect();
 
         // Sort by descending score, then ascending depth as tiebreaker.
         scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-        scored.into_iter().map(|(_, _, p)| p).collect()
+        scored
+            .into_iter()
+            .map(|(_, _, path, indices)| PathSearchResult { path, indices })
+            .collect()
     }
 
     /// Returns skills whose names match `query`, sorted by descending nucleo score.
     ///
-    /// All skills are returned when `query` is empty.
-    pub fn search_skills(&self, query: &str) -> Vec<Skill> {
+    /// All skills are returned when `query` is empty. Each result includes the matched
+    /// character indices into the skill name string.
+    pub fn search_skills(&self, query: &str) -> Vec<SkillSearchResult> {
         let mut skills = load_skills(&self.root).unwrap_or_default();
 
         if query.is_empty() {
             skills.sort_by(|a, b| a.metadata.name.cmp(&b.metadata.name));
-            return skills;
+            return skills
+                .into_iter()
+                .map(|skill| SkillSearchResult { skill, indices: vec![] })
+                .collect();
         }
 
+        let normalized_query = query.replace(['-', '_'], " ");
         let mut matcher = Matcher::new(Config::DEFAULT);
         let pattern = Pattern::new(
-            query,
+            &normalized_query,
             CaseMatching::Smart,
             Normalization::Smart,
             AtomKind::Fuzzy,
         );
 
-        let mut scored: Vec<(u32, Skill)> = skills
+        let mut scored: Vec<(u32, Skill, Vec<u32>)> = skills
             .into_iter()
             .filter_map(|s| {
-                let score = pattern.score(
-                    nucleo_matcher::Utf32Str::new(&s.metadata.name, &mut Vec::new()),
+                let normalized = s.metadata.name.replace(['-', '_'], " ");
+                let mut indices = Vec::new();
+                let score = pattern.indices(
+                    nucleo_matcher::Utf32Str::new(&normalized, &mut Vec::new()),
                     &mut matcher,
+                    &mut indices,
                 )?;
-                Some((score, s))
+                indices.sort_unstable();
+                Some((score, s, indices))
             })
             .collect();
 
         scored.sort_by(|a, b| b.0.cmp(&a.0));
-        scored.into_iter().map(|(_, s)| s).collect()
+        scored
+            .into_iter()
+            .map(|(_, skill, indices)| SkillSearchResult { skill, indices })
+            .collect()
     }
 
     /// Expands `tokens` into a user message (reading file/skill attachments eagerly), appends it
@@ -460,6 +482,20 @@ impl App {
             .ok_or_else(|| anyhow::anyhow!("no active model selection"))?;
         Ok(PreparedRequest { history, selection })
     }
+}
+
+/// A single result from [`App::search_paths`].
+pub struct PathSearchResult {
+    pub path: PathBuf,
+    /// Matched character indices into the normalized relative path string.
+    pub indices: Vec<u32>,
+}
+
+/// A single result from [`App::search_skills`].
+pub struct SkillSearchResult {
+    pub skill: Skill,
+    /// Matched character indices into the normalized skill name string.
+    pub indices: Vec<u32>,
 }
 
 /// Prepared inputs for a single agent request, returned by [`App::prepare_request`].

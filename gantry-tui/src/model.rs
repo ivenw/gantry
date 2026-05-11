@@ -4,8 +4,9 @@ use nucleo_matcher::{
 };
 
 use gantry_core::{
-    Branch, ContextWindow, InputToken, ModelSelection, ProviderAlias, ProviderConfig, Skill,
-    Usage, SessionId, SessionInfo, SessionTree, StoredCredential, UserId,
+    Branch, ContextWindow, InputToken, ModelSelection, PathSearchResult, ProviderAlias,
+    ProviderConfig, SkillSearchResult, Usage, SessionId, SessionInfo, SessionTree,
+    StoredCredential, UserId,
 };
 
 /// The top-level editing mode, analogous to Vim's modal editing.
@@ -445,24 +446,24 @@ pub struct AttachmentPicker {
 
 /// Discriminates between path and skill attachment pickers.
 pub enum AttachmentPickerKind {
-    Path(Vec<std::path::PathBuf>),
-    Skill(Vec<Skill>),
+    Path(Vec<PathSearchResult>),
+    Skill(Vec<SkillSearchResult>),
 }
 
 impl AttachmentPicker {
     /// Creates a new path picker with the given search results.
-    pub fn new_path(paths: Vec<std::path::PathBuf>) -> Self {
+    pub fn new_path(results: Vec<PathSearchResult>) -> Self {
         Self {
-            kind: AttachmentPickerKind::Path(paths),
+            kind: AttachmentPickerKind::Path(results),
             filter: String::new(),
             selected_idx: 0,
         }
     }
 
     /// Creates a new skill picker with the given search results.
-    pub fn new_skill(skills: Vec<Skill>) -> Self {
+    pub fn new_skill(results: Vec<SkillSearchResult>) -> Self {
         Self {
-            kind: AttachmentPickerKind::Skill(skills),
+            kind: AttachmentPickerKind::Skill(results),
             filter: String::new(),
             selected_idx: 0,
         }
@@ -471,8 +472,8 @@ impl AttachmentPicker {
     /// Returns the number of items currently displayed.
     pub fn len(&self) -> usize {
         match &self.kind {
-            AttachmentPickerKind::Path(paths) => paths.len(),
-            AttachmentPickerKind::Skill(skills) => skills.len(),
+            AttachmentPickerKind::Path(results) => results.len(),
+            AttachmentPickerKind::Skill(results) => results.len(),
         }
     }
 
@@ -570,13 +571,13 @@ impl Model {
     }
 
     /// Opens the attachment picker with the given path results.
-    pub fn activate_path_picker(&mut self, paths: Vec<std::path::PathBuf>) {
-        self.attachment_picker = Some(AttachmentPicker::new_path(paths));
+    pub fn activate_path_picker(&mut self, results: Vec<PathSearchResult>) {
+        self.attachment_picker = Some(AttachmentPicker::new_path(results));
     }
 
     /// Opens the attachment picker with the given skill results.
-    pub fn activate_skill_picker(&mut self, skills: Vec<Skill>) {
-        self.attachment_picker = Some(AttachmentPicker::new_skill(skills));
+    pub fn activate_skill_picker(&mut self, results: Vec<SkillSearchResult>) {
+        self.attachment_picker = Some(AttachmentPicker::new_skill(results));
     }
 
     pub fn deactivate_attachment_picker(&mut self) {
@@ -635,12 +636,12 @@ impl Model {
     pub fn selected_attachment(&self) -> Option<InputToken> {
         let picker = self.attachment_picker.as_ref()?;
         match &picker.kind {
-            AttachmentPickerKind::Path(paths) => {
-                let path = paths.get(picker.selected_idx)?;
+            AttachmentPickerKind::Path(results) => {
+                let path = &results.get(picker.selected_idx)?.path;
                 Some(InputToken::Path(path.clone()))
             }
-            AttachmentPickerKind::Skill(skills) => {
-                let skill = skills.get(picker.selected_idx)?;
+            AttachmentPickerKind::Skill(results) => {
+                let skill = &results.get(picker.selected_idx)?.skill;
                 Some(InputToken::Skill {
                     name: skill.metadata.name.clone(),
                     path: skill.skill_file.clone(),

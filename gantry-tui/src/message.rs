@@ -1,6 +1,4 @@
-use std::path::PathBuf;
-
-use gantry_core::{ChatStreamItem, ContextWindow, InputToken, ModelSelection, ProviderAlias, ProviderConfig, Skill, Usage, SessionId, SessionInfo, SessionTree, StoredCredential, StreamingError};
+use gantry_core::{ChatStreamItem, ContextWindow, InputToken, ModelSelection, PathSearchResult, ProviderAlias, ProviderConfig, SkillSearchResult, Usage, SessionId, SessionInfo, SessionTree, StoredCredential, StreamingError};
 
 use crate::model::ChatMessage;
 
@@ -59,9 +57,9 @@ pub enum Msg {
     /// Re-run the attachment picker search with an updated query.
     RefineAttachmentPicker(String),
     /// Populate the attachment picker with fresh path results (produced by Runtime).
-    SetPathPickerResults(Vec<PathBuf>),
+    SetPathPickerResults(Vec<PathSearchResult>),
     /// Populate the attachment picker with fresh skill results (produced by Runtime).
-    SetSkillPickerResults(Vec<Skill>),
+    SetSkillPickerResults(Vec<SkillSearchResult>),
     InterruptStream,
     ExecuteCommand(std::sync::Arc<dyn crate::commands::Command>),
     Quit,

@@ -94,16 +94,16 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             model.activate_usage_view(cw, history);
             None
         }
-        Msg::SetPathPickerResults(paths) => {
+        Msg::SetPathPickerResults(results) => {
             if let Some(ref mut picker) = model.attachment_picker {
-                picker.kind = crate::model::AttachmentPickerKind::Path(paths);
+                picker.kind = crate::model::AttachmentPickerKind::Path(results);
                 picker.selected_idx = 0;
             }
             None
         }
-        Msg::SetSkillPickerResults(skills) => {
+        Msg::SetSkillPickerResults(results) => {
             if let Some(ref mut picker) = model.attachment_picker {
-                picker.kind = crate::model::AttachmentPickerKind::Skill(skills);
+                picker.kind = crate::model::AttachmentPickerKind::Skill(results);
                 picker.selected_idx = 0;
             }
             None
