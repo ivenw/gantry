@@ -1,4 +1,4 @@
-use gantry_core::{ChatStreamItem, ContextWindow, ModelSelection, ProviderAlias, ProviderConfig, Usage, SessionId, SessionInfo, SessionTree, StoredCredential, StreamingError};
+use gantry_core::{ChatStreamItem, ContextWindow, InputToken, ModelSelection, ProviderAlias, ProviderConfig, Usage, SessionId, SessionInfo, SessionTree, StoredCredential, StreamingError};
 
 use crate::model::ChatMessage;
 
@@ -49,7 +49,7 @@ pub enum Msg {
     SelectModel(ModelSelection),
 
     // Side-effect signals intercepted by Runtime before update()
-    SendMessage(String),
+    SendMessage(Vec<InputToken>),
     InterruptStream,
     ExecuteCommand(std::sync::Arc<dyn crate::commands::Command>),
     Quit,

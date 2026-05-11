@@ -3,6 +3,13 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use ignore::WalkBuilder;
+use nucleo_matcher::{
+    Config, Matcher,
+    pattern::{AtomKind, CaseMatching, Normalization, Pattern},
+};
+
+use crate::input::{InputToken, build_user_message};
 use crate::message::Message;
 use anyhow::Result;
 use futures::Stream;
@@ -19,7 +26,7 @@ use crate::metrics::{CharCounts, ContextWindow, Usage};
 use crate::provider::agent::ChatStream;
 use crate::provider::registry::ProviderClientRegistry;
 use crate::provider::{HookEvent, ModelAlias, ModelSelection, PromptHook};
-use crate::resource_loader::{load_context_files, load_skills};
+use crate::resource_loader::{Skill, load_context_files, load_skills};
 use crate::session::registry::SessionRegistry;
 use crate::session::{NodeId, Session, SessionId, SessionTree};
 use crate::system_prompt::{BASE_PROMPT, build_system_prompt};
@@ -329,12 +336,89 @@ impl App {
         ]
     }
 
-    /// Appends `content` as a user message, captures char counts, and returns the prepared
-    /// history and model selection needed to dispatch a request.
+    /// Returns all file and directory paths under the project root matching `query`.
     ///
-    /// Fails if no model selection is active.
-    pub fn prepare_request(&mut self, content: String) -> Result<PreparedRequest> {
-        self.append_message(Message::user(content))?;
+    /// Walks the project root respecting `.gitignore`. Results are sorted by descending
+    /// nucleo score; all paths are returned when `query` is empty.
+    pub fn search_paths(&self, query: &str) -> Vec<PathBuf> {
+        let paths: Vec<PathBuf> = WalkBuilder::new(&self.project_path)
+            .hidden(true)
+            .build()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path() != self.project_path)
+            .map(|e| e.into_path())
+            .collect();
+
+        if query.is_empty() {
+            return paths;
+        }
+
+        let mut matcher = Matcher::new(Config::DEFAULT);
+        let pattern = Pattern::new(
+            query,
+            CaseMatching::Smart,
+            Normalization::Smart,
+            AtomKind::Fuzzy,
+        );
+
+        let mut scored: Vec<(u32, PathBuf)> = paths
+            .into_iter()
+            .filter_map(|p| {
+                let display = p
+                    .strip_prefix(&self.project_path)
+                    .unwrap_or(&p)
+                    .display()
+                    .to_string();
+                let score =
+                    pattern.score(nucleo_matcher::Utf32Str::new(&display, &mut Vec::new()), &mut matcher)?;
+                Some((score, p))
+            })
+            .collect();
+
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.into_iter().map(|(_, p)| p).collect()
+    }
+
+    /// Returns skills whose names match `query`, sorted by descending nucleo score.
+    ///
+    /// All skills are returned when `query` is empty.
+    pub fn search_skills(&self, query: &str) -> Vec<Skill> {
+        let skills = load_skills(&self.root).unwrap_or_default();
+
+        if query.is_empty() {
+            return skills;
+        }
+
+        let mut matcher = Matcher::new(Config::DEFAULT);
+        let pattern = Pattern::new(
+            query,
+            CaseMatching::Smart,
+            Normalization::Smart,
+            AtomKind::Fuzzy,
+        );
+
+        let mut scored: Vec<(u32, Skill)> = skills
+            .into_iter()
+            .filter_map(|s| {
+                let score = pattern.score(
+                    nucleo_matcher::Utf32Str::new(&s.metadata.name, &mut Vec::new()),
+                    &mut matcher,
+                )?;
+                Some((score, s))
+            })
+            .collect();
+
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.into_iter().map(|(_, s)| s).collect()
+    }
+
+    /// Expands `tokens` into a user message (reading file/skill attachments eagerly), appends it
+    /// to the session, captures char counts, and returns the prepared history and model selection.
+    ///
+    /// Fails if no model selection is active or any attachment cannot be read.
+    pub async fn prepare_request(&mut self, tokens: Vec<InputToken>) -> Result<PreparedRequest> {
+        let message = build_user_message(tokens, &self.project_path).await?;
+        self.append_message(message)?;
         let history: Vec<rig::message::Message> =
             self.history().into_iter().map(Into::into).collect();
         let char_counts = CharCounts {
@@ -394,21 +478,21 @@ impl StreamingResponse {
     }
 }
 
-/// Persists `content` as a user message, then streams the agent response.
+/// Expands `tokens` into a user message, persists it, then streams the agent response.
 ///
 /// Returns a [`StreamingResponse`] and a receiver for tool call lifecycle events. The caller
 /// must call [`StreamingResponse::commit`] after the stream is done or abandoned to persist
 /// the assistant reply and update token usage.
 pub async fn stream_message(
     app: Arc<Mutex<App>>,
-    content: String,
+    tokens: Vec<InputToken>,
 ) -> Result<(
     StreamingResponse,
     tokio::sync::mpsc::UnboundedReceiver<HookEvent>,
 )> {
     let (hook_tx, hook_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut guard = app.lock().await;
-    let PreparedRequest { history, selection } = guard.prepare_request(content)?;
+    let PreparedRequest { history, selection } = guard.prepare_request(tokens).await?;
     let system_prompt = guard.system_prompt.clone();
     let tools = guard.tools();
     let hook = PromptHook::new(hook_tx);

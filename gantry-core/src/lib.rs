@@ -2,6 +2,7 @@ pub mod app;
 pub mod config;
 pub mod dirs;
 pub mod fs;
+pub mod input;
 pub mod message;
 pub mod metrics;
 pub mod provider;
@@ -12,6 +13,8 @@ pub mod system_prompt;
 pub mod tools;
 
 pub use app::{App, StreamingResponse, stream_message};
+pub use input::InputToken;
+pub use resource_loader::{Skill, SkillMetadata};
 pub use config::{
     CopilotProviderConfig, CortecsProviderConfig, Credential, CredentialsCatalog,
     CredentialsRepository, OllamaProviderConfig, OpenAiCompletionsProviderConfig,

@@ -27,8 +27,7 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
         }
         Msg::StreamError(e) => {
             if let Some(text) = model.chat.cancel_streaming() {
-                model.input.value = text;
-                model.input.cursor = model.input.value.chars().count();
+                model.input.set_text(text);
             }
             model.status_message = Some(e);
             None
@@ -71,8 +70,7 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             model.chat.messages = messages;
             model.chat.scroll_offset = 0;
             model.chat.user_is_scrolling = false;
-            model.input.value = input;
-            model.input.cursor = model.input.value.chars().count();
+            model.input.set_text(input);
             model.deactivate_tree_view();
             None
         }
@@ -628,8 +626,7 @@ fn handle_enter_insert(model: &mut Model, modifiers: KeyModifiers) -> Option<Msg
         return None;
     }
 
-    let input = model.input.value.clone();
-    if input.trim().is_empty() || model.is_streaming() {
+    if model.input.is_blank() || model.is_streaming() {
         return None;
     }
 
@@ -638,8 +635,9 @@ fn handle_enter_insert(model: &mut Model, modifiers: KeyModifiers) -> Option<Msg
         return None;
     }
 
-    if input.starts_with('/') {
-        let filter = input.strip_prefix('/').unwrap_or("");
+    let display = model.input.raw_display();
+    if display.starts_with('/') {
+        let filter = display.strip_prefix('/').unwrap_or("");
         let available = available_command_entries();
         let has_match = available.iter().any(|c| c.name.starts_with(filter));
         if !has_match {
@@ -648,12 +646,13 @@ fn handle_enter_insert(model: &mut Model, modifiers: KeyModifiers) -> Option<Msg
         }
     }
 
+    let tokens = model.input.tokens.clone();
     model.input.clear();
-    model.chat.add_user_message(input.clone());
+    model.chat.add_user_message(display);
     model.chat.start_streaming_message();
     model.chat.scroll_offset = 0;
     model.chat.user_is_scrolling = false;
-    Some(Msg::SendMessage(input))
+    Some(Msg::SendMessage(tokens))
 }
 
 pub fn available_command_entries() -> Vec<CommandEntry> {

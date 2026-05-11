@@ -149,8 +149,8 @@ impl Runtime {
                 self.spawn_branch_with_input(branch_id.clone(), input.clone());
                 return None;
             }
-            Msg::SendMessage(ref input) => {
-                self.spawn_send_message(input.clone());
+            Msg::SendMessage(ref tokens) => {
+                self.spawn_send_message(tokens.clone());
             }
             Msg::AddProvider(ref config, ref credential) => {
                 self.handle_add_provider(config.clone(), credential.clone());
@@ -173,7 +173,7 @@ impl Runtime {
         update(&mut self.model, &self.view_state, msg)
     }
 
-    fn spawn_send_message(&mut self, input: String) {
+    fn spawn_send_message(&mut self, input: Vec<gantry_core::InputToken>) {
         // Cancel any in-flight stream before starting a new one.
         self.cancel_stream.store(true, Ordering::SeqCst);
         if let Some(old) = self.stream_task.take() {
@@ -189,7 +189,7 @@ impl Runtime {
         cancel.store(false, Ordering::SeqCst);
 
         let task = self.rt.spawn(async move {
-            match gantry_core::stream_message(app, input).await {
+            match gantry_core::stream_message(app, input.clone()).await {
                 Err(e) => {
                     let _ = tx.send(Msg::StreamError(e.to_string())).await;
                 }
