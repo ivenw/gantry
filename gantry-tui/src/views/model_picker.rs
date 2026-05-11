@@ -2,28 +2,50 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
-    widgets::{Block, BorderType, Borders, Widget},
+    text::{Line, Span},
+    widgets::{Block, Borders, Widget},
 };
 
 use crate::model::ModelPickerView;
+use crate::theme;
 
-pub struct ModelPickerViewWidget<'a> {
+use super::table::{ColumnSpec, TableView, highlighted_line};
+
+pub const MAX_VISIBLE: usize = 10;
+
+const STYLE_TEXT: Style = Style::new().fg(Color::White);
+const STYLE_MATCH: Style = Style::new().fg(Color::LightCyan);
+const STYLE_SELECTED: Style = Style::new().fg(Color::LightCyan).bold();
+const STYLE_ACTIVE: Style = Style::new().fg(Color::LightCyan);
+const STYLE_PROVIDER: Style = Style::new().fg(Color::DarkGray);
+
+/// Overhead rows: top border + search line + blank separator + bottom border.
+const CHROME_HEIGHT: u16 = 4;
+
+pub struct ModelPickerWidget<'a> {
     state: &'a ModelPickerView,
 }
 
-impl<'a> ModelPickerViewWidget<'a> {
+impl<'a> ModelPickerWidget<'a> {
+    /// Creates a `ModelPickerWidget` from picker state.
     pub fn new(state: &'a ModelPickerView) -> Self {
         Self { state }
     }
+
+    /// Returns the total height needed to render the picker.
+    pub fn height(&self) -> u16 {
+        CHROME_HEIGHT + self.state.filtered.len().clamp(1, MAX_VISIBLE) as u16
+    }
 }
 
-impl Widget for ModelPickerViewWidget<'_> {
+impl Widget for ModelPickerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        let filtered = &self.state.filtered;
+
         let block = Block::default()
-            .title(" Model ")
             .borders(Borders::ALL)
-            .border_type(BorderType::Plain)
-            .border_style(Style::default().fg(Color::DarkGray));
+            .border_set(theme::border_set())
+            .border_style(Style::default().fg(Color::Gray));
         block.render(area, buf);
 
         let inner = Rect::new(
@@ -37,52 +59,66 @@ impl Widget for ModelPickerViewWidget<'_> {
             return;
         }
 
-        let footer_y = inner.bottom().saturating_sub(1);
-        let list_area = Rect::new(
+        let prompt = format!("> {}", self.state.filter);
+        buf.set_string(inner.x, inner.y, &prompt, STYLE_TEXT);
+
+        // inner.y + 1 is the blank separator; list starts at inner.y + 2.
+        let list = Rect::new(
             inner.x,
-            inner.y,
+            inner.y + 2,
             inner.width,
-            inner.height.saturating_sub(1),
+            inner.height.saturating_sub(2),
         );
 
-        if self.state.models.is_empty() {
-            buf.set_string(
-                list_area.x,
-                list_area.y,
-                "No models available",
-                Style::default().fg(Color::DarkGray),
-            );
-        } else {
-            for (i, selection) in self.state.models.iter().enumerate() {
-                if list_area.y + i as u16 >= list_area.bottom() {
-                    break;
-                }
-                let y = list_area.y + i as u16;
-                let is_cursor = i == self.state.selected_idx;
-                let is_active = self.state.active_selection.as_ref() == Some(selection);
-                let style = if is_cursor {
-                    Style::default().fg(Color::Black).bg(Color::Cyan)
-                } else if is_active {
-                    Style::default().fg(Color::Cyan)
-                } else {
-                    Style::default().fg(Color::White)
-                };
-                let label = format!(
-                    "{}  {}",
-                    selection.provider.as_str(),
-                    selection.model.as_str()
-                );
-                let padded = format!("{:<width$}", label, width = inner.width as usize);
-                buf.set_string(list_area.x, y, &padded, style);
-            }
+        if list.height == 0 {
+            return;
         }
 
-        let footer = " ↑↓ navigate   Enter select   Esc close ";
-        buf.set_string(
-            inner.x,
-            footer_y,
-            footer,
-            Style::default().fg(Color::DarkGray),
-        );
+        if filtered.is_empty() {
+            buf.set_string(
+                list.x,
+                list.y,
+                "No matches",
+                Style::default().fg(Color::DarkGray),
+            );
+            return;
+        }
+
+        let selected = self.state.selected_idx;
+        let count = filtered.len();
+        let max_visible = list.height as usize;
+
+        // Scroll window: keep selected_idx visible.
+        let scroll_offset = if count <= max_visible {
+            0
+        } else {
+            (selected + 1).saturating_sub(max_visible)
+        };
+
+        // Build rows for the full list so TableView measures widths across all entries.
+        let rows: Vec<Vec<Line>> = filtered
+            .iter()
+            .enumerate()
+            .map(|(i, entry)| {
+                let is_cursor = i == selected;
+                let model_str = entry.selection.model.as_str().to_owned();
+                let model_line = if is_cursor {
+                    Line::from(Span::styled(model_str, STYLE_SELECTED))
+                } else if entry.is_active {
+                    Line::from(Span::styled(model_str, STYLE_ACTIVE))
+                } else {
+                    highlighted_line(&model_str, &entry.indices, STYLE_TEXT, STYLE_MATCH)
+                };
+                let provider_line = Line::from(Span::styled(
+                    entry.selection.provider.as_str().to_owned(),
+                    STYLE_PROVIDER,
+                ));
+                vec![model_line, provider_line]
+            })
+            .collect();
+
+        let columns = vec![ColumnSpec::new(4, None), ColumnSpec::new(0, None)];
+        let col_widths = vec![self.state.model_col_width, 0];
+        TableView::new(columns, rows, scroll_offset, col_widths).render(list, buf);
     }
 }
