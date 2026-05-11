@@ -69,8 +69,7 @@ pub async fn build_user_message(tokens: Vec<InputToken>, project_root: &Path) ->
 /// Reads a path (file or directory) and wraps the contents in an XML attachment block.
 fn expand_path(path: &Path, display: &str) -> Result<String> {
     if path.is_dir() {
-        let contents =
-            tree(path, None).with_context(|| format!("tree failed for {}", display))?;
+        let contents = tree(path, None).with_context(|| format!("tree failed for {}", display))?;
         Ok(format!(
             "<attachment type=\"dir\" path=\"{}\">\n{}\n</attachment>",
             display, contents

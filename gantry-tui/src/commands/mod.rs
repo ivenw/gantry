@@ -99,4 +99,3 @@ const fn max_name_len(commands: &[KnownCommand]) -> usize {
     }
     max
 }
-

@@ -1,7 +1,7 @@
 use crate::model::Model;
 use crate::views::ViewState;
-use crate::views::chat::ChatView;
 use crate::views::attachment_picker::AttachmentPickerView;
+use crate::views::chat::ChatView;
 use crate::views::command_picker::CommandPickerView;
 use crate::views::input::InputView;
 use crate::views::model_picker::ModelPickerViewWidget;
@@ -42,15 +42,15 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
 
     let (_, input_cursor) = model.input.display_with_cursor();
     let input_height = if let Some(ref uv) = model.usage_view {
-        UsageViewWidget::new(uv).calc_height()
+        UsageViewWidget::new(uv).height()
     } else if let Some(ref picker) = model.command_picker {
-        CommandPickerView::new(picker).calc_height(area.width)
+        CommandPickerView::new(picker).height(area.width)
     } else {
-        InputView::new(&model.input.tokens, input_cursor).calc_height(area.width)
+        InputView::new(&model.input.tokens, input_cursor).height(area.width)
     };
 
     let statusline_height = if let Some(ref picker) = model.attachment_picker {
-        picker.len().max(1).min(10) as u16
+        AttachmentPickerView::new(picker, &model.project_path).height()
     } else {
         1
     };
@@ -82,8 +82,10 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
         frame.render_widget(CommandPickerView::new(picker), input_area);
     } else {
         // Input is always visible; compute picker_filter_len for highlight when picker is active.
-        let picker_filter_len = model.attachment_picker.as_ref()
-            .map(|p| 1 + p.filter.len())  // sigil + filter chars
+        let picker_filter_len = model
+            .attachment_picker
+            .as_ref()
+            .map(|p| 1 + p.filter.len()) // sigil + filter chars
             .unwrap_or(0);
         frame.render_widget(
             InputView::new(&model.input.tokens, input_cursor)
@@ -101,7 +103,11 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
         frame.render_widget(StatusMessageView::new(msg), statusline_area);
     } else {
         frame.render_stateful_widget(
-            StatuslineView::new(model.mode, model.is_streaming(), model.context_window.clone()),
+            StatuslineView::new(
+                model.mode,
+                model.is_streaming(),
+                model.context_window.clone(),
+            ),
             statusline_area,
             &mut view_state.statusline,
         );

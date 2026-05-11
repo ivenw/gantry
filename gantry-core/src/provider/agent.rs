@@ -52,7 +52,6 @@ where
     }
 }
 
-
 /// Wraps a [`StreamingResult`] into a [`ChatStream`] by erasing provider-specific payloads.
 pub(super) fn into_chat_stream<R: 'static>(stream: StreamingResult<R>) -> ChatStream {
     Box::pin(

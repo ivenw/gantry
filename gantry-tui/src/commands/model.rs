@@ -14,7 +14,9 @@ impl Command for Model {
                     let _ = tx.send(Msg::OpenModelPicker(selections)).await;
                 }
                 Err(e) => {
-                    let _ = tx.send(Msg::SetStatus(format!("Failed to list models: {e}"))).await;
+                    let _ = tx
+                        .send(Msg::SetStatus(format!("Failed to list models: {e}")))
+                        .await;
                 }
             }
         });

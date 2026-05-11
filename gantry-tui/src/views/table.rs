@@ -101,7 +101,9 @@ impl Widget for TableView<'_> {
 
                 // Gap after all columns except the last.
                 if col_idx + 1 < self.columns.len() {
-                    let gap = spec.min_gap.min(area.width.saturating_sub(x.saturating_sub(area.x)));
+                    let gap = spec
+                        .min_gap
+                        .min(area.width.saturating_sub(x.saturating_sub(area.x)));
                     for g in 0..gap {
                         buf.set_string(x + g, y, " ", ratatui::style::Style::default());
                     }
@@ -124,7 +126,11 @@ fn render_cell(buf: &mut Buffer, x: u16, y: u16, max_width: u16, cell: Option<&L
     let max = max_width as usize;
     let needs_ellipsis = line_width(line) > max;
     // Reserve space for "..." only when truncation will actually occur.
-    let content_limit = if needs_ellipsis && max >= 3 { max - 3 } else { max };
+    let content_limit = if needs_ellipsis && max >= 3 {
+        max - 3
+    } else {
+        max
+    };
 
     let mut written = 0usize;
     let mut ellipsis_style = ratatui::style::Style::default();
@@ -134,7 +140,7 @@ fn render_cell(buf: &mut Buffer, x: u16, y: u16, max_width: u16, cell: Option<&L
                 ellipsis_style = span.style;
                 break 'outer;
             }
-            buf.set_string(x + written as u16, y, &ch.to_string(), span.style);
+            buf.set_string(x + written as u16, y, ch.to_string(), span.style);
             written += 1;
         }
     }
@@ -172,7 +178,11 @@ pub fn highlighted_line<'a>(
             current_is_match = is_match;
         }
         if is_match != current_is_match {
-            let style = if current_is_match { match_style } else { base_style };
+            let style = if current_is_match {
+                match_style
+            } else {
+                base_style
+            };
             spans.push(Span::styled(current_text.clone(), style));
             current_text.clear();
             current_is_match = is_match;
@@ -181,7 +191,11 @@ pub fn highlighted_line<'a>(
     }
 
     if !current_text.is_empty() {
-        let style = if current_is_match { match_style } else { base_style };
+        let style = if current_is_match {
+            match_style
+        } else {
+            base_style
+        };
         spans.push(Span::styled(current_text, style));
     }
 

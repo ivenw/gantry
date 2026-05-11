@@ -24,7 +24,7 @@ impl<'a> CommandPickerView<'a> {
     }
 
     /// Calculates the total height needed to render the picker at the given width.
-    pub fn calc_height(&self, width: u16) -> u16 {
+    pub fn height(&self, width: u16) -> u16 {
         let filtered = self.state.filtered_commands();
         // Available width for descriptions: subtract borders and the name column.
         let desc_width = (width.saturating_sub(2) as usize)

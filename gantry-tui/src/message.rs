@@ -1,4 +1,8 @@
-use gantry_core::{ChatStreamItem, ContextWindow, InputToken, ModelSelection, PathSearchResult, ProviderAlias, ProviderConfig, SkillSearchResult, Usage, SessionId, SessionInfo, SessionTree, StoredCredential, StreamingError};
+use gantry_core::{
+    ChatStreamItem, ContextWindow, InputToken, ModelSelection, PathSearchResult, ProviderAlias,
+    ProviderConfig, SessionId, SessionInfo, SessionTree, SkillSearchResult, StoredCredential,
+    StreamingError, Usage,
+};
 
 use crate::model::ChatMessage;
 
@@ -9,8 +13,13 @@ pub enum Msg {
     // Stream events from the agent
     StreamItem(Result<ChatStreamItem, StreamingError>),
     StreamDone,
-    ToolCallStarted { name: String, id: String },
-    ToolCallFinished { id: String },
+    ToolCallStarted {
+        name: String,
+        id: String,
+    },
+    ToolCallFinished {
+        id: String,
+    },
 
     // Streaming error (stream task failed; StreamDone is not sent in this case)
     StreamError(String),

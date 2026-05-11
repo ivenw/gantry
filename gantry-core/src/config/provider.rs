@@ -82,8 +82,8 @@ impl ProviderConfigRepository {
             .parse::<toml_edit::DocumentMut>()
             .with_context(|| format!("failed to parse {}", self.path.display()))?;
 
-        let entry = toml_edit::ser::to_document(selection)
-            .context("failed to serialize default model")?;
+        let entry =
+            toml_edit::ser::to_document(selection).context("failed to serialize default model")?;
         doc["default_model"] = toml_edit::Item::Table(entry.as_table().clone());
 
         super::atomic_write(&self.path, &doc.to_string())?;
@@ -237,7 +237,6 @@ pub struct OpenAiResponsesProviderConfig {
 pub struct CortecsProviderConfig {
     pub alias: ProviderAlias,
 }
-
 
 #[cfg(test)]
 mod tests {

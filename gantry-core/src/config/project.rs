@@ -66,7 +66,8 @@ fn parse_owner_repo(url: &str) -> Option<String> {
     // SSH: git@host:owner/repo.git  or  ssh://git@host/owner/repo.git
     // HTTPS: https://host/owner/repo.git
     let path_part = if url.contains("://") {
-        url.split_once("://").map(|x| x.1)
+        url.split_once("://")
+            .map(|x| x.1)
             .and_then(|s| s.split_once('/').map(|x| x.1))?
     } else if let Some(colon_pos) = url.find(':') {
         &url[colon_pos + 1..]

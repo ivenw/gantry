@@ -13,8 +13,6 @@ pub mod system_prompt;
 pub mod tools;
 
 pub use app::{App, PathSearchResult, SkillSearchResult, StreamingResponse, stream_message};
-pub use input::InputToken;
-pub use resource_loader::{Skill, SkillMetadata};
 pub use config::{
     CopilotProviderConfig, CortecsProviderConfig, Credential, CredentialsCatalog,
     CredentialsRepository, OllamaProviderConfig, OpenAiCompletionsProviderConfig,
@@ -22,12 +20,14 @@ pub use config::{
     ProviderConfigRepository, StoredCredential,
 };
 pub use dirs::{GlobalGantryDir, ProjectRootDir};
+pub use input::InputToken;
 pub use message::{Message, UserId};
 pub use metrics::{CharCounts, ContextWindow, Usage};
 pub use provider::HookEvent;
 pub use provider::agent::{ChatStream, ChatStreamItem};
 pub use provider::registry::ProviderClientRegistry;
 pub use provider::{ModelAlias, ModelSelection, ProviderAlias};
+pub use resource_loader::{Skill, SkillMetadata};
 pub use rig::agent::{MultiTurnStreamItem, StreamingError};
 pub use rig::streaming::StreamedAssistantContent;
 

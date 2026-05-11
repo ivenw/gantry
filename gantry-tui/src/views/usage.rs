@@ -24,7 +24,7 @@ impl<'a> UsageViewWidget<'a> {
     }
 
     /// Computes the total height needed to render the overlay at the given width.
-    pub fn calc_height(&self) -> u16 {
+    pub fn height(&self) -> u16 {
         let cw = &self.state.context_window;
         let agent_file_rows = cw.agent_files_tokens.len() as u16;
         // borders(2) + bar(1) + blank(1) + header(1) + system_prompt(1) + base_prompt(1) + agent_files(N) + messages(1) + other(1) + remaining(1)
@@ -96,7 +96,8 @@ fn render_bar(buf: &mut Buffer, x: u16, y: u16, width: u16, cw: &ContextWindow) 
 
 fn fill_bar(buf: &mut Buffer, x: u16, y: u16, width: u16, color: Color) {
     for col in x..x + width {
-        buf.cell_mut((col, y)).map(|c| c.set_char(' ').set_bg(color));
+        buf.cell_mut((col, y))
+            .map(|c| c.set_char(' ').set_bg(color));
     }
 }
 
@@ -117,13 +118,33 @@ fn render_breakdown(buf: &mut Buffer, x: u16, y: u16, width: u16, cw: &ContextWi
     // System prompt section.
     let sys_tokens = cw.system_prompt_tokens();
     let sys_pct = cw.system_prompt_fraction() * 100.0;
-    render_row(buf, x, row, width, "System prompt", sys_tokens, sys_pct, COLOR_SYSTEM, 0);
+    render_row(
+        buf,
+        x,
+        row,
+        width,
+        "System prompt",
+        sys_tokens,
+        sys_pct,
+        COLOR_SYSTEM,
+        0,
+    );
     row += 1;
 
     // Base prompt sub-row (indented).
     let bp_tokens = cw.base_prompt_tokens;
     let bp_pct = cw.base_prompt_fraction() * 100.0;
-    render_row(buf, x, row, width, "Base prompt", bp_tokens, bp_pct, COLOR_SYSTEM, 2);
+    render_row(
+        buf,
+        x,
+        row,
+        width,
+        "Base prompt",
+        bp_tokens,
+        bp_pct,
+        COLOR_SYSTEM,
+        2,
+    );
     row += 1;
 
     // Agent file sub-rows (indented).
@@ -138,20 +159,50 @@ fn render_breakdown(buf: &mut Buffer, x: u16, y: u16, width: u16, cw: &ContextWi
             .find(|(p, _)| p == &path)
             .map(|(_, t)| *t)
             .unwrap_or(0);
-        render_row(buf, x, row, width, name, tokens, pct * 100.0, COLOR_SYSTEM, 2);
+        render_row(
+            buf,
+            x,
+            row,
+            width,
+            name,
+            tokens,
+            pct * 100.0,
+            COLOR_SYSTEM,
+            2,
+        );
         row += 1;
     }
 
     // Messages row.
     let msg_tokens = cw.messages_tokens;
     let msg_pct = cw.messages_fraction() * 100.0;
-    render_row(buf, x, row, width, "Messages", msg_tokens, msg_pct, COLOR_MESSAGES, 0);
+    render_row(
+        buf,
+        x,
+        row,
+        width,
+        "Messages",
+        msg_tokens,
+        msg_pct,
+        COLOR_MESSAGES,
+        0,
+    );
     row += 1;
 
     // Other row.
     let other_tokens = cw.other_tokens;
     let other_pct = cw.other_fraction() * 100.0;
-    render_row(buf, x, row, width, "Other", other_tokens, other_pct, COLOR_OTHER, 0);
+    render_row(
+        buf,
+        x,
+        row,
+        width,
+        "Other",
+        other_tokens,
+        other_pct,
+        COLOR_OTHER,
+        0,
+    );
 
     render_row(
         buf,
@@ -183,18 +234,8 @@ fn render_row(
     let label_x = x + indent;
     let right_x = x + width.saturating_sub(right_len);
 
-    buf.set_string(
-        label_x,
-        y,
-        label,
-        Style::default().fg(color),
-    );
-    buf.set_string(
-        right_x,
-        y,
-        &right_col,
-        Style::default().fg(Color::Gray),
-    );
+    buf.set_string(label_x, y, label, Style::default().fg(color));
+    buf.set_string(right_x, y, &right_col, Style::default().fg(Color::Gray));
 }
 
 /// Formats a token count, abbreviating values ≥ 1000 as e.g. `12.3k`.

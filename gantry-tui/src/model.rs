@@ -5,8 +5,8 @@ use nucleo_matcher::{
 
 use gantry_core::{
     Branch, ContextWindow, InputToken, ModelSelection, PathSearchResult, ProviderAlias,
-    ProviderConfig, SkillSearchResult, Usage, SessionId, SessionInfo, SessionTree,
-    StoredCredential, UserId,
+    ProviderConfig, SessionId, SessionInfo, SessionTree, SkillSearchResult, StoredCredential,
+    Usage, UserId,
 };
 
 /// The top-level editing mode, analogous to Vim's modal editing.
@@ -323,8 +323,7 @@ impl ProviderWizard {
             }
             WizardProviderKind::Cortecs => {
                 let api_key = self.fields[1].value.trim().to_string();
-                let config =
-                    ProviderConfig::Cortecs(gantry_core::CortecsProviderConfig { alias });
+                let config = ProviderConfig::Cortecs(gantry_core::CortecsProviderConfig { alias });
                 Ok((config, Some(StoredCredential::ApiKey { value: api_key })))
             }
         }
@@ -419,7 +418,10 @@ pub struct InputModel {
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputCursor {
     /// Cursor is inside a `Text` token at the given byte offset.
-    InText { token_idx: usize, byte_offset: usize },
+    InText {
+        token_idx: usize,
+        byte_offset: usize,
+    },
     /// Cursor is positioned on an attachment token (next backspace deletes it).
     AtAttachment { token_idx: usize },
 }
@@ -804,7 +806,10 @@ impl Model {
 
     /// Activates the context window usage overlay with the given snapshot.
     pub fn activate_usage_view(&mut self, context_window: ContextWindow, consumption: Usage) {
-        self.usage_view = Some(UsageView { context_window, consumption });
+        self.usage_view = Some(UsageView {
+            context_window,
+            consumption,
+        });
     }
 
     /// Closes the context window usage overlay.
@@ -1026,7 +1031,10 @@ impl InputModel {
     pub fn new() -> Self {
         Self {
             tokens: vec![InputToken::Text(String::new())],
-            cursor: InputCursor::InText { token_idx: 0, byte_offset: 0 },
+            cursor: InputCursor::InText {
+                token_idx: 0,
+                byte_offset: 0,
+            },
         }
     }
 
@@ -1036,7 +1044,10 @@ impl InputModel {
     /// immediately before the attachment.
     pub fn insert(&mut self, c: char) {
         match self.cursor.clone() {
-            InputCursor::InText { token_idx, byte_offset } => {
+            InputCursor::InText {
+                token_idx,
+                byte_offset,
+            } => {
                 if let InputToken::Text(ref mut text) = self.tokens[token_idx] {
                     text.insert(byte_offset, c);
                     self.cursor = InputCursor::InText {
@@ -1062,7 +1073,10 @@ impl InputModel {
     /// Deletes the character before the cursor, or the whole attachment token if the cursor is on one.
     pub fn delete_before_cursor(&mut self) {
         match self.cursor.clone() {
-            InputCursor::InText { token_idx, byte_offset } => {
+            InputCursor::InText {
+                token_idx,
+                byte_offset,
+            } => {
                 if byte_offset == 0 {
                     if token_idx == 0 {
                         return;
@@ -1076,7 +1090,10 @@ impl InputModel {
                             } else {
                                 unreachable!()
                             };
-                            self.cursor = InputCursor::InText { token_idx: prev_idx, byte_offset: len };
+                            self.cursor = InputCursor::InText {
+                                token_idx: prev_idx,
+                                byte_offset: len,
+                            };
                         }
                         _ => {
                             // Delete the attachment immediately rather than landing on it first.
@@ -1086,7 +1103,10 @@ impl InputModel {
                                 Some(InputToken::Text(t)) => t.len(),
                                 _ => 0,
                             };
-                            self.cursor = InputCursor::InText { token_idx: new_idx, byte_offset };
+                            self.cursor = InputCursor::InText {
+                                token_idx: new_idx,
+                                byte_offset,
+                            };
                             self.normalize();
                         }
                     }
@@ -1094,7 +1114,10 @@ impl InputModel {
                     if let InputToken::Text(ref mut text) = self.tokens[token_idx] {
                         let prev = prev_char_boundary(text, byte_offset);
                         text.drain(prev..byte_offset);
-                        self.cursor = InputCursor::InText { token_idx, byte_offset: prev };
+                        self.cursor = InputCursor::InText {
+                            token_idx,
+                            byte_offset: prev,
+                        };
                     }
                 }
             }
@@ -1107,7 +1130,10 @@ impl InputModel {
                     Some(InputToken::Text(t)) => t.len(),
                     _ => 0,
                 };
-                self.cursor = InputCursor::InText { token_idx: new_idx, byte_offset };
+                self.cursor = InputCursor::InText {
+                    token_idx: new_idx,
+                    byte_offset,
+                };
                 self.normalize();
             }
         }
@@ -1117,13 +1143,20 @@ impl InputModel {
     ///
     /// Attachment tokens are skipped transparently — the cursor only ever rests in Text tokens.
     pub fn move_left(&mut self) {
-        let InputCursor::InText { token_idx, byte_offset } = self.cursor.clone() else {
+        let InputCursor::InText {
+            token_idx,
+            byte_offset,
+        } = self.cursor.clone()
+        else {
             return;
         };
         if byte_offset > 0 {
             if let InputToken::Text(ref text) = self.tokens[token_idx] {
                 let prev = prev_char_boundary(text, byte_offset);
-                self.cursor = InputCursor::InText { token_idx, byte_offset: prev };
+                self.cursor = InputCursor::InText {
+                    token_idx,
+                    byte_offset: prev,
+                };
             }
             return;
         }
@@ -1135,7 +1168,10 @@ impl InputModel {
             }
             idx -= 1;
             if let InputToken::Text(t) = &self.tokens[idx] {
-                self.cursor = InputCursor::InText { token_idx: idx, byte_offset: t.len() };
+                self.cursor = InputCursor::InText {
+                    token_idx: idx,
+                    byte_offset: t.len(),
+                };
                 return;
             }
             // Non-text (attachment) token — keep scanning left.
@@ -1146,18 +1182,22 @@ impl InputModel {
     ///
     /// Attachment tokens are skipped transparently — the cursor only ever rests in Text tokens.
     pub fn move_right(&mut self) {
-        let InputCursor::InText { token_idx, byte_offset } = self.cursor.clone() else {
+        let InputCursor::InText {
+            token_idx,
+            byte_offset,
+        } = self.cursor.clone()
+        else {
             return;
         };
-        if let InputToken::Text(ref text) = self.tokens[token_idx] {
-            if byte_offset < text.len() {
-                let c = text[byte_offset..].chars().next().unwrap();
-                self.cursor = InputCursor::InText {
-                    token_idx,
-                    byte_offset: byte_offset + c.len_utf8(),
-                };
-                return;
-            }
+        if let InputToken::Text(ref text) = self.tokens[token_idx]
+            && byte_offset < text.len()
+        {
+            let c = text[byte_offset..].chars().next().unwrap();
+            self.cursor = InputCursor::InText {
+                token_idx,
+                byte_offset: byte_offset + c.len_utf8(),
+            };
+            return;
         }
         // At the end of a text token — scan right for the next text token, skipping attachments.
         let mut idx = token_idx;
@@ -1167,7 +1207,10 @@ impl InputModel {
                 return;
             }
             if matches!(self.tokens[idx], InputToken::Text(_)) {
-                self.cursor = InputCursor::InText { token_idx: idx, byte_offset: 0 };
+                self.cursor = InputCursor::InText {
+                    token_idx: idx,
+                    byte_offset: 0,
+                };
                 return;
             }
             // Non-text (attachment) token — keep scanning right.
@@ -1177,7 +1220,10 @@ impl InputModel {
     /// Resets the input to an empty state.
     pub fn clear(&mut self) {
         self.tokens = vec![InputToken::Text(String::new())];
-        self.cursor = InputCursor::InText { token_idx: 0, byte_offset: 0 };
+        self.cursor = InputCursor::InText {
+            token_idx: 0,
+            byte_offset: 0,
+        };
     }
 
     /// Inserts an attachment token at the current cursor position.
@@ -1186,7 +1232,10 @@ impl InputModel {
     /// text token is appended after the attachment so the cursor always lands in a text token.
     pub fn insert_attachment(&mut self, token: InputToken) {
         match self.cursor.clone() {
-            InputCursor::InText { token_idx, byte_offset } => {
+            InputCursor::InText {
+                token_idx,
+                byte_offset,
+            } => {
                 let tail = if let InputToken::Text(ref mut text) = self.tokens[token_idx] {
                     text.split_off(byte_offset)
                 } else {
@@ -1194,14 +1243,22 @@ impl InputModel {
                 };
                 let attach_idx = token_idx + 1;
                 self.tokens.insert(attach_idx, token);
-                self.tokens.insert(attach_idx + 1, InputToken::Text(format!(" {tail}")));
-                self.cursor = InputCursor::InText { token_idx: attach_idx + 1, byte_offset: 1 };
+                self.tokens
+                    .insert(attach_idx + 1, InputToken::Text(format!(" {tail}")));
+                self.cursor = InputCursor::InText {
+                    token_idx: attach_idx + 1,
+                    byte_offset: 1,
+                };
             }
             InputCursor::AtAttachment { token_idx } => {
                 self.tokens.insert(token_idx, token);
                 let new_text_idx = token_idx + 1;
-                self.tokens.insert(new_text_idx, InputToken::Text(" ".to_string()));
-                self.cursor = InputCursor::InText { token_idx: new_text_idx, byte_offset: 1 };
+                self.tokens
+                    .insert(new_text_idx, InputToken::Text(" ".to_string()));
+                self.cursor = InputCursor::InText {
+                    token_idx: new_text_idx,
+                    byte_offset: 1,
+                };
             }
         }
         self.normalize();
@@ -1211,18 +1268,29 @@ impl InputModel {
     ///
     /// Used when the user confirms a picker selection: the sigil + filter text already in the
     /// input is stripped and the chosen token is inserted in its place.
-    pub fn replace_filter_with_attachment(&mut self, sigil_and_filter_len: usize, token: InputToken) {
-        if let InputCursor::InText { token_idx, byte_offset } = self.cursor.clone() {
-            if let InputToken::Text(ref mut text) = self.tokens[token_idx] {
-                let strip_start = byte_offset.saturating_sub(sigil_and_filter_len);
-                let tail = text.split_off(byte_offset);
-                text.truncate(strip_start);
-                let attach_idx = token_idx + 1;
-                self.tokens.insert(attach_idx, token);
-                self.tokens.insert(attach_idx + 1, InputToken::Text(format!(" {tail}")));
-                self.cursor = InputCursor::InText { token_idx: attach_idx + 1, byte_offset: 1 };
-                self.normalize();
-            }
+    pub fn replace_filter_with_attachment(
+        &mut self,
+        sigil_and_filter_len: usize,
+        token: InputToken,
+    ) {
+        if let InputCursor::InText {
+            token_idx,
+            byte_offset,
+        } = self.cursor.clone()
+            && let InputToken::Text(ref mut text) = self.tokens[token_idx]
+        {
+            let strip_start = byte_offset.saturating_sub(sigil_and_filter_len);
+            let tail = text.split_off(byte_offset);
+            text.truncate(strip_start);
+            let attach_idx = token_idx + 1;
+            self.tokens.insert(attach_idx, token);
+            self.tokens
+                .insert(attach_idx + 1, InputToken::Text(format!(" {tail}")));
+            self.cursor = InputCursor::InText {
+                token_idx: attach_idx + 1,
+                byte_offset: 1,
+            };
+            self.normalize();
         }
     }
 
@@ -1260,37 +1328,37 @@ impl InputModel {
             let token_start = out.len();
             match token {
                 InputToken::Text(t) => {
-                    if !found_cursor {
-                        if let InputCursor::InText { token_idx, byte_offset } = self.cursor {
-                            if token_idx == idx {
-                                cursor_byte = token_start + byte_offset;
-                                found_cursor = true;
-                            }
-                        }
+                    if !found_cursor
+                        && let InputCursor::InText {
+                            token_idx,
+                            byte_offset,
+                        } = self.cursor
+                        && token_idx == idx
+                    {
+                        cursor_byte = token_start + byte_offset;
+                        found_cursor = true;
                     }
                     out.push_str(t);
                 }
                 InputToken::Path(p) => {
                     let sigil = format!("+{}", p.display());
-                    if !found_cursor {
-                        if let InputCursor::AtAttachment { token_idx } = self.cursor {
-                            if token_idx == idx {
-                                cursor_byte = token_start;
-                                found_cursor = true;
-                            }
-                        }
+                    if !found_cursor
+                        && let InputCursor::AtAttachment { token_idx } = self.cursor
+                        && token_idx == idx
+                    {
+                        cursor_byte = token_start;
+                        found_cursor = true;
                     }
                     out.push_str(&sigil);
                 }
                 InputToken::Skill { name, .. } => {
                     let sigil = format!("/{}", name);
-                    if !found_cursor {
-                        if let InputCursor::AtAttachment { token_idx } = self.cursor {
-                            if token_idx == idx {
-                                cursor_byte = token_start;
-                                found_cursor = true;
-                            }
-                        }
+                    if !found_cursor
+                        && let InputCursor::AtAttachment { token_idx } = self.cursor
+                        && token_idx == idx
+                    {
+                        cursor_byte = token_start;
+                        found_cursor = true;
                     }
                     out.push_str(&sigil);
                 }
@@ -1308,7 +1376,10 @@ impl InputModel {
     pub fn set_text(&mut self, text: String) {
         let len = text.len();
         self.tokens = vec![InputToken::Text(text)];
-        self.cursor = InputCursor::InText { token_idx: 0, byte_offset: len };
+        self.cursor = InputCursor::InText {
+            token_idx: 0,
+            byte_offset: len,
+        };
     }
 
     /// Merges adjacent `Text` tokens and ensures the sequence starts and ends with a `Text` token.
@@ -1316,14 +1387,27 @@ impl InputModel {
         // Merge adjacent text tokens.
         let mut i = 0;
         while i + 1 < self.tokens.len() {
-            if matches!((&self.tokens[i], &self.tokens[i + 1]), (InputToken::Text(_), InputToken::Text(_))) {
-                let next = if let InputToken::Text(t) = self.tokens.remove(i + 1) { t } else { unreachable!() };
+            if matches!(
+                (&self.tokens[i], &self.tokens[i + 1]),
+                (InputToken::Text(_), InputToken::Text(_))
+            ) {
+                let next = if let InputToken::Text(t) = self.tokens.remove(i + 1) {
+                    t
+                } else {
+                    unreachable!()
+                };
                 if let InputToken::Text(ref mut cur) = self.tokens[i] {
                     // Update cursor byte_offset if it pointed into the merged token.
-                    if let InputCursor::InText { token_idx, ref mut byte_offset } = self.cursor {
-                        if token_idx == i + 1 {
-                            self.cursor = InputCursor::InText { token_idx: i, byte_offset: cur.len() + *byte_offset };
-                        }
+                    if let InputCursor::InText {
+                        token_idx,
+                        ref mut byte_offset,
+                    } = self.cursor
+                        && token_idx == i + 1
+                    {
+                        self.cursor = InputCursor::InText {
+                            token_idx: i,
+                            byte_offset: cur.len() + *byte_offset,
+                        };
                     }
                     cur.push_str(&next);
                 }

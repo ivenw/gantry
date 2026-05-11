@@ -5,7 +5,9 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Widget},
 };
 
-use crate::model::{CopilotAuthKind, ProviderWizard, ProvidersSubView, ProvidersView, WizardProviderKind};
+use crate::model::{
+    CopilotAuthKind, ProviderWizard, ProvidersSubView, ProvidersView, WizardProviderKind,
+};
 
 pub struct ProvidersViewWidget<'a> {
     state: &'a ProvidersView,
@@ -55,11 +57,21 @@ fn render_list(
     }
 
     let footer_y = inner.bottom().saturating_sub(1);
-    let list_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+    let list_area = Rect::new(
+        inner.x,
+        inner.y,
+        inner.width,
+        inner.height.saturating_sub(1),
+    );
 
     if providers.is_empty() {
         let msg = "No providers configured";
-        buf.set_string(list_area.x, list_area.y, msg, Style::default().fg(Color::DarkGray));
+        buf.set_string(
+            list_area.x,
+            list_area.y,
+            msg,
+            Style::default().fg(Color::DarkGray),
+        );
     } else {
         for (i, provider) in providers.iter().enumerate() {
             if list_area.y + i as u16 >= list_area.bottom() {
@@ -80,7 +92,12 @@ fn render_list(
     }
 
     let footer = " a add   d delete   Esc close ";
-    buf.set_string(inner.x, footer_y, footer, Style::default().fg(Color::DarkGray));
+    buf.set_string(
+        inner.x,
+        footer_y,
+        footer,
+        Style::default().fg(Color::DarkGray),
+    );
 }
 
 fn render_type_picker(buf: &mut Buffer, area: Rect, selected_idx: usize) {
@@ -97,7 +114,12 @@ fn render_type_picker(buf: &mut Buffer, area: Rect, selected_idx: usize) {
     }
 
     let footer_y = inner.bottom().saturating_sub(1);
-    let list_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+    let list_area = Rect::new(
+        inner.x,
+        inner.y,
+        inner.width,
+        inner.height.saturating_sub(1),
+    );
 
     for (i, kind) in WizardProviderKind::ALL.iter().enumerate() {
         if list_area.y + i as u16 >= list_area.bottom() {
@@ -115,7 +137,12 @@ fn render_type_picker(buf: &mut Buffer, area: Rect, selected_idx: usize) {
     }
 
     let footer = " ↑↓ navigate   Enter select   Esc back ";
-    buf.set_string(inner.x, footer_y, footer, Style::default().fg(Color::DarkGray));
+    buf.set_string(
+        inner.x,
+        footer_y,
+        footer,
+        Style::default().fg(Color::DarkGray),
+    );
 }
 
 fn render_copilot_auth_picker(buf: &mut Buffer, area: Rect, selected_idx: usize) {
@@ -132,7 +159,12 @@ fn render_copilot_auth_picker(buf: &mut Buffer, area: Rect, selected_idx: usize)
     }
 
     let footer_y = inner.bottom().saturating_sub(1);
-    let list_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+    let list_area = Rect::new(
+        inner.x,
+        inner.y,
+        inner.width,
+        inner.height.saturating_sub(1),
+    );
 
     for (i, kind) in CopilotAuthKind::ALL.iter().enumerate() {
         if list_area.y + i as u16 >= list_area.bottom() {
@@ -150,7 +182,12 @@ fn render_copilot_auth_picker(buf: &mut Buffer, area: Rect, selected_idx: usize)
     }
 
     let footer = " ↑↓ navigate   Enter select   Esc back ";
-    buf.set_string(inner.x, footer_y, footer, Style::default().fg(Color::DarkGray));
+    buf.set_string(
+        inner.x,
+        footer_y,
+        footer,
+        Style::default().fg(Color::DarkGray),
+    );
 }
 
 fn render_wizard(buf: &mut Buffer, area: Rect, wizard: &ProviderWizard) {
@@ -194,7 +231,12 @@ fn render_wizard(buf: &mut Buffer, area: Rect, wizard: &ProviderWizard) {
         let is_focused = i == wizard.focused_idx;
 
         let req_marker = if field.required { "*" } else { " " };
-        let label = format!("{}{:<width$}", req_marker, format!("{}:", field.label), width = label_width);
+        let label = format!(
+            "{}{:<width$}",
+            req_marker,
+            format!("{}:", field.label),
+            width = label_width
+        );
 
         let label_style = if is_focused {
             Style::default().fg(Color::Cyan)
@@ -216,7 +258,11 @@ fn render_wizard(buf: &mut Buffer, area: Rect, wizard: &ProviderWizard) {
 
         // Draw cursor block on the focused field.
         if is_focused {
-            let cursor_col = field.value.chars().count().min(value_width.saturating_sub(1));
+            let cursor_col = field
+                .value
+                .chars()
+                .count()
+                .min(value_width.saturating_sub(1));
             let cursor_x = value_x + cursor_col as u16;
             if cursor_x < inner.right()
                 && let Some(cell) = buf.cell_mut((cursor_x, y))
@@ -245,14 +291,17 @@ fn render_wizard(buf: &mut Buffer, area: Rect, wizard: &ProviderWizard) {
         buf.set_string(inner.x, note_y, note, Style::default().fg(Color::Yellow));
     }
 
-    if has_error
-        && let Some(ref msg) = wizard.error
-    {
+    if has_error && let Some(ref msg) = wizard.error {
         buf.set_string(inner.x, error_y, msg, Style::default().fg(Color::Red));
     }
 
     let footer = " ↑↓ navigate   Enter edit/confirm   Esc back ";
-    buf.set_string(inner.x, footer_y, footer, Style::default().fg(Color::DarkGray));
+    buf.set_string(
+        inner.x,
+        footer_y,
+        footer,
+        Style::default().fg(Color::DarkGray),
+    );
 }
 
 fn inner_area(area: Rect) -> Rect {

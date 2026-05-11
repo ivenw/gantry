@@ -7,8 +7,8 @@ use rig::tool::ToolDyn;
 use crate::config::{
     ApiKeyCredential, Credential, CredentialsRepository, ProviderConfig, ProviderConfigRepository,
 };
-use crate::provider::agent::BoxedAgent;
 use crate::provider::PromptHook;
+use crate::provider::agent::BoxedAgent;
 use crate::provider::client::ProviderClient;
 use crate::provider::{ModelSelection, ProviderAlias};
 

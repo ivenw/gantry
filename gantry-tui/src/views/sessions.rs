@@ -109,6 +109,11 @@ impl Widget for SessionsViewWidget<'_> {
         }
 
         let footer = " ↑↓ navigate   Enter resume   Esc cancel ";
-        buf.set_string(footer_area.x, footer_area.y, footer, Style::default().fg(Color::DarkGray));
+        buf.set_string(
+            footer_area.x,
+            footer_area.y,
+            footer,
+            Style::default().fg(Color::DarkGray),
+        );
     }
 }

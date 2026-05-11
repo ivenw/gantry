@@ -16,7 +16,9 @@ impl Command for Sessions {
                     let _ = tx.send(Msg::OpenSessionsView(sessions, active_id)).await;
                 }
                 Err(e) => {
-                    let _ = tx.send(Msg::SetStatus(format!("failed to list sessions: {e}"))).await;
+                    let _ = tx
+                        .send(Msg::SetStatus(format!("failed to list sessions: {e}")))
+                        .await;
                 }
             }
         });

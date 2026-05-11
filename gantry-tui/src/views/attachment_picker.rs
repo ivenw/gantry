@@ -23,12 +23,19 @@ pub struct AttachmentPickerView<'a> {
 }
 
 impl<'a> AttachmentPickerView<'a> {
+    pub const MAX_VISIBLE: usize = 10;
+
     /// Creates an `AttachmentPickerView` from picker state and the project root for path display.
     pub fn new(state: &'a AttachmentPicker, project_root: &'a Path) -> Self {
         Self {
             state,
             project_root,
         }
+    }
+
+    /// Returns the height this view needs based on the number of results, capped at `MAX_VISIBLE`.
+    pub fn height(&self) -> u16 {
+        self.state.len().clamp(1, Self::MAX_VISIBLE) as u16
     }
 }
 
@@ -45,10 +52,8 @@ impl Widget for AttachmentPickerView<'_> {
         // Scroll window: keep selected_idx visible.
         let start = if count <= max_visible {
             0
-        } else if selected + 1 > max_visible {
-            selected + 1 - max_visible
         } else {
-            0
+            (selected + 1).saturating_sub(max_visible)
         };
 
         if count == 0 {

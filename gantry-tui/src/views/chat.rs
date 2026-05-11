@@ -12,7 +12,6 @@ const USER_PREFIX: &str = ">> ";
 const ASSISTANT_PREFIX: &str = "<< ";
 const TOOL_CALL_PREFIX: &str = ".. ";
 
-
 pub struct ChatView<'a> {
     pub messages: &'a [ChatMessage],
     pub scroll_offset: u16,
@@ -72,9 +71,7 @@ impl StatefulWidget for ChatView<'_> {
                             + sender.as_ref().map(|s| s.as_str().len() + 2).unwrap_or(0)
                     }
                     ChatMessage::Assistant { .. } => ASSISTANT_PREFIX.len(),
-                    ChatMessage::ToolCall { name, .. } => {
-                        TOOL_CALL_PREFIX.len() + name.len() + 1
-                    }
+                    ChatMessage::ToolCall { name, .. } => TOOL_CALL_PREFIX.len() + name.len() + 1,
                 };
                 let content = msg_content(m);
                 let text_width = area.width.saturating_sub(prefix_len as u16);
@@ -156,7 +153,11 @@ impl StatefulWidget for ChatView<'_> {
                         .render(text_area, buf);
                 }
                 ChatMessage::ToolCall { name, done, .. } => {
-                    let indicator = if *done { "✓" } else { &self.spinner.to_string() };
+                    let indicator = if *done {
+                        "✓"
+                    } else {
+                        &self.spinner.to_string()
+                    };
                     let line = format!("{}{} {}", TOOL_CALL_PREFIX, indicator, name);
                     buf.set_string(
                         area.x,

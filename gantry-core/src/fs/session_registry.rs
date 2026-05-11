@@ -6,8 +6,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::session::{Node, Session, SessionHistory, SessionId};
 use crate::session::registry::{SessionInfo, SessionRegistry};
+use crate::session::{Node, Session, SessionHistory, SessionId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SessionHeader {

@@ -38,7 +38,12 @@ impl Widget for ModelPickerViewWidget<'_> {
         }
 
         let footer_y = inner.bottom().saturating_sub(1);
-        let list_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+        let list_area = Rect::new(
+            inner.x,
+            inner.y,
+            inner.width,
+            inner.height.saturating_sub(1),
+        );
 
         if self.state.models.is_empty() {
             buf.set_string(
@@ -62,13 +67,22 @@ impl Widget for ModelPickerViewWidget<'_> {
                 } else {
                     Style::default().fg(Color::White)
                 };
-                let label = format!("{}  {}", selection.provider.as_str(), selection.model.as_str());
+                let label = format!(
+                    "{}  {}",
+                    selection.provider.as_str(),
+                    selection.model.as_str()
+                );
                 let padded = format!("{:<width$}", label, width = inner.width as usize);
                 buf.set_string(list_area.x, y, &padded, style);
             }
         }
 
         let footer = " ↑↓ navigate   Enter select   Esc close ";
-        buf.set_string(inner.x, footer_y, footer, Style::default().fg(Color::DarkGray));
+        buf.set_string(
+            inner.x,
+            footer_y,
+            footer,
+            Style::default().fg(Color::DarkGray),
+        );
     }
 }

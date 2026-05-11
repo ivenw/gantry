@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod commands;
 pub mod effects;
 mod message;

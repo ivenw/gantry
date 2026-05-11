@@ -91,7 +91,10 @@ impl Widget for TreeViewWidget<'_> {
             let body_width = body.chars().count();
             let max_width = list_area.width as usize;
             let content_budget = max_width.saturating_sub(body_width);
-            let single_line: String = node.node.message.text()
+            let single_line: String = node
+                .node
+                .message
+                .text()
                 .chars()
                 .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
                 .collect();

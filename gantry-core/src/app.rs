@@ -353,7 +353,10 @@ impl App {
         if query.is_empty() {
             return paths
                 .into_iter()
-                .map(|path| PathSearchResult { path, indices: vec![] })
+                .map(|path| PathSearchResult {
+                    path,
+                    indices: vec![],
+                })
                 .collect();
         }
 
@@ -373,9 +376,7 @@ impl App {
                 // Normalize path separators and word-boundary chars to spaces so that a query
                 // like "tools edit" or "tools-edit" scores against "gantry-tools/src/edit.rs"
                 // as if it were "gantry tools src edit.rs", enabling cross-component matching.
-                let normalized = rel
-                    .to_string_lossy()
-                    .replace(['/', '-', '_'], " ");
+                let normalized = rel.to_string_lossy().replace(['/', '-', '_'], " ");
                 let depth = rel.components().count().saturating_sub(1);
                 let mut indices = Vec::new();
                 let score = pattern.indices(
@@ -407,7 +408,10 @@ impl App {
             skills.sort_by(|a, b| a.metadata.name.cmp(&b.metadata.name));
             return skills
                 .into_iter()
-                .map(|skill| SkillSearchResult { skill, indices: vec![] })
+                .map(|skill| SkillSearchResult {
+                    skill,
+                    indices: vec![],
+                })
                 .collect();
         }
 

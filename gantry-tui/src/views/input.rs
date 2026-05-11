@@ -40,7 +40,7 @@ impl<'a> InputView<'a> {
     }
 
     /// Returns the widget height required to fit the content within `width` terminal columns.
-    pub fn calc_height(&self, width: u16) -> u16 {
+    pub fn height(&self, width: u16) -> u16 {
         let text_width = width.saturating_sub(PREFIX_WIDTH).max(1) as usize;
         let wrapped_lines = Self::wrapped_line_count(&self.flat, text_width);
         (wrapped_lines as u16 + BORDER_HEIGHT).max(3)
@@ -187,10 +187,11 @@ impl Widget for InputView<'_> {
                 }
                 let cx = text_area.x + col as u16;
                 let cy = text_area.y + row as u16;
-                if cx < text_area.right() && cy < text_area.bottom() {
-                    if let Some(cell) = buf.cell_mut((cx, cy)) {
-                        cell.set_char(c).set_style(style);
-                    }
+                if cx < text_area.right()
+                    && cy < text_area.bottom()
+                    && let Some(cell) = buf.cell_mut((cx, cy))
+                {
+                    cell.set_char(c).set_style(style);
                 }
                 col += 1;
             }

@@ -73,8 +73,7 @@ impl Runtime {
             if crossterm::event::poll(Duration::from_millis(10))? {
                 match crossterm::event::read()? {
                     Event::Key(key)
-                        if key.kind == KeyEventKind::Press
-                            || key.kind == KeyEventKind::Repeat =>
+                        if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat =>
                     {
                         let _ = self.msg_tx.try_send(Msg::Key(key));
                     }
@@ -124,7 +123,9 @@ impl Runtime {
     fn process(&mut self, msg: Msg) -> Option<Msg> {
         match msg {
             Msg::NewSession => {
-                let result = self.rt.block_on(async { self.app.lock().await.new_session() });
+                let result = self
+                    .rt
+                    .block_on(async { self.app.lock().await.new_session() });
                 if let Err(e) = result {
                     return Some(Msg::SetStatus(format!("failed to create session: {}", e)));
                 }
@@ -155,16 +156,16 @@ impl Runtime {
                 self.spawn_send_message(tokens.clone());
             }
             Msg::OpenPathPicker(ref query) => {
-                let paths = self.rt.block_on(async {
-                    self.app.lock().await.search_paths(query)
-                });
+                let paths = self
+                    .rt
+                    .block_on(async { self.app.lock().await.search_paths(query) });
                 self.model.activate_path_picker(paths);
                 return None;
             }
             Msg::OpenSkillPicker(ref query) => {
-                let skills = self.rt.block_on(async {
-                    self.app.lock().await.search_skills(query)
-                });
+                let skills = self
+                    .rt
+                    .block_on(async { self.app.lock().await.search_skills(query) });
                 self.model.activate_skill_picker(skills);
                 return None;
             }
@@ -174,14 +175,14 @@ impl Runtime {
                     Some(crate::model::AttachmentPickerKind::Skill(_))
                 );
                 if is_skill {
-                    let skills = self.rt.block_on(async {
-                        self.app.lock().await.search_skills(query)
-                    });
+                    let skills = self
+                        .rt
+                        .block_on(async { self.app.lock().await.search_skills(query) });
                     return Some(Msg::SetSkillPickerResults(skills));
                 } else {
-                    let paths = self.rt.block_on(async {
-                        self.app.lock().await.search_paths(query)
-                    });
+                    let paths = self
+                        .rt
+                        .block_on(async { self.app.lock().await.search_paths(query) });
                     return Some(Msg::SetPathPickerResults(paths));
                 }
             }
@@ -245,7 +246,9 @@ impl Runtime {
                         }
                     });
                     while let Some(item) = response.stream.next().await {
-                        if cancel.load(Ordering::SeqCst) || tx.send(Msg::StreamItem(item)).await.is_err() {
+                        if cancel.load(Ordering::SeqCst)
+                            || tx.send(Msg::StreamItem(item)).await.is_err()
+                        {
                             break;
                         }
                     }
@@ -293,9 +296,7 @@ impl Runtime {
                 return;
             }
             let messages = ChatMessage::messages_from(app.lock().await.history());
-            let _ = tx
-                .send(Msg::ReloadMessagesWithInput(messages, input))
-                .await;
+            let _ = tx.send(Msg::ReloadMessagesWithInput(messages, input)).await;
         });
     }
 
@@ -304,13 +305,14 @@ impl Runtime {
         config: gantry_core::ProviderConfig,
         credential: Option<gantry_core::StoredCredential>,
     ) {
-        match self.rt.block_on(async {
-            self.app.lock().await.add_provider(config, credential)
-        }) {
+        match self
+            .rt
+            .block_on(async { self.app.lock().await.add_provider(config, credential) })
+        {
             Ok(()) => {
-                let providers = self.rt.block_on(async {
-                    self.app.lock().await.list_providers().to_vec()
-                });
+                let providers = self
+                    .rt
+                    .block_on(async { self.app.lock().await.list_providers().to_vec() });
                 self.model.activate_providers_view(providers);
             }
             Err(e) => {
@@ -327,16 +329,19 @@ impl Runtime {
     }
 
     fn handle_remove_provider(&mut self, alias: gantry_core::ProviderAlias) {
-        match self.rt.block_on(async {
-            self.app.lock().await.remove_provider(&alias)
-        }) {
+        match self
+            .rt
+            .block_on(async { self.app.lock().await.remove_provider(&alias) })
+        {
             Ok(()) => {
-                let providers = self.rt.block_on(async {
-                    self.app.lock().await.list_providers().to_vec()
-                });
+                let providers = self
+                    .rt
+                    .block_on(async { self.app.lock().await.list_providers().to_vec() });
                 // Refresh the list view, clamping selection if it is now out of bounds.
                 if let Some(ref mut pv) = self.model.providers_view
-                    && let crate::model::ProvidersSubView::List { ref mut selected_idx } = pv.sub
+                    && let crate::model::ProvidersSubView::List {
+                        ref mut selected_idx,
+                    } = pv.sub
                 {
                     pv.providers = providers;
                     if !pv.providers.is_empty() {
@@ -353,9 +358,9 @@ impl Runtime {
     }
 
     fn handle_resume_session(&mut self, session_id: gantry_core::SessionId) {
-        let result = self.rt.block_on(async {
-            self.app.lock().await.resume_session(&session_id)
-        });
+        let result = self
+            .rt
+            .block_on(async { self.app.lock().await.resume_session(&session_id) });
         match result {
             Err(e) => {
                 self.model.status_message = Some(format!("failed to resume session: {e}"));
@@ -388,4 +393,3 @@ impl Runtime {
         cmd.execute(ctx);
     }
 }
-

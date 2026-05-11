@@ -22,4 +22,3 @@ pub(crate) fn resolve_path(cwd: &Path, path: PathBuf) -> PathBuf {
         cwd.join(path)
     }
 }
-
