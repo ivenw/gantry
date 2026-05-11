@@ -1045,7 +1045,6 @@ impl InputModel {
                     if token_idx == 0 {
                         return;
                     }
-                    // Step back over the preceding token.
                     let prev_idx = token_idx - 1;
                     match &self.tokens[prev_idx] {
                         InputToken::Text(_) => {
@@ -1058,7 +1057,15 @@ impl InputModel {
                             self.cursor = InputCursor::InText { token_idx: prev_idx, byte_offset: len };
                         }
                         _ => {
-                            self.cursor = InputCursor::AtAttachment { token_idx: prev_idx };
+                            // Delete the attachment immediately rather than landing on it first.
+                            self.tokens.remove(prev_idx);
+                            let new_idx = prev_idx.saturating_sub(1);
+                            let byte_offset = match self.tokens.get(new_idx) {
+                                Some(InputToken::Text(t)) => t.len(),
+                                _ => 0,
+                            };
+                            self.cursor = InputCursor::InText { token_idx: new_idx, byte_offset };
+                            self.normalize();
                         }
                     }
                 } else {
@@ -1085,90 +1092,63 @@ impl InputModel {
     }
 
     /// Moves the cursor one position to the left.
+    ///
+    /// Attachment tokens are skipped transparently — the cursor only ever rests in Text tokens.
     pub fn move_left(&mut self) {
-        match self.cursor.clone() {
-            InputCursor::InText { token_idx, byte_offset } => {
-                if byte_offset == 0 {
-                    if token_idx == 0 {
-                        return;
-                    }
-                    let prev_idx = token_idx - 1;
-                    match &self.tokens[prev_idx] {
-                        InputToken::Text(t) => {
-                            let len = t.len();
-                            self.cursor = InputCursor::InText { token_idx: prev_idx, byte_offset: len };
-                        }
-                        _ => {
-                            self.cursor = InputCursor::AtAttachment { token_idx: prev_idx };
-                        }
-                    }
-                } else {
-                    if let InputToken::Text(ref text) = self.tokens[token_idx] {
-                        let prev = prev_char_boundary(text, byte_offset);
-                        self.cursor = InputCursor::InText { token_idx, byte_offset: prev };
-                    }
-                }
+        let InputCursor::InText { token_idx, byte_offset } = self.cursor.clone() else {
+            return;
+        };
+        if byte_offset > 0 {
+            if let InputToken::Text(ref text) = self.tokens[token_idx] {
+                let prev = prev_char_boundary(text, byte_offset);
+                self.cursor = InputCursor::InText { token_idx, byte_offset: prev };
             }
-            InputCursor::AtAttachment { token_idx } => {
-                if token_idx == 0 {
-                    return;
-                }
-                let prev_idx = token_idx - 1;
-                match &self.tokens[prev_idx] {
-                    InputToken::Text(t) => {
-                        let len = t.len();
-                        self.cursor = InputCursor::InText { token_idx: prev_idx, byte_offset: len };
-                    }
-                    _ => {
-                        self.cursor = InputCursor::AtAttachment { token_idx: prev_idx };
-                    }
-                }
+            return;
+        }
+        // At the start of a text token — scan left for the previous text token, skipping attachments.
+        let mut idx = token_idx;
+        loop {
+            if idx == 0 {
+                return;
             }
+            idx -= 1;
+            if let InputToken::Text(t) = &self.tokens[idx] {
+                self.cursor = InputCursor::InText { token_idx: idx, byte_offset: t.len() };
+                return;
+            }
+            // Non-text (attachment) token — keep scanning left.
         }
     }
 
     /// Moves the cursor one position to the right.
+    ///
+    /// Attachment tokens are skipped transparently — the cursor only ever rests in Text tokens.
     pub fn move_right(&mut self) {
-        match self.cursor.clone() {
-            InputCursor::InText { token_idx, byte_offset } => {
-                if let InputToken::Text(ref text) = self.tokens[token_idx] {
-                    if byte_offset < text.len() {
-                        let c = text[byte_offset..].chars().next().unwrap();
-                        self.cursor = InputCursor::InText {
-                            token_idx,
-                            byte_offset: byte_offset + c.len_utf8(),
-                        };
-                        return;
-                    }
-                }
-                // At end of text token — move to next token.
-                let next_idx = token_idx + 1;
-                if next_idx >= self.tokens.len() {
-                    return;
-                }
-                match &self.tokens[next_idx] {
-                    InputToken::Text(_) => {
-                        self.cursor = InputCursor::InText { token_idx: next_idx, byte_offset: 0 };
-                    }
-                    _ => {
-                        self.cursor = InputCursor::AtAttachment { token_idx: next_idx };
-                    }
-                }
+        let InputCursor::InText { token_idx, byte_offset } = self.cursor.clone() else {
+            return;
+        };
+        if let InputToken::Text(ref text) = self.tokens[token_idx] {
+            if byte_offset < text.len() {
+                let c = text[byte_offset..].chars().next().unwrap();
+                self.cursor = InputCursor::InText {
+                    token_idx,
+                    byte_offset: byte_offset + c.len_utf8(),
+                };
+                return;
             }
-            InputCursor::AtAttachment { token_idx } => {
-                let next_idx = token_idx + 1;
-                if next_idx >= self.tokens.len() {
-                    return;
-                }
-                match &self.tokens[next_idx] {
-                    InputToken::Text(_) => {
-                        self.cursor = InputCursor::InText { token_idx: next_idx, byte_offset: 0 };
-                    }
-                    _ => {
-                        self.cursor = InputCursor::AtAttachment { token_idx: next_idx };
-                    }
-                }
+        }
+        // At the end of a text token — scan right for the next text token, skipping attachments.
+        let mut idx = token_idx;
+        loop {
+            idx += 1;
+            if idx >= self.tokens.len() {
+                return;
             }
+            if matches!(self.tokens[idx], InputToken::Text(_)) {
+                self.cursor = InputCursor::InText { token_idx: idx, byte_offset: 0 };
+                return;
+            }
+            // Non-text (attachment) token — keep scanning right.
         }
     }
 

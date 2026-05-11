@@ -615,7 +615,7 @@ fn handle_key_insert(
             if c == '+' {
                 return Some(Msg::OpenPathPicker(String::new()));
             }
-            if c == '/' && model.input.is_blank() {
+            if c == '/' {
                 return Some(Msg::OpenSkillPicker(String::new()));
             }
             model.input.insert(c);
