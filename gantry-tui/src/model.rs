@@ -1173,14 +1173,14 @@ impl InputModel {
                 };
                 let attach_idx = token_idx + 1;
                 self.tokens.insert(attach_idx, token);
-                self.tokens.insert(attach_idx + 1, InputToken::Text(tail));
-                self.cursor = InputCursor::InText { token_idx: attach_idx + 1, byte_offset: 0 };
+                self.tokens.insert(attach_idx + 1, InputToken::Text(format!(" {tail}")));
+                self.cursor = InputCursor::InText { token_idx: attach_idx + 1, byte_offset: 1 };
             }
             InputCursor::AtAttachment { token_idx } => {
                 self.tokens.insert(token_idx, token);
                 let new_text_idx = token_idx + 1;
-                self.tokens.insert(new_text_idx, InputToken::Text(String::new()));
-                self.cursor = InputCursor::InText { token_idx: new_text_idx, byte_offset: 0 };
+                self.tokens.insert(new_text_idx, InputToken::Text(" ".to_string()));
+                self.cursor = InputCursor::InText { token_idx: new_text_idx, byte_offset: 1 };
             }
         }
         self.normalize();
