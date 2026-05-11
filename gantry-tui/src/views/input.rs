@@ -3,8 +3,10 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
-    widgets::{Block, BorderType, Borders, Widget},
+    widgets::{Block, Borders, Widget},
 };
+
+use crate::{model::InputMode, theme};
 
 const PREFIX: &str = ">> ";
 const PREFIX_WIDTH: u16 = PREFIX.len() as u16;
@@ -19,6 +21,7 @@ pub struct InputView<'a> {
     /// Number of trailing bytes in the flat string that belong to an active picker filter (sigil + query).
     /// These characters are rendered in LightYellow to indicate the pending picker state.
     picker_filter_len: usize,
+    mode: InputMode,
 }
 
 impl<'a> InputView<'a> {
@@ -30,7 +33,14 @@ impl<'a> InputView<'a> {
             cursor,
             flat,
             picker_filter_len: 0,
+            mode: InputMode::Normal,
         }
+    }
+
+    /// Sets the input mode, used to color the border.
+    pub fn with_mode(mut self, mode: InputMode) -> Self {
+        self.mode = mode;
+        self
     }
 
     /// Sets the number of trailing bytes that represent an active picker filter, for highlight rendering.
@@ -113,10 +123,14 @@ fn flat_display(tokens: &[InputToken]) -> String {
 
 impl Widget for InputView<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        let border_color = match self.mode {
+            InputMode::Normal => Color::DarkGray,
+            InputMode::Insert => Color::LightGreen,
+        };
         Block::default()
             .borders(Borders::TOP | Borders::BOTTOM)
-            .border_type(BorderType::LightDoubleDashed)
-            .border_style(Style::default().fg(Color::DarkGray))
+            .border_set(theme::border_set())
+            .border_style(Style::default().fg(border_color))
             .render(area, buf);
 
         let content_area = Rect::new(

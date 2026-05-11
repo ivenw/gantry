@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 mod commands;
+pub mod theme;
 pub mod effects;
 mod message;
 mod model;

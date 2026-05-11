@@ -89,6 +89,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
             .unwrap_or(0);
         frame.render_widget(
             InputView::new(&model.input.tokens, input_cursor)
+                .with_mode(model.mode)
                 .with_picker_filter_len(picker_filter_len),
             input_area,
         );
