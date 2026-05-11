@@ -9,7 +9,7 @@ pub fn border_set() -> border::Set<'static> {
         bottom_right: "+",
         horizontal_top: "-",
         horizontal_bottom: "-",
-        vertical_left: "|",
-        vertical_right: "|",
+        vertical_left: " ",
+        vertical_right: " ",
     }
 }

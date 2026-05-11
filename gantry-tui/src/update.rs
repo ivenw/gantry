@@ -796,6 +796,7 @@ pub fn available_command_entries() -> Vec<CommandEntry> {
             name: k.name().to_string(),
             description: k.description().to_string(),
             command: k.into_command().into(),
+            indices: vec![],
         })
         .collect()
 }

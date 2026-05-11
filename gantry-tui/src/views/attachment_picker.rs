@@ -12,10 +12,10 @@ use crate::model::{AttachmentPicker, AttachmentPickerKind};
 
 use super::table::{ColumnSpec, TableView, highlighted_line};
 
-const STYLE_TEXT: Style = Style::new().fg(Color::Gray);
+const STYLE_TEXT: Style = Style::new().fg(Color::White);
 const STYLE_MATCH: Style = Style::new().fg(Color::LightYellow);
 const STYLE_SELECTED: Style = Style::new().fg(Color::LightYellow).bold();
-const STYLE_DESC: Style = Style::new().fg(Color::DarkGray);
+const STYLE_DESC: Style = Style::new().fg(Color::Gray);
 
 pub struct AttachmentPickerView<'a> {
     state: &'a AttachmentPicker,

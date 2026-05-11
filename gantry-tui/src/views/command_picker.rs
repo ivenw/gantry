@@ -2,54 +2,39 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
-    widgets::{Block, BorderType, Borders, Widget},
+    text::{Line, Span},
+    widgets::{Block, Borders, Widget},
 };
 
-use crate::commands::MAX_CMD_NAME_LEN;
 use crate::model::CommandPicker;
+use crate::theme;
+
+use super::table::{ColumnSpec, TableView, highlighted_line};
 
 /// Minimum spaces between the end of a command name and the start of its description.
-const CMD_DESC_GAP: usize = 12;
+const CMD_DESC_GAP: u16 = 12;
 
-/// Column offset at which descriptions start, relative to the list area.
-const DESC_COL: u16 = (MAX_CMD_NAME_LEN + CMD_DESC_GAP) as u16;
+const STYLE_TEXT: Style = Style::new().fg(Color::White);
+const STYLE_MATCH: Style = Style::new().fg(Color::LightCyan);
+const STYLE_SELECTED: Style = Style::new().fg(Color::LightCyan).bold();
+const STYLE_DESC: Style = Style::new().fg(Color::Gray);
+
+/// Overhead rows: top border + search line + blank separator + bottom border.
+const CHROME_HEIGHT: u16 = 4;
 
 pub struct CommandPickerView<'a> {
     state: &'a CommandPicker,
 }
 
 impl<'a> CommandPickerView<'a> {
+    /// Creates a `CommandPickerView` from picker state.
     pub fn new(state: &'a CommandPicker) -> Self {
         Self { state }
     }
 
-    /// Calculates the total height needed to render the picker at the given width.
-    pub fn height(&self, width: u16) -> u16 {
-        let filtered = self.state.filtered_commands();
-        // Available width for descriptions: subtract borders and the name column.
-        let desc_width = (width.saturating_sub(2) as usize)
-            .saturating_sub(DESC_COL as usize)
-            .max(1);
-
-        let list_height: u16 = if filtered.is_empty() {
-            1
-        } else {
-            filtered
-                .iter()
-                .map(|cmd| {
-                    let desc_len = cmd.description.len();
-                    let wrapped = if desc_len == 0 {
-                        1
-                    } else {
-                        desc_len.div_ceil(desc_width)
-                    };
-                    wrapped.max(1) as u16
-                })
-                .sum()
-        };
-
-        // border top + list rows + border bottom
-        list_height + 2
+    /// Returns the total height needed to render the picker.
+    pub fn height(&self) -> u16 {
+        CHROME_HEIGHT + self.state.filtered_commands().len().max(1) as u16
     }
 }
 
@@ -57,21 +42,10 @@ impl Widget for CommandPickerView<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let filtered = self.state.filtered_commands();
 
-        let title = if self.state.filter.is_empty() {
-            if filtered.is_empty() {
-                " No commands ".to_string()
-            } else {
-                " Commands ".to_string()
-            }
-        } else {
-            format!(" Commands: {} ", self.state.filter)
-        };
-
         let block = Block::default()
             .borders(Borders::ALL)
-            .border_type(BorderType::Plain)
-            .border_style(Style::default().fg(Color::DarkGray))
-            .title(title);
+            .border_set(theme::border_set())
+            .border_style(Style::default().fg(Color::Gray));
         block.render(area, buf);
 
         let inner = Rect::new(
@@ -85,61 +59,51 @@ impl Widget for CommandPickerView<'_> {
             return;
         }
 
-        let desc_col_x = inner.x + DESC_COL;
-        let desc_width = (inner.width as usize)
-            .saturating_sub(DESC_COL as usize)
-            .max(1);
-        let mut y = inner.y;
+        let prompt = format!("> {}", self.state.filter);
+        buf.set_string(inner.x, inner.y, &prompt, STYLE_TEXT);
 
-        for (i, cmd) in filtered.iter().enumerate() {
-            if y >= inner.bottom() {
-                break;
-            }
+        // inner.y + 1 is the blank separator; list starts at inner.y + 2.
+        let list = Rect::new(
+            inner.x,
+            inner.y + 2,
+            inner.width,
+            inner.height.saturating_sub(2),
+        );
 
-            let is_selected = i == self.state.selected_idx;
-            let name_style = if is_selected {
-                Style::default().fg(Color::Black).bg(Color::LightGreen)
-            } else {
-                Style::default().fg(Color::White)
-            };
-            let desc_style = if is_selected {
-                Style::default().fg(Color::Black).bg(Color::LightGreen)
-            } else {
-                Style::default().fg(Color::White)
-            };
-
-            // Pad the name to fill the name column so the selection highlight is uniform.
-            let padded_name = format!("{:<width$}", cmd.name, width = MAX_CMD_NAME_LEN);
-            buf.set_string(inner.x, y, &padded_name, name_style);
-
-            // For selected rows, fill the gap between name and description columns.
-            if is_selected {
-                let gap_x = inner.x + MAX_CMD_NAME_LEN as u16;
-                let gap_width = DESC_COL.saturating_sub(MAX_CMD_NAME_LEN as u16) as usize;
-                buf.set_string(gap_x, y, " ".repeat(gap_width), desc_style);
-            }
-
-            let desc_chunks: Vec<&str> = if cmd.description.is_empty() {
-                vec![""]
-            } else {
-                cmd.description
-                    .as_bytes()
-                    .chunks(desc_width)
-                    .map(|c| unsafe { std::str::from_utf8_unchecked(c) })
-                    .collect()
-            };
-
-            for (j, chunk) in desc_chunks.iter().enumerate() {
-                if y >= inner.bottom() {
-                    break;
-                }
-                // Continuation lines re-indent to the description column.
-                if j > 0 {
-                    buf.set_string(inner.x, y, " ".repeat(DESC_COL as usize), desc_style);
-                }
-                buf.set_string(desc_col_x, y, chunk, desc_style);
-                y += 1;
-            }
+        if list.height == 0 {
+            return;
         }
+
+        if filtered.is_empty() {
+            buf.set_string(
+                list.x,
+                list.y,
+                "No matches",
+                Style::default().fg(Color::DarkGray),
+            );
+            return;
+        }
+
+        let rows: Vec<Vec<Line>> = filtered
+            .iter()
+            .enumerate()
+            .map(|(i, cmd)| {
+                let is_selected = i == self.state.selected_idx;
+                let name_line = if is_selected {
+                    Line::from(Span::styled(cmd.name.clone(), STYLE_SELECTED))
+                } else {
+                    highlighted_line(&cmd.name, &cmd.indices, STYLE_TEXT, STYLE_MATCH)
+                };
+                let desc_line = Line::from(Span::styled(cmd.description.clone(), STYLE_DESC));
+                vec![name_line, desc_line]
+            })
+            .collect();
+
+        let columns = vec![
+            ColumnSpec::new(CMD_DESC_GAP, None),
+            ColumnSpec::new(0, None),
+        ];
+
+        TableView::new(columns, rows).render(list, buf);
     }
 }

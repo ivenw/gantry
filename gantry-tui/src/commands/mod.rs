@@ -83,19 +83,3 @@ impl KnownCommand {
         }
     }
 }
-
-/// The length of the longest command name, computed at compile time.
-pub const MAX_CMD_NAME_LEN: usize = max_name_len(KnownCommand::ALL);
-
-const fn max_name_len(commands: &[KnownCommand]) -> usize {
-    let mut max = 0;
-    let mut i = 0;
-    while i < commands.len() {
-        let len = commands[i].name().len();
-        if len > max {
-            max = len;
-        }
-        i += 1;
-    }
-    max
-}

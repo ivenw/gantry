@@ -437,6 +437,8 @@ pub struct CommandEntry {
     pub name: String,
     pub description: String,
     pub command: std::sync::Arc<dyn crate::commands::Command>,
+    /// Matched character indices into `name` from the last fuzzy filter. Empty when unfiltered.
+    pub indices: Vec<u32>,
 }
 
 /// A fuzzy-find picker for file/directory or skill attachments.
@@ -1451,19 +1453,25 @@ impl CommandPicker {
             AtomKind::Fuzzy,
         );
 
-        let mut scored: Vec<(u32, &CommandEntry)> = self
+        let mut buf = Vec::new();
+        let mut scored: Vec<(u32, CommandEntry)> = self
             .commands
             .iter()
             .filter_map(|cmd| {
-                let score = pattern.score(
-                    nucleo_matcher::Utf32Str::new(&cmd.name, &mut Vec::new()),
+                let mut indices = Vec::new();
+                let score = pattern.indices(
+                    nucleo_matcher::Utf32Str::new(&cmd.name, &mut buf),
                     &mut matcher,
+                    &mut indices,
                 )?;
-                Some((score, cmd))
+                indices.sort_unstable();
+                let mut entry = cmd.clone();
+                entry.indices = indices;
+                Some((score, entry))
             })
             .collect();
 
         scored.sort_by(|a, b| b.0.cmp(&a.0));
-        scored.into_iter().map(|(_, cmd)| cmd.clone()).collect()
+        scored.into_iter().map(|(_, cmd)| cmd).collect()
     }
 }

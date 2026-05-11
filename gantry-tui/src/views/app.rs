@@ -44,7 +44,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
     let input_height = if let Some(ref uv) = model.usage_view {
         UsageViewWidget::new(uv).height()
     } else if let Some(ref picker) = model.command_picker {
-        CommandPickerView::new(picker).height(area.width)
+        CommandPickerView::new(picker).height()
     } else {
         InputView::new(&model.input.tokens, input_cursor).height(area.width)
     };
