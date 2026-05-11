@@ -94,6 +94,10 @@ pub struct ModelPickerView {
     pub filtered: Vec<ModelEntry>,
     /// Maximum model alias width across the full unfiltered list; stable for the lifetime of the picker.
     pub model_col_width: u16,
+    /// Maximum provider alias width across the full unfiltered list; stable for the lifetime of the picker.
+    pub provider_col_width: u16,
+    /// Maximum context length label width across the full unfiltered list; stable for the lifetime of the picker.
+    pub context_col_width: u16,
 }
 
 /// A filtered model entry with fuzzy-match highlight indices.
@@ -538,6 +542,11 @@ impl AttachmentPicker {
     }
 }
 
+/// Formats a context length in tokens as a compact string (e.g. `131072` → `"128k"`).
+pub fn format_context_length(tokens: u32) -> String {
+    format!("{}k", (tokens + 512) / 1024)
+}
+
 impl Model {
     pub fn new() -> Self {
         Self {
@@ -863,6 +872,17 @@ impl Model {
             .map(|s| s.model.as_str().chars().count() as u16)
             .max()
             .unwrap_or(0);
+        let provider_col_width = models
+            .iter()
+            .map(|s| s.provider.as_str().chars().count() as u16)
+            .max()
+            .unwrap_or(0);
+        let context_col_width = models
+            .iter()
+            .filter_map(|s| s.context_length)
+            .map(|n| format_context_length(n).len() as u16)
+            .max()
+            .unwrap_or(0);
         let mut picker = ModelPickerView {
             models,
             filter: String::new(),
@@ -870,6 +890,8 @@ impl Model {
             active_selection,
             filtered: Vec::new(),
             model_col_width,
+            provider_col_width,
+            context_col_width,
         };
         picker.refilter();
         self.model_picker_view = Some(picker);

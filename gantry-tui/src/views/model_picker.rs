@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::model::ModelPickerView;
+use crate::model::{ModelPickerView, format_context_length};
 use crate::theme;
 
 use super::table::{TableView, highlighted_line};
@@ -114,10 +114,23 @@ impl Widget for ModelPickerWidget<'_> {
                     entry.selection.provider.as_str().to_owned(),
                     STYLE_PROVIDER,
                 ));
-                vec![model_line, provider_line]
+                let context_line = Line::from(Span::styled(
+                    entry
+                        .selection
+                        .context_length
+                        .map(format_context_length)
+                        .unwrap_or_default(),
+                    STYLE_PROVIDER,
+                ));
+                vec![model_line, provider_line, context_line]
             })
             .collect();
 
-        TableView::new(vec![self.state.model_col_width], 4, rows).render(list, buf);
+        TableView::new(
+            vec![self.state.model_col_width, self.state.provider_col_width],
+            12,
+            rows,
+        )
+        .render(list, buf);
     }
 }

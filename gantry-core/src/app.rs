@@ -218,7 +218,7 @@ impl App {
     /// the alias and reason for each failure. On success the selections are ordered by
     /// provider, then by model within that provider.
     pub async fn list_models(&mut self) -> Result<Vec<ModelSelection>> {
-        let aliases: Vec<_> = self
+        let provider_aliases: Vec<_> = self
             .registry
             .providers()
             .iter()
@@ -227,18 +227,25 @@ impl App {
 
         let mut selections = Vec::new();
         let mut errors = Vec::new();
-        for alias in aliases {
-            match self.registry.client(&alias) {
-                Err(e) => errors.push(format!("{}: {}", alias.as_str(), e)),
+        // TODO: We need to have a way to filter out non completion models but I am not sure if
+        // the `type` field contains stable keys. it's just a string, not an enum.
+        for provider_alias in provider_aliases {
+            match self.registry.client(&provider_alias) {
+                Err(e) => errors.push(format!("{}: {}", provider_alias.as_str(), e)),
                 Ok(client) => match client.list_models().await {
-                    Err(e) => errors.push(format!("{}: {}", alias.as_str(), e)),
+                    Err(e) => errors.push(format!("{}: {}", provider_alias.as_str(), e)),
                     Ok(list) => {
                         for model in list.data {
-                            selections.push(ModelSelection {
-                                provider: alias.clone(),
+                            let mut selection = ModelSelection {
+                                provider: provider_alias.clone(),
                                 model: ModelAlias::new(model.id),
                                 context_length: model.context_length,
-                            });
+                            };
+                            if selection.context_length.is_none() {
+                                selection.context_length =
+                                    self.resolve_context_length(&selection);
+                            }
+                            selections.push(selection);
                         }
                     }
                 },
