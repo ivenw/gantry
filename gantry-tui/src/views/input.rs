@@ -1,6 +1,8 @@
+use gantry_core::InputToken;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
+    style::{Color, Style},
     widgets::{Block, BorderType, Borders, Widget},
 };
 
@@ -9,27 +11,33 @@ const PREFIX_WIDTH: u16 = PREFIX.len() as u16;
 const BORDER_HEIGHT: u16 = 2;
 
 pub struct InputView<'a> {
-    value: &'a str,
+    tokens: &'a [InputToken],
+    /// Byte offset of the cursor within the flat display string produced by the tokens.
     cursor: usize,
+    /// Flat display string (sigils inlined) derived from tokens.
+    flat: String,
 }
 
 impl<'a> InputView<'a> {
-    pub fn new(value: &'a str, cursor: usize) -> Self {
-        Self { value, cursor }
+    /// Creates an `InputView` from a token slice and the cursor's byte offset in the flat display string.
+    pub fn new(tokens: &'a [InputToken], cursor: usize) -> Self {
+        let flat = flat_display(tokens);
+        Self { tokens, cursor, flat }
     }
 
+    /// Returns the widget height required to fit the content within `width` terminal columns.
     pub fn calc_height(&self, width: u16) -> u16 {
         let text_width = width.saturating_sub(PREFIX_WIDTH).max(1) as usize;
-        let wrapped_lines = Self::wrapped_line_count(self.value, text_width);
+        let wrapped_lines = Self::wrapped_line_count(&self.flat, text_width);
         (wrapped_lines as u16 + BORDER_HEIGHT).max(3)
     }
 
-    /// Returns (col, row) of the cursor within the text area.
+    /// Returns `(col, row)` of the cursor within the text area.
     fn calc_cursor_pos(&self, text_width: usize) -> (u16, u16) {
         let mut col = 0usize;
         let mut row = 0usize;
 
-        for (i, c) in self.value.char_indices() {
+        for (i, c) in self.flat.char_indices() {
             if i == self.cursor {
                 break;
             }
@@ -70,12 +78,31 @@ impl<'a> InputView<'a> {
     }
 }
 
+/// Builds the flat display string with sigils inlined, mirroring `InputModel::raw_display`.
+fn flat_display(tokens: &[InputToken]) -> String {
+    let mut out = String::new();
+    for token in tokens {
+        match token {
+            InputToken::Text(t) => out.push_str(t),
+            InputToken::Path(p) => {
+                out.push('+');
+                out.push_str(&p.display().to_string());
+            }
+            InputToken::Skill { name, .. } => {
+                out.push('/');
+                out.push_str(name);
+            }
+        }
+    }
+    out
+}
+
 impl Widget for InputView<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         Block::default()
             .borders(Borders::TOP | Borders::BOTTOM)
             .border_type(BorderType::LightDoubleDashed)
-            .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::DarkGray))
+            .border_style(Style::default().fg(Color::DarkGray))
             .render(area, buf);
 
         let content_area = Rect::new(
@@ -92,7 +119,7 @@ impl Widget for InputView<'_> {
             content_area.x,
             content_area.y,
             PREFIX,
-            ratatui::style::Style::default().fg(ratatui::style::Color::LightGreen),
+            Style::default().fg(Color::LightGreen),
         );
 
         let text_area = Rect::new(
@@ -102,24 +129,58 @@ impl Widget for InputView<'_> {
             content_area.height,
         );
 
-        if !self.value.is_empty() {
-            let paragraph = ratatui::widgets::Paragraph::new(self.value)
-                .style(ratatui::style::Style::default().fg(ratatui::style::Color::White))
-                .wrap(ratatui::widgets::Wrap { trim: false });
-            paragraph.render(text_area, buf);
+        let text_width = text_area.width as usize;
+
+        // Render tokens one span at a time, tracking col/row to handle wrapping.
+        let mut col = 0usize;
+        let mut row = 0usize;
+        for token in self.tokens {
+            let sigil_buf;
+            let (text, style) = match token {
+                InputToken::Text(t) => (t.as_str(), Style::default().fg(Color::White)),
+                InputToken::Path(p) => {
+                    sigil_buf = format!("+{}", p.display());
+                    (sigil_buf.as_str(), Style::default().fg(Color::LightYellow))
+                }
+                InputToken::Skill { name, .. } => {
+                    sigil_buf = format!("/{}", name);
+                    (sigil_buf.as_str(), Style::default().fg(Color::LightYellow))
+                }
+            };
+
+            for c in text.chars() {
+                if row >= text_area.height as usize {
+                    break;
+                }
+                if c == '\n' {
+                    row += 1;
+                    col = 0;
+                    continue;
+                }
+                if col >= text_width {
+                    row += 1;
+                    col = 0;
+                }
+                let cx = text_area.x + col as u16;
+                let cy = text_area.y + row as u16;
+                if cx < text_area.right() && cy < text_area.bottom() {
+                    if let Some(cell) = buf.cell_mut((cx, cy)) {
+                        cell.set_char(c).set_style(style);
+                    }
+                }
+                col += 1;
+            }
         }
 
-        let text_width = text_area.width as usize;
-        let (col, row) = self.calc_cursor_pos(text_width);
-        let cursor_x = text_area.x + col;
-        let cursor_y = text_area.y + row;
+        let (cur_col, cur_row) = self.calc_cursor_pos(text_width);
+        let cursor_x = text_area.x + cur_col;
+        let cursor_y = text_area.y + cur_row;
 
         if cursor_x < text_area.right()
             && cursor_y < text_area.bottom()
             && let Some(cell) = buf.cell_mut((cursor_x, cursor_y))
         {
-            cell.set_char('█')
-                .set_style(ratatui::style::Style::default().fg(ratatui::style::Color::White));
+            cell.set_char('█').set_style(Style::default().fg(Color::White));
         }
     }
 }

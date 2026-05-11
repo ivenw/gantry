@@ -40,7 +40,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
         return;
     }
 
-    let (input_display, input_cursor) = model.input.display_with_cursor();
+    let (_, input_cursor) = model.input.display_with_cursor();
     let input_height = if let Some(ref uv) = model.usage_view {
         UsageViewWidget::new(uv).calc_height()
     } else if let Some(ref picker) = model.command_picker {
@@ -48,7 +48,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
     } else if let Some(ref picker) = model.attachment_picker {
         AttachmentPickerView::new(picker, &model.project_path).calc_height()
     } else {
-        InputView::new(&input_display, input_cursor).calc_height(area.width)
+        InputView::new(&model.input.tokens, input_cursor).calc_height(area.width)
     };
 
     let chunks = Layout::default()
@@ -83,7 +83,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
         );
     } else {
         frame.render_widget(
-            InputView::new(&input_display, input_cursor),
+            InputView::new(&model.input.tokens, input_cursor),
             input_area,
         );
     }
