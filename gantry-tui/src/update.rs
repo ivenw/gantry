@@ -769,7 +769,7 @@ fn handle_enter_insert(model: &mut Model, modifiers: KeyModifiers) -> Option<Msg
         return None;
     }
 
-    let display = model.input.raw_display();
+    let display = model.input.raw_display(&model.project_path);
     if display.starts_with('/') {
         let filter = display.strip_prefix('/').unwrap_or("");
         let available = available_command_entries();

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use nucleo_matcher::{
     Config, Matcher,
     pattern::{AtomKind, CaseMatching, Normalization, Pattern},
@@ -25,6 +27,7 @@ pub struct Model {
     pub chat: ChatModel,
     pub input: InputModel,
     pub project_path: std::path::PathBuf,
+    pub cwd: std::path::PathBuf,
     pub command_picker: Option<CommandPicker>,
     pub attachment_picker: Option<AttachmentPicker>,
     pub sessions_view: Option<SessionsView>,
@@ -495,6 +498,7 @@ impl Model {
             chat: ChatModel::new(),
             input: InputModel::new(),
             project_path: std::path::PathBuf::new(),
+            cwd: std::path::PathBuf::new(),
             command_picker: None,
             attachment_picker: None,
             sessions_view: None,
@@ -1297,14 +1301,16 @@ impl InputModel {
     }
 
     /// Returns a display string with attachment sigils (`+path`, `/skill`) inlined.
-    pub fn raw_display(&self) -> String {
+    /// Path tokens are shown relative to `project_root`.
+    pub fn raw_display(&self, project_root: &Path) -> String {
         let mut out = String::new();
         for token in &self.tokens {
             match token {
                 InputToken::Text(t) => out.push_str(t),
                 InputToken::Path(p) => {
+                    let rel = p.strip_prefix(project_root).unwrap_or(p);
                     out.push('+');
-                    out.push_str(&p.display().to_string());
+                    out.push_str(&rel.display().to_string());
                 }
                 InputToken::Skill { name, .. } => {
                     out.push('/');
@@ -1317,11 +1323,13 @@ impl InputModel {
 
     /// Returns whether the effective content (raw display) is blank.
     pub fn is_blank(&self) -> bool {
-        self.raw_display().trim().is_empty()
+        // Path tokens are non-empty regardless of prefix stripping, so project_root is irrelevant here.
+        self.raw_display(Path::new("")).trim().is_empty()
     }
 
     /// Returns the display string and the cursor's byte offset within it, suitable for rendering.
-    pub fn display_with_cursor(&self) -> (String, usize) {
+    /// Path tokens are shown relative to `project_root`.
+    pub fn display_with_cursor(&self, project_root: &Path) -> (String, usize) {
         let mut out = String::new();
         let mut cursor_byte = 0usize;
         let mut found_cursor = false;
@@ -1343,7 +1351,8 @@ impl InputModel {
                     out.push_str(t);
                 }
                 InputToken::Path(p) => {
-                    let sigil = format!("+{}", p.display());
+                    let rel = p.strip_prefix(project_root).unwrap_or(p);
+                    let sigil = format!("+{}", rel.display());
                     if !found_cursor
                         && let InputCursor::AtAttachment { token_idx } = self.cursor
                         && token_idx == idx

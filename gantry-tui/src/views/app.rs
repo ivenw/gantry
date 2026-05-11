@@ -40,17 +40,16 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
         return;
     }
 
-    let (_, input_cursor) = model.input.display_with_cursor();
     let input_height = if let Some(ref uv) = model.usage_view {
         UsageViewWidget::new(uv).height()
     } else if let Some(ref picker) = model.command_picker {
         CommandPickerView::new(picker).height()
     } else {
-        InputView::new(&model.input.tokens, input_cursor).height(area.width)
+        InputView::new(&model.input, &model.cwd).height(area.width)
     };
 
     let statusline_height = if let Some(ref picker) = model.attachment_picker {
-        AttachmentPickerView::new(picker, &model.project_path).height()
+        AttachmentPickerView::new(picker, &model.cwd).height()
     } else {
         1
     };
@@ -88,7 +87,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
             .map(|p| 1 + p.filter.len()) // sigil + filter chars
             .unwrap_or(0);
         frame.render_widget(
-            InputView::new(&model.input.tokens, input_cursor)
+            InputView::new(&model.input, &model.cwd)
                 .with_mode(model.mode)
                 .with_picker_filter_len(picker_filter_len),
             input_area,
@@ -97,7 +96,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
 
     if let Some(ref picker) = model.attachment_picker {
         frame.render_widget(
-            AttachmentPickerView::new(picker, &model.project_path),
+            AttachmentPickerView::new(picker, &model.cwd),
             statusline_area,
         );
     } else if let Some(ref msg) = model.status_message {

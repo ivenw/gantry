@@ -360,6 +360,7 @@ impl App {
                 .collect();
         }
 
+        // TODO: I am not sure if this normalization is actually a good idea but it works for now.
         let normalized_query = query.replace(['/', '-', '_'], " ");
         let mut matcher = Matcher::new(Config::DEFAULT);
         let pattern = Pattern::new(

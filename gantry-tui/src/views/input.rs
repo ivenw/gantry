@@ -1,4 +1,5 @@
-use gantry_core::InputToken;
+use std::path::Path;
+
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -6,32 +7,37 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::{model::InputMode, theme};
+use crate::{
+    model::{InputMode, InputModel},
+    theme,
+};
 
 const PREFIX: &str = ">> ";
 const PREFIX_WIDTH: u16 = PREFIX.len() as u16;
 const BORDER_HEIGHT: u16 = 2;
 
 pub struct InputView<'a> {
-    tokens: &'a [InputToken],
-    /// Byte offset of the cursor within the flat display string produced by the tokens.
+    state: &'a InputModel,
+    project_root: &'a Path,
+    /// Byte offset of the cursor within the raw display string.
     cursor: usize,
-    /// Flat display string (sigils inlined) derived from tokens.
-    flat: String,
-    /// Number of trailing bytes in the flat string that belong to an active picker filter (sigil + query).
+    /// Raw display string (sigils inlined, paths stripped to relative).
+    raw_display: String,
+    /// Number of trailing bytes in the raw display string that belong to an active picker filter.
     /// These characters are rendered in LightYellow to indicate the pending picker state.
     picker_filter_len: usize,
     mode: InputMode,
 }
 
 impl<'a> InputView<'a> {
-    /// Creates an `InputView` from a token slice and the cursor's byte offset in the flat display string.
-    pub fn new(tokens: &'a [InputToken], cursor: usize) -> Self {
-        let flat = flat_display(tokens);
+    /// Creates an `InputView` from the input model and the project root for path display.
+    pub fn new(state: &'a InputModel, project_root: &'a Path) -> Self {
+        let (raw_display, cursor) = state.display_with_cursor(project_root);
         Self {
-            tokens,
+            state,
+            project_root,
             cursor,
-            flat,
+            raw_display,
             picker_filter_len: 0,
             mode: InputMode::Normal,
         }
@@ -52,7 +58,7 @@ impl<'a> InputView<'a> {
     /// Returns the widget height required to fit the content within `width` terminal columns.
     pub fn height(&self, width: u16) -> u16 {
         let text_width = width.saturating_sub(PREFIX_WIDTH).max(1) as usize;
-        let wrapped_lines = Self::wrapped_line_count(&self.flat, text_width);
+        let wrapped_lines = Self::wrapped_line_count(&self.raw_display, text_width);
         (wrapped_lines as u16 + BORDER_HEIGHT).max(3)
     }
 
@@ -61,7 +67,7 @@ impl<'a> InputView<'a> {
         let mut col = 0usize;
         let mut row = 0usize;
 
-        for (i, c) in self.flat.char_indices() {
+        for (i, c) in self.raw_display.char_indices() {
             if i == self.cursor {
                 break;
             }
@@ -102,27 +108,10 @@ impl<'a> InputView<'a> {
     }
 }
 
-/// Builds the flat display string with sigils inlined, mirroring `InputModel::raw_display`.
-fn flat_display(tokens: &[InputToken]) -> String {
-    let mut out = String::new();
-    for token in tokens {
-        match token {
-            InputToken::Text(t) => out.push_str(t),
-            InputToken::Path(p) => {
-                out.push('+');
-                out.push_str(&p.display().to_string());
-            }
-            InputToken::Skill { name, .. } => {
-                out.push('/');
-                out.push_str(name);
-            }
-        }
-    }
-    out
-}
-
 impl Widget for InputView<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        use gantry_core::InputToken;
+
         let border_color = match self.mode {
             InputMode::Normal => Color::DarkGray,
             InputMode::Insert => Color::LightGreen,
@@ -160,17 +149,18 @@ impl Widget for InputView<'_> {
         let text_width = text_area.width as usize;
 
         // Render tokens one span at a time, tracking col/row to handle wrapping.
-        // Trailing picker_filter_len bytes of the flat string are highlighted as pending filter input.
-        let filter_start_byte = self.flat.len().saturating_sub(self.picker_filter_len);
-        let mut flat_byte = 0usize;
+        // Trailing picker_filter_len bytes of the raw display string are highlighted as pending filter input.
+        let filter_start_byte = self.raw_display.len().saturating_sub(self.picker_filter_len);
+        let mut raw_byte = 0usize;
         let mut col = 0usize;
         let mut row = 0usize;
-        for token in self.tokens {
-            let sigil_buf;
+        let mut sigil_buf;
+        for token in &self.state.tokens {
             let (text, base_style) = match token {
                 InputToken::Text(t) => (t.as_str(), Style::default().fg(Color::White)),
                 InputToken::Path(p) => {
-                    sigil_buf = format!("+{}", p.display());
+                    let rel = p.strip_prefix(self.project_root).unwrap_or(p);
+                    sigil_buf = format!("+{}", rel.display());
                     (sigil_buf.as_str(), Style::default().fg(Color::LightYellow))
                 }
                 InputToken::Skill { name, .. } => {
@@ -180,12 +170,12 @@ impl Widget for InputView<'_> {
             };
 
             for c in text.chars() {
-                let style = if self.picker_filter_len > 0 && flat_byte >= filter_start_byte {
+                let style = if self.picker_filter_len > 0 && raw_byte >= filter_start_byte {
                     Style::default().fg(Color::LightYellow)
                 } else {
                     base_style
                 };
-                flat_byte += c.len_utf8();
+                raw_byte += c.len_utf8();
 
                 if row >= text_area.height as usize {
                     break;

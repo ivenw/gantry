@@ -30,7 +30,7 @@ pub struct Runtime {
 
 impl Runtime {
     /// Creates a new runtime, loading existing messages from the app.
-    pub fn new(app: Arc<Mutex<App>>) -> Result<Self> {
+    pub fn new(app: Arc<Mutex<App>>, cwd: std::path::PathBuf) -> Result<Self> {
         let rt = tokio::runtime::Runtime::new()?;
         let (msg_tx, msg_rx) = channel::<Msg>(256);
 
@@ -49,6 +49,7 @@ impl Runtime {
         model.chat.messages = existing_messages;
         model.selection = selection;
         model.project_path = project_path;
+        model.cwd = cwd;
 
         Ok(Self {
             model,

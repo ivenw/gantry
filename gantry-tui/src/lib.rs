@@ -38,7 +38,7 @@ pub fn run() -> Result<()> {
     let app = Arc::new(Mutex::new(app));
 
     let (_terminal_guard, mut terminal) = TerminalGuard::enter()?;
-    let mut runtime = runtime::Runtime::new(app)?;
+    let mut runtime = runtime::Runtime::new(app, cwd)?;
     runtime.run(&mut terminal)
 }
 
