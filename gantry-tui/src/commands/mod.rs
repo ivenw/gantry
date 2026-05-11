@@ -1,30 +1,5 @@
-pub mod model;
-pub mod new;
-pub mod providers;
-pub mod quit;
-pub mod sessions;
-pub mod tree;
-pub mod usage;
-
-use crate::message::Msg;
-use gantry_core::App;
-use std::sync::Arc;
-use tokio::runtime::Handle;
-use tokio::sync::Mutex;
-use tokio::sync::mpsc::Sender;
-
-pub struct CommandContext {
-    pub app: Arc<Mutex<App>>,
-    pub msg_tx: Sender<Msg>,
-    pub rt_handle: Handle,
-}
-
-pub trait Command: Send + Sync {
-    fn execute(&self, ctx: CommandContext);
-}
-
-/// Compile-time registry of all available commands.
-#[derive(Clone, Copy)]
+/// Every command that can be invoked from the command picker.
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum KnownCommand {
     Model,
     New,
@@ -46,6 +21,7 @@ impl KnownCommand {
         KnownCommand::Usage,
     ];
 
+    /// Short name shown in the command picker filter.
     pub const fn name(&self) -> &'static str {
         match self {
             KnownCommand::Model => "model",
@@ -58,6 +34,7 @@ impl KnownCommand {
         }
     }
 
+    /// One-line description shown next to the name in the command picker.
     pub const fn description(&self) -> &'static str {
         match self {
             KnownCommand::Model => "Pick the active model",
@@ -67,19 +44,6 @@ impl KnownCommand {
             KnownCommand::Sessions => "Browse and resume sessions",
             KnownCommand::Tree => "Browse the message tree",
             KnownCommand::Usage => "Show context window usage",
-        }
-    }
-
-    /// Constructs the concrete [`Command`] implementation for this variant.
-    pub fn into_command(self) -> Box<dyn Command> {
-        match self {
-            KnownCommand::Model => Box::new(model::Model),
-            KnownCommand::New => Box::new(new::New),
-            KnownCommand::Providers => Box::new(providers::Providers),
-            KnownCommand::Quit => Box::new(quit::Quit),
-            KnownCommand::Sessions => Box::new(sessions::Sessions),
-            KnownCommand::Tree => Box::new(tree::Tree),
-            KnownCommand::Usage => Box::new(usage::Usage),
         }
     }
 }

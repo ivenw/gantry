@@ -5,6 +5,7 @@ use gantry_core::{
 };
 
 use crate::model::ChatMessage;
+use crate::commands::KnownCommand;
 
 pub enum Msg {
     // Input
@@ -70,6 +71,6 @@ pub enum Msg {
     /// Populate the attachment picker with fresh skill results (produced by Runtime).
     SetSkillPickerResults(Vec<SkillSearchResult>),
     InterruptStream,
-    ExecuteCommand(std::sync::Arc<dyn crate::commands::Command>),
+    RunCommand(KnownCommand),
     Quit,
 }

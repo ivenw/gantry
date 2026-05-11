@@ -133,8 +133,8 @@ impl Runtime {
                 self.model.chat.messages.clear();
                 return None;
             }
-            Msg::ExecuteCommand(ref cmd) => {
-                self.execute_command(cmd.clone());
+            Msg::RunCommand(cmd) => {
+                self.run_command(cmd);
                 return None;
             }
             Msg::InterruptStream => {
@@ -194,6 +194,9 @@ impl Runtime {
             Msg::RemoveProvider(ref alias) => {
                 self.handle_remove_provider(alias.clone());
                 return None;
+            }
+            Msg::OpenModelPicker(ref models) => {
+                self.model.cached_models = Some(models.clone());
             }
             Msg::SelectModel(ref selection) => {
                 self.handle_select_model(selection.clone());
@@ -385,12 +388,99 @@ impl Runtime {
         self.model.selection = Some(selection);
     }
 
-    fn execute_command(&mut self, cmd: std::sync::Arc<dyn crate::commands::Command>) {
-        let ctx = crate::commands::CommandContext {
-            app: self.app.clone(),
-            msg_tx: self.msg_tx.clone(),
-            rt_handle: self.rt.handle().clone(),
-        };
-        cmd.execute(ctx);
+    /// Dispatches a `KnownCommand`, either immediately updating the model or spawning an async task.
+    fn run_command(&mut self, cmd: crate::commands::KnownCommand) {
+        use crate::commands::KnownCommand;
+        match cmd {
+            KnownCommand::Quit => {
+                let _ = self.msg_tx.try_send(Msg::Quit);
+            }
+            KnownCommand::New => {
+                let _ = self.msg_tx.try_send(Msg::NewSession);
+            }
+            KnownCommand::Model => {
+                if let Some(models) = self.model.cached_models.clone() {
+                    self.model.activate_model_picker_view(models);
+                    return;
+                }
+                let tx = self.msg_tx.clone();
+                let app = self.app.clone();
+                self.rt.spawn(async move {
+                    match app.lock().await.list_models().await {
+                        Ok(models) => {
+                            let _ = tx.send(Msg::OpenModelPicker(models)).await;
+                        }
+                        Err(e) => {
+                            let _ = tx
+                                .send(Msg::SetStatus(format!("Failed to list models: {e}")))
+                                .await;
+                        }
+                    }
+                });
+            }
+            KnownCommand::Providers => {
+                let tx = self.msg_tx.clone();
+                let app = self.app.clone();
+                self.rt.spawn(async move {
+                    let providers = app.lock().await.list_providers().to_vec();
+                    let _ = tx.send(Msg::OpenProvidersView(providers)).await;
+                });
+            }
+            KnownCommand::Sessions => {
+                let tx = self.msg_tx.clone();
+                let app = self.app.clone();
+                self.rt.spawn(async move {
+                    let app = app.lock().await;
+                    match app.list_sessions() {
+                        Ok(sessions) => {
+                            let active_id = app.session_id().clone();
+                            let _ = tx.send(Msg::OpenSessionsView(sessions, active_id)).await;
+                        }
+                        Err(e) => {
+                            let _ = tx
+                                .send(Msg::SetStatus(format!("failed to list sessions: {e}")))
+                                .await;
+                        }
+                    }
+                });
+            }
+            KnownCommand::Tree => {
+                let tx = self.msg_tx.clone();
+                let app = self.app.clone();
+                self.rt.spawn(async move {
+                    match app.lock().await.get_tree() {
+                        Some(tree) => {
+                            let _ = tx.send(Msg::OpenTreeView(tree)).await;
+                        }
+                        None => {
+                            let _ = tx.send(Msg::SetStatus("No messages yet".into())).await;
+                        }
+                    }
+                });
+            }
+            KnownCommand::Usage => {
+                let tx = self.msg_tx.clone();
+                let app = self.app.clone();
+                self.rt.spawn(async move {
+                    let guard = app.lock().await;
+                    match guard.context_window() {
+                        Some(cw) => {
+                            let consumption = guard.total_consumption().clone();
+                            drop(guard);
+                            let _ = tx.send(Msg::OpenUsageView(cw, consumption)).await;
+                        }
+                        None => {
+                            drop(guard);
+                            let _ = tx
+                                .send(Msg::SetStatus(
+                                    "no context window data yet — send a message first"
+                                        .to_string(),
+                                ))
+                                .await;
+                        }
+                    }
+                });
+            }
+        }
     }
 }

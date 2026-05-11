@@ -2,6 +2,7 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use gantry_core::{ChatStreamItem, MultiTurnStreamItem, StreamedAssistantContent, StreamingError};
 
 use crate::message::Msg;
+use crate::commands::KnownCommand;
 use crate::model::{
     CommandEntry, CopilotAuthKind, InputMode, Model, ProviderWizard, ProvidersSubView,
     WizardProviderKind, branch_rows, prev_char_boundary,
@@ -111,7 +112,7 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
         Msg::Quit
         | Msg::SendMessage(_)
         | Msg::InterruptStream
-        | Msg::ExecuteCommand(_)
+        | Msg::RunCommand(_)
         | Msg::BranchTo(_)
         | Msg::BranchToWithInput { .. }
         | Msg::OpenPathPicker(_)
@@ -527,7 +528,7 @@ fn handle_key_command_picker(model: &mut Model, key: crossterm::event::KeyEvent)
         KeyCode::Enter => {
             let selected = model.selected_command();
             model.deactivate_command_picker();
-            selected.map(|cmd| Msg::ExecuteCommand(cmd.command))
+            selected.map(|cmd| Msg::RunCommand(cmd.command))
         }
         KeyCode::Up => {
             model.move_command_selection_up();
@@ -792,13 +793,14 @@ fn handle_enter_insert(model: &mut Model, modifiers: KeyModifiers) -> Option<Msg
     Some(Msg::SendMessage(tokens))
 }
 
+/// Builds the full list of command entries for the command picker.
 pub fn available_command_entries() -> Vec<CommandEntry> {
-    crate::commands::KnownCommand::ALL
+    KnownCommand::ALL
         .iter()
         .map(|k| CommandEntry {
             name: k.name().to_string(),
             description: k.description().to_string(),
-            command: k.into_command().into(),
+            command: *k,
             indices: vec![],
         })
         .collect()

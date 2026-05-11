@@ -38,6 +38,8 @@ pub struct Model {
     pub status_message: Option<String>,
     /// Context window snapshot from the most recently completed stream.
     pub context_window: Option<ContextWindow>,
+    /// Cached model list fetched on first open of the model picker.
+    pub cached_models: Option<Vec<ModelSelection>>,
 }
 
 /// State for the context window usage overlay.
@@ -462,7 +464,7 @@ pub struct CommandPicker {
 pub struct CommandEntry {
     pub name: String,
     pub description: String,
-    pub command: std::sync::Arc<dyn crate::commands::Command>,
+    pub command: crate::commands::KnownCommand,
     /// Matched character indices into `name` from the last fuzzy filter. Empty when unfiltered.
     pub indices: Vec<u32>,
 }
@@ -566,6 +568,7 @@ impl Model {
             usage_view: None,
             status_message: None,
             context_window: None,
+            cached_models: None,
         }
     }
 
