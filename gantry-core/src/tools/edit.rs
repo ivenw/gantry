@@ -8,7 +8,11 @@ use rig::tool::Tool;
 use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 
-pub struct EditTool;
+use super::resolve_path;
+
+pub struct EditTool {
+    pub cwd: PathBuf,
+}
 
 /// A single edit operation. Line references are passed as strings in `N#XX` format
 /// and parsed into `gantry_tools::LineRef` inside `call`.
@@ -135,11 +139,12 @@ impl Tool for EditTool {
             .collect();
         let ops = ops.map_err(EditToolError::from)?;
         let op_count = ops.len();
-        let path = args.path.clone();
+        let path = resolve_path(&self.cwd, args.path);
+        let display_path = path.display().to_string();
         tokio::task::spawn_blocking(move || gantry_tools::edit_file(&path, ops))
             .await
             .expect("edit_file task panicked")
             .map_err(EditToolError::from)?;
-        Ok(format!("applied {op_count} edit(s) to {}", args.path.display()))
+        Ok(format!("applied {op_count} edit(s) to {display_path}"))
     }
 }

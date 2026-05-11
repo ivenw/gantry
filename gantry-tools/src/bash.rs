@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
@@ -15,13 +16,15 @@ pub enum BashError {
 
 /// Runs `command` in a bash shell and returns its combined stdout and stderr output.
 ///
-/// `timeout_ms` caps execution time; defaults to 30 000 ms. If the process exceeds
-/// the limit it is killed and `BashError::Timeout` is returned.
-pub fn run_bash(command: &str, timeout_ms: Option<u64>) -> Result<String, BashError> {
+/// `cwd` sets the working directory for the process. `timeout_ms` caps execution time;
+/// defaults to 30 000 ms. If the process exceeds the limit it is killed and
+/// `BashError::Timeout` is returned.
+pub fn run_bash(cwd: &Path, command: &str, timeout_ms: Option<u64>) -> Result<String, BashError> {
     let timeout = Duration::from_millis(timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS));
 
     let mut child = Command::new("bash")
         .args(["-c", command])
+        .current_dir(cwd)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()

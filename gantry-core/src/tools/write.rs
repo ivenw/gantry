@@ -7,7 +7,11 @@ use rig::tool::Tool;
 use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 
-pub struct WriteTool;
+use super::resolve_path;
+
+pub struct WriteTool {
+    pub cwd: PathBuf,
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct WriteArgs {
@@ -70,12 +74,13 @@ impl Tool for WriteTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let byte_count = args.content.len();
-        let path = args.path.clone();
+        let path = resolve_path(&self.cwd, args.path);
         let content = args.content.clone();
+        let display_path = path.display().to_string();
         tokio::task::spawn_blocking(move || gantry_tools::write_file(&path, &content))
             .await
             .expect("write_file task panicked")
             .map_err(WriteToolError::from)?;
-        Ok(format!("wrote {byte_count} bytes to {}", args.path.display()))
+        Ok(format!("wrote {byte_count} bytes to {display_path}"))
     }
 }

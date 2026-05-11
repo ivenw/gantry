@@ -7,7 +7,11 @@ use rig::tool::Tool;
 use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 
-pub struct ReadTool;
+use super::resolve_path;
+
+pub struct ReadTool {
+    pub cwd: PathBuf,
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ReadArgs {
@@ -67,7 +71,7 @@ impl Tool for ReadTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let path = args.path.clone();
+        let path = resolve_path(&self.cwd, args.path);
         Ok(tokio::task::spawn_blocking(move || {
             gantry_tools::read_file(&path, args.offset, args.limit)
         })

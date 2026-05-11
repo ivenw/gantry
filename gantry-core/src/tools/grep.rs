@@ -7,7 +7,11 @@ use rig::tool::Tool;
 use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 
-pub struct GrepTool;
+use super::resolve_path;
+
+pub struct GrepTool {
+    pub cwd: PathBuf,
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GrepArgs {
@@ -75,7 +79,7 @@ impl Tool for GrepTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let pattern = args.pattern.clone();
-        let path = args.path.clone();
+        let path = resolve_path(&self.cwd, args.path);
         let glob_filter = args.glob_filter.clone();
         Ok(tokio::task::spawn_blocking(move || {
             gantry_tools::grep_files(

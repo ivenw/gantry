@@ -1,4 +1,5 @@
 use std::fmt;
+use std::path::PathBuf;
 
 use gantry_tools::bash::BashError;
 use rig::completion::ToolDefinition;
@@ -6,7 +7,9 @@ use rig::tool::Tool;
 use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 
-pub struct BashTool;
+pub struct BashTool {
+    pub cwd: PathBuf,
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct BashArgs {
@@ -63,8 +66,9 @@ impl Tool for BashTool {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let command = args.command.clone();
+        let cwd = self.cwd.clone();
         Ok(tokio::task::spawn_blocking(move || {
-            gantry_tools::run_bash(&command, args.timeout_ms)
+            gantry_tools::run_bash(&cwd, &command, args.timeout_ms)
         })
         .await
         .expect("bash task panicked")?)

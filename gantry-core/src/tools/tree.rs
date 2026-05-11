@@ -7,7 +7,11 @@ use rig::tool::Tool;
 use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
 
-pub struct TreeTool;
+use super::resolve_path;
+
+pub struct TreeTool {
+    pub cwd: PathBuf,
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct TreeArgs {
@@ -69,7 +73,7 @@ impl Tool for TreeTool {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let path = args.path.clone();
+        let path = resolve_path(&self.cwd, args.path);
         Ok(
             tokio::task::spawn_blocking(move || gantry_tools::tree(&path, args.depth))
                 .await

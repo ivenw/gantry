@@ -318,13 +318,14 @@ impl App {
 
     /// Returns the tools available for the current request.
     pub fn tools(&self) -> Vec<Box<dyn ToolDyn>> {
+        let cwd = self.project_path.clone();
         vec![
-            Box::new(ReadTool),
-            Box::new(WriteTool),
-            Box::new(EditTool),
-            Box::new(GrepTool),
-            Box::new(TreeTool),
-            Box::new(BashTool),
+            Box::new(ReadTool { cwd: cwd.clone() }),
+            Box::new(WriteTool { cwd: cwd.clone() }),
+            Box::new(EditTool { cwd: cwd.clone() }),
+            Box::new(GrepTool { cwd: cwd.clone() }),
+            Box::new(TreeTool { cwd: cwd.clone() }),
+            Box::new(BashTool { cwd }),
         ]
     }
 
