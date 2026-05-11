@@ -483,11 +483,11 @@ fn handle_key_command_picker(
             model.deactivate_command_picker();
             selected.map(|cmd| Msg::ExecuteCommand(cmd.command))
         }
-        KeyCode::Up | KeyCode::Char('k') => {
+        KeyCode::Up => {
             model.move_command_selection_up();
             None
         }
-        KeyCode::Down | KeyCode::Char('j') => {
+        KeyCode::Down => {
             model.move_command_selection_down();
             None
         }
@@ -530,11 +530,11 @@ fn handle_key_attachment_picker(
             }
             None
         }
-        KeyCode::Up | KeyCode::Char('k') => {
+        KeyCode::Up => {
             model.move_attachment_selection_up();
             None
         }
-        KeyCode::Down | KeyCode::Char('j') => {
+        KeyCode::Down => {
             model.move_attachment_selection_down();
             None
         }

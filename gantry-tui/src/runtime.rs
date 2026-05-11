@@ -114,9 +114,9 @@ impl Runtime {
 
     fn dispatch(&mut self, msg: Msg) -> bool {
         let is_quit = matches!(msg, Msg::Quit);
-        let chained = self.process(msg);
-        if let Some(chained) = chained {
-            self.process(chained);
+        let mut next = self.process(msg);
+        while let Some(msg) = next {
+            next = self.process(msg);
         }
         is_quit
     }
