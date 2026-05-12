@@ -133,7 +133,10 @@ where
     M: rig::completion::CompletionModel + Send + Sync + 'static,
     M::StreamingResponse: rig::wasm_compat::WasmCompatSend,
 {
-    let mut b = builder.tools(tools);
+    // TODO: 100 max turn limit is likely too high but I am not sure what a good limit is right
+    // now. More importantly, if we hit the limit right now we error but for this we should find
+    // a more graceful way perhaps to handle this.
+    let mut b = builder.tools(tools).default_max_turns(100);
     if let Some(p) = preamble {
         b = b.preamble(p);
     }
