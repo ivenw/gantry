@@ -160,6 +160,21 @@ pub fn mock_stream_message() -> StreamingResponse {
             ),
         ));
 
+
+        for chunk in &edit_reasoning_chunks {
+            sleep(reasoning_ms).await;
+            yield Ok(MultiTurnStreamItem::StreamAssistantItem(
+                StreamedAssistantContent::Reasoning(Reasoning::new(chunk.as_str())),
+            ));
+        }
+
+        for chunk in &edit_text_chunks {
+            sleep(token_ms).await;
+            yield Ok(MultiTurnStreamItem::StreamAssistantItem(
+                StreamedAssistantContent::Text(rig::message::Text { text: chunk.clone() }),
+            ));
+        }
+
         yield Ok(MultiTurnStreamItem::StreamAssistantItem(
             StreamedAssistantContent::ToolCall {
                 tool_call: ToolCall::new(
@@ -177,7 +192,7 @@ pub fn mock_stream_message() -> StreamingResponse {
             },
         ));
 
-        sleep(Duration::from_millis(400)).await;
+        sleep(Duration::from_millis(100)).await;
         yield Ok(MultiTurnStreamItem::StreamUserItem(
             StreamedUserContent::tool_result(
                 rig::message::ToolResult {
@@ -191,19 +206,7 @@ pub fn mock_stream_message() -> StreamingResponse {
             ),
         ));
 
-        for chunk in &edit_reasoning_chunks {
-            sleep(reasoning_ms).await;
-            yield Ok(MultiTurnStreamItem::StreamAssistantItem(
-                StreamedAssistantContent::Reasoning(Reasoning::new(chunk.as_str())),
-            ));
-        }
-
-        for chunk in &edit_text_chunks {
-            sleep(token_ms).await;
-            yield Ok(MultiTurnStreamItem::StreamAssistantItem(
-                StreamedAssistantContent::Text(rig::message::Text { text: chunk.clone() }),
-            ));
-        }
+        sleep(Duration::from_millis(400)).await;
 
         yield Ok(MultiTurnStreamItem::StreamAssistantItem(
             StreamedAssistantContent::ToolCall {
@@ -257,7 +260,7 @@ pub fn mock_stream_message() -> StreamingResponse {
                     bash_id.clone(),
                     ToolFunction::new(
                         "bash".to_string(),
-                        serde_json::json!({ "command": "cargo test" }),
+                        serde_json::json!({ "command": "cargo check&&cargo clippy &&cargo test&& echo '&&'\\&\\& \\&" }),
                     ),
                 ),
                 internal_call_id: bash_id.clone(),

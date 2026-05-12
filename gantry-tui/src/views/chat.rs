@@ -66,19 +66,40 @@ impl StatefulWidget for ChatView<'_> {
 
         let heights: Vec<u16> = messages
             .iter()
-            .map(|m| {
-                let prefix_len = match m {
-                    ChatMessage::User { sender, .. } => {
-                        USER_PREFIX.len()
-                            + sender.as_ref().map(|s| s.as_str().len() + 2).unwrap_or(0)
-                    }
-                    ChatMessage::Reasoning { .. } => REASONING_PREFIX.len(),
-                    ChatMessage::Assistant { .. } => ASSISTANT_PREFIX.len(),
-                    ChatMessage::ToolCall { name, .. } => 2 + name.len() + 1,
-                };
-                let content = msg_content(m);
-                let text_width = area.width.saturating_sub(prefix_len as u16);
-                Self::calc_msg_height(content, text_width)
+            .map(|m| match m {
+                ChatMessage::ToolCall {
+                    name, arguments, ..
+                } => {
+                    let raw_arg = tool_display_arg(name, arguments);
+                    let display_name = if name == "bash" { "$" } else { name.as_str() };
+                    let formatted = raw_arg.map(|a| {
+                        if name == "bash" {
+                            format_bash_command(a)
+                        } else {
+                            a.to_string()
+                        }
+                    });
+                    // Count newlines in the full rendered line to get the true height.
+                    let line = match &formatted {
+                        Some(a) => format!("x {} {}", display_name, a),
+                        None => format!("x {}", display_name),
+                    };
+                    Self::calc_msg_height(&line, area.width)
+                }
+                _ => {
+                    let prefix_len = match m {
+                        ChatMessage::User { sender, .. } => {
+                            USER_PREFIX.len()
+                                + sender.as_ref().map(|s| s.as_str().len() + 2).unwrap_or(0)
+                        }
+                        ChatMessage::Reasoning { .. } => REASONING_PREFIX.len(),
+                        ChatMessage::Assistant { .. } => ASSISTANT_PREFIX.len(),
+                        ChatMessage::ToolCall { .. } => unreachable!(),
+                    };
+                    let content = msg_content(m);
+                    let text_width = area.width.saturating_sub(prefix_len as u16);
+                    Self::calc_msg_height(content, text_width)
+                }
             })
             .collect();
 
@@ -187,9 +208,16 @@ impl StatefulWidget for ChatView<'_> {
                         (true, false) => "+".to_string(),
                         (true, true) => "-".to_string(),
                     };
-                    let arg = tool_display_arg(name, arguments);
+                    let raw_arg = tool_display_arg(name, arguments);
                     let display_name = if name == "bash" { "$" } else { name.as_str() };
-                    let line = match arg {
+                    let formatted_arg: Option<String> = raw_arg.map(|a| {
+                        if name == "bash" {
+                            format_bash_command(a)
+                        } else {
+                            a.to_string()
+                        }
+                    });
+                    let line = match &formatted_arg {
                         Some(a) => format!("{} {} {}", indicator, display_name, a),
                         None => format!("{} {}", indicator, display_name),
                     };
@@ -198,7 +226,19 @@ impl StatefulWidget for ChatView<'_> {
                         (true, false) => ratatui::style::Color::DarkGray,
                         (true, true) => ratatui::style::Color::Red,
                     };
-                    buf.set_string(area.x, screen_y, &line, Style::default().fg(color));
+                    for (row, text_line) in line
+                        .split('\n')
+                        .skip(clip_top as usize)
+                        .take(visible_lines as usize)
+                        .enumerate()
+                    {
+                        buf.set_string(
+                            area.x,
+                            screen_y + row as u16,
+                            text_line,
+                            Style::default().fg(color),
+                        );
+                    }
                 }
             }
 
@@ -234,6 +274,9 @@ impl StatefulWidget for ChatView<'_> {
 }
 
 /// Returns a short display string for the most informative argument of a known tool.
+///
+/// For bash commands the raw command string is returned; callers should pass it through
+/// [`format_bash_command`] for display.
 fn tool_display_arg<'a>(name: &str, args: &'a serde_json::Value) -> Option<&'a str> {
     let key = match name {
         "bash" => "command",
@@ -241,6 +284,70 @@ fn tool_display_arg<'a>(name: &str, args: &'a serde_json::Value) -> Option<&'a s
         _ => return None,
     };
     args.get(key)?.as_str()
+}
+
+/// Formats a bash command for display by splitting on unescaped `&&` operators.
+///
+/// Each part is placed on its own line with `  && ` as a continuation prefix so long
+/// chained commands are easier to read at a glance. `&&` inside single or double quotes,
+/// or preceded by a backslash (`\&\&`), is left untouched.
+fn format_bash_command(cmd: &str) -> String {
+    let parts = split_on_unescaped_and(cmd);
+    if parts.len() == 1 {
+        return parts.into_iter().next().unwrap().trim().to_string();
+    }
+    let mut out = String::new();
+    for (i, part) in parts.iter().enumerate() {
+        if i == 0 {
+            out.push_str(part.trim());
+        } else {
+            out.push_str("\n  && ");
+            out.push_str(part.trim());
+        }
+    }
+    out
+}
+
+/// Splits `cmd` on `&&` tokens that are not inside single/double quotes and not
+/// preceded by a backslash.
+fn split_on_unescaped_and(cmd: &str) -> Vec<&str> {
+    let bytes = cmd.as_bytes();
+    let len = bytes.len();
+    let mut parts: Vec<&str> = Vec::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut segment_start = 0usize;
+    let mut i = 0usize;
+
+    while i < len {
+        match bytes[i] {
+            b'\\' => {
+                // Skip the next character — it is escaped.
+                i += 2;
+                continue;
+            }
+            b'\'' if !in_double => {
+                in_single = !in_single;
+            }
+            b'"' if !in_single => {
+                in_double = !in_double;
+            }
+            b'&' if !in_single && !in_double => {
+                if i + 1 < len && bytes[i + 1] == b'&' {
+                    parts.push(&cmd[segment_start..i]);
+                    // Advance past `&&`.
+                    i += 2;
+                    segment_start = i;
+                    continue;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    parts.push(&cmd[segment_start..]);
+    parts
 }
 
 fn msg_content(message: &ChatMessage) -> &str {
