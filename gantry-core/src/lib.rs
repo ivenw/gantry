@@ -10,10 +10,11 @@ pub mod provider;
 pub mod providers;
 pub mod session;
 pub mod skills;
+pub mod streaming;
 pub mod system_prompt;
 pub mod tools;
 
-pub use app::{App, PathSearchResult, SkillSearchResult, StreamingResponse, stream_message};
+pub use app::{App, PathSearchResult, SkillSearchResult};
 pub use config::{
     CopilotProviderConfig, CortecsProviderConfig, Credential, CredentialsCatalog,
     CredentialsRepository, OllamaProviderConfig, OpenAiCompletionsProviderConfig,
@@ -31,6 +32,7 @@ pub use rig::agent::{MultiTurnStreamItem, StreamingError};
 pub use rig::completion::message::ReasoningContent;
 pub use rig::streaming::{StreamedAssistantContent, StreamedUserContent};
 pub use skills::{Skill, SkillMetadata};
+pub use streaming::{StreamingResponse, mock_stream_message, stream_message};
 
 pub use fs::FsSessionRegistry;
 pub use session::{Branch, NodeId, Session, SessionId, SessionInfo, SessionRegistry, SessionTree};

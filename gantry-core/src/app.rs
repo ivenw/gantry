@@ -1,7 +1,4 @@
 use std::path::PathBuf;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
 
 use ignore::WalkBuilder;
 use nucleo_matcher::{
@@ -9,24 +6,13 @@ use nucleo_matcher::{
     pattern::{AtomKind, CaseMatching, Normalization, Pattern},
 };
 
-use crate::input::{InputToken, build_user_message};
-use crate::message::Message;
 use anyhow::Result;
-use async_stream::stream;
-use futures::Stream;
-use rig::agent::{FinalResponse, MultiTurnStreamItem, StreamingError};
-use rig::message::{AssistantContent, Reasoning, ToolCall, ToolFunction, UserContent};
-use rig::streaming::{StreamedAssistantContent, StreamedUserContent};
-use std::time::Duration;
-use tokio::sync::Mutex;
-use tokio::sync::oneshot;
-use tokio::time::sleep;
 
 use crate::config::{ProjectConfig, ProviderConfig};
 use crate::dirs::{GlobalGantryDir, ProjectRootDir};
 use crate::fs::FsSessionRegistry;
+use crate::message::Message;
 use crate::metrics::{CharCounts, ContextWindow, Usage};
-use crate::provider::agent::ChatStream;
 use crate::provider::registry::ProviderClientRegistry;
 use crate::provider::{ModelId, ModelSelection};
 use crate::session::registry::SessionRegistry;
@@ -45,16 +31,16 @@ type FsSession = Session<crate::fs::session_registry::FsSessionHistory>;
 /// provider registry. All chat and session operations go through this type.
 pub struct App {
     pub project_path: PathBuf,
-    cwd: PathBuf,
+    pub(crate) cwd: PathBuf,
     sessions_dir: PathBuf,
     session: FsSession,
     pub selection: Option<ModelSelection>,
-    registry: ProviderClientRegistry,
-    system_prompt: SystemPrompt,
+    pub(crate) registry: ProviderClientRegistry,
+    pub(crate) system_prompt: SystemPrompt,
     /// Token usage from the most recently completed stream.
-    last_usage: Option<RigUsage>,
+    pub(crate) last_usage: Option<RigUsage>,
     /// Character counts per component, captured just before the most recent request.
-    last_char_counts: Option<CharCounts>,
+    pub(crate) last_char_counts: Option<CharCounts>,
     /// Accumulated token consumption across all nodes in the active session.
     total_consumption: Usage,
 }
@@ -301,6 +287,21 @@ impl App {
         self.system_prompt.refresh(&self.cwd);
     }
 
+    /// Persists a completed assistant turn and updates token usage and consumption totals.
+    pub fn commit_response(&mut self, text: String, usage: Option<RigUsage>) {
+        if let Some(u) = usage {
+            let consumption = Usage::from(&u);
+            if !text.is_empty() {
+                let _ = self
+                    .append_message_with_usage(Message::assistant(text), Some(consumption.clone()));
+            }
+            self.total_consumption += consumption;
+            self.last_usage = Some(u);
+        } else if !text.is_empty() {
+            let _ = self.append_message(Message::assistant(text));
+        }
+    }
+
     /// Returns the tools available for the current request.
     pub fn tools(&self) -> Vec<Box<dyn ToolDyn>> {
         let cwd = self.project_path.clone();
@@ -424,273 +425,6 @@ impl App {
             .map(|(_, skill, indices)| SkillSearchResult { skill, indices })
             .collect()
     }
-
-    /// Expands `tokens` into a user message (reading file/skill attachments eagerly), appends it
-    /// to the session, captures char counts, and returns the prepared history and model selection.
-    ///
-    /// Fails if no model selection is active or any attachment cannot be read.
-    pub async fn prepare_request(&mut self, tokens: Vec<InputToken>) -> Result<PreparedRequest> {
-        let message = build_user_message(tokens, &self.project_path).await?;
-        self.append_message(message)?;
-        let history: Vec<rig::message::Message> =
-            self.history().into_iter().map(Into::into).collect();
-        let messages_chars = history.iter().fold(0, |acc, m| {
-            acc + match m {
-                rig::message::Message::User { content } => content.iter().fold(0, |a, c| {
-                    a + match c {
-                        UserContent::Text(t) => t.text.len(),
-                        _ => 0,
-                    }
-                }),
-                rig::message::Message::Assistant { content, .. } => {
-                    content.iter().fold(0, |a, c| {
-                        a + match c {
-                            AssistantContent::Text(t) => t.text.len(),
-                            _ => 0,
-                        }
-                    })
-                }
-                rig::message::Message::System { content } => content.len(),
-            }
-        });
-        self.last_char_counts = Some(self.system_prompt.char_counts(messages_chars));
-        let selection = self
-            .selection
-            .clone()
-            .ok_or_else(|| anyhow::anyhow!("no active model selection"))?;
-        Ok(PreparedRequest { history, selection })
-    }
-}
-
-/// Produces a fake streaming response for exercising the TUI rendering pipeline.
-///
-/// Emits a scripted sequence of reasoning tokens, text, two tool calls with their
-/// results, and a final text turn, with realistic per-item delays to simulate token
-/// streaming and tool execution latency.
-pub fn mock_chat() -> StreamingResponse {
-    let read_id = uuid::Uuid::new_v4().to_string();
-    let edit_id = uuid::Uuid::new_v4().to_string();
-    let bash_id = uuid::Uuid::new_v4().to_string();
-
-    // Token delay — simulates the inter-token gap during LLM streaming.
-    let token_ms = Duration::from_millis(200);
-    // Slightly longer gap between reasoning chunks to feel deliberate.
-    let reasoning_ms = Duration::from_millis(200);
-
-    let reasoning_chunks: &[&str] = &[
-        "The user wants me to look at the codebase. ",
-        "I should start by reading the main entry point ",
-        "to understand the overall structure.\n",
-        "\n",
-        "Once I have a picture of the module layout ",
-        "I can identify the specific file the user mentioned.",
-    ];
-
-    let text_chunks: &[&str] = &[
-        "Sure, ",
-        "I'll take a look at the codebase for you.\n",
-        "Let me start by reading `src/main.rs` ",
-        "to understand the entry point, ",
-        "then I'll follow the module tree from there.\n",
-        "\n",
-        "This is the second paragraph. ",
-        "It should only appear after the double newline above ",
-        "has been received by the renderer.\n",
-    ];
-
-    let edit_reasoning_chunks: &[&str] = &[
-        "The main function just prints hello. ",
-        "I should update it to print a proper greeting ",
-        "with the program name included.",
-    ];
-
-    let edit_text_chunks: &[&str] = &[
-        "The entry point is simple. ",
-        "I'll update the greeting to be more descriptive.\n",
-    ];
-
-    let second_reasoning_chunks: &[&str] = &[
-        "The edit looks good. ",
-        "Now I should run the tests to verify correctness.",
-    ];
-
-    let pre_bash_text_chunks: &[&str] = &[
-        "Now let me run the tests ",
-        "to make sure nothing is broken.\n",
-    ];
-
-    let final_text_chunks: &[&str] = &[
-        "All tests pass. ",
-        "The implementation looks correct.\n",
-        "Anything else I can help with?",
-    ];
-
-    // Clone all string data up-front so the stream owns it.
-    let reasoning_chunks: Vec<String> = reasoning_chunks.iter().map(|s| s.to_string()).collect();
-    let text_chunks: Vec<String> = text_chunks.iter().map(|s| s.to_string()).collect();
-    let edit_reasoning_chunks: Vec<String> = edit_reasoning_chunks
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-    let edit_text_chunks: Vec<String> = edit_text_chunks.iter().map(|s| s.to_string()).collect();
-    let second_reasoning_chunks: Vec<String> = second_reasoning_chunks
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-    let pre_bash_text_chunks: Vec<String> =
-        pre_bash_text_chunks.iter().map(|s| s.to_string()).collect();
-    let final_text_chunks: Vec<String> = final_text_chunks.iter().map(|s| s.to_string()).collect();
-
-    let chat_stream: crate::provider::agent::ChatStream = Box::pin(stream! {
-        for chunk in &reasoning_chunks {
-            sleep(reasoning_ms).await;
-            yield Ok(MultiTurnStreamItem::StreamAssistantItem(
-                StreamedAssistantContent::Reasoning(Reasoning::new(chunk.as_str())),
-            ));
-        }
-
-        for chunk in &text_chunks {
-            sleep(token_ms).await;
-            yield Ok(MultiTurnStreamItem::StreamAssistantItem(
-                StreamedAssistantContent::Text(rig::message::Text { text: chunk.clone() }),
-            ));
-        }
-
-        yield Ok(MultiTurnStreamItem::StreamAssistantItem(
-            StreamedAssistantContent::ToolCall {
-                tool_call: ToolCall::new(
-                    read_id.clone(),
-                    ToolFunction::new(
-                        "read".to_string(),
-                        serde_json::json!({ "path": "src/main.rs" }),
-                    ),
-                ),
-                internal_call_id: read_id.clone(),
-            },
-        ));
-
-        // read: fast tool, ~100ms
-        sleep(Duration::from_millis(100)).await;
-        yield Ok(MultiTurnStreamItem::StreamUserItem(
-            StreamedUserContent::tool_result(
-                rig::message::ToolResult {
-                    id: read_id.clone(),
-                    call_id: None,
-                    content: rig::OneOrMany::one(rig::message::ToolResultContent::text(
-                        "fn main() { println!(\"hello\"); }",
-                    )),
-                },
-                read_id,
-            ),
-        ));
-
-        for chunk in &edit_reasoning_chunks {
-            sleep(reasoning_ms).await;
-            yield Ok(MultiTurnStreamItem::StreamAssistantItem(
-                StreamedAssistantContent::Reasoning(Reasoning::new(chunk.as_str())),
-            ));
-        }
-
-        for chunk in &edit_text_chunks {
-            sleep(token_ms).await;
-            yield Ok(MultiTurnStreamItem::StreamAssistantItem(
-                StreamedAssistantContent::Text(rig::message::Text { text: chunk.clone() }),
-            ));
-        }
-
-        yield Ok(MultiTurnStreamItem::StreamAssistantItem(
-            StreamedAssistantContent::ToolCall {
-                tool_call: ToolCall::new(
-                    edit_id.clone(),
-                    ToolFunction::new(
-                        "edit".to_string(),
-                        serde_json::json!({
-                            "path": "src/main.rs",
-                            "old_string": "fn main() { println!(\"hello\"); }",
-                            "new_string": "fn main() {\n    println!(\"gantry: hello from main\");\n}"
-                        }),
-                    ),
-                ),
-                internal_call_id: edit_id.clone(),
-            },
-        ));
-
-        // edit: medium tool, ~800ms
-        sleep(Duration::from_millis(800)).await;
-        yield Ok(MultiTurnStreamItem::StreamUserItem(
-            StreamedUserContent::tool_result(
-                rig::message::ToolResult {
-                    id: edit_id.clone(),
-                    call_id: None,
-                    content: rig::OneOrMany::one(rig::message::ToolResultContent::text(
-                        "Edit applied successfully.",
-                    )),
-                },
-                edit_id,
-            ),
-        ));
-
-        for chunk in &second_reasoning_chunks {
-            sleep(reasoning_ms).await;
-            yield Ok(MultiTurnStreamItem::StreamAssistantItem(
-                StreamedAssistantContent::Reasoning(Reasoning::new(chunk.as_str())),
-            ));
-        }
-
-        for chunk in &pre_bash_text_chunks {
-            sleep(token_ms).await;
-            yield Ok(MultiTurnStreamItem::StreamAssistantItem(
-                StreamedAssistantContent::Text(rig::message::Text { text: chunk.clone() }),
-            ));
-        }
-
-        yield Ok(MultiTurnStreamItem::StreamAssistantItem(
-            StreamedAssistantContent::ToolCall {
-                tool_call: ToolCall::new(
-                    bash_id.clone(),
-                    ToolFunction::new(
-                        "bash".to_string(),
-                        serde_json::json!({ "command": "cargo test" }),
-                    ),
-                ),
-                internal_call_id: bash_id.clone(),
-            },
-        ));
-
-        // bash: slow tool, ~3s
-        sleep(Duration::from_millis(3000)).await;
-        yield Ok(MultiTurnStreamItem::StreamUserItem(
-            StreamedUserContent::tool_result(
-                rig::message::ToolResult {
-                    id: bash_id.clone(),
-                    call_id: None,
-                    content: rig::OneOrMany::one(rig::message::ToolResultContent::text(
-                        "test result: ok. 3 passed.",
-                    )),
-                },
-                bash_id,
-            ),
-        ));
-
-        for chunk in &final_text_chunks {
-            sleep(token_ms).await;
-            yield Ok(MultiTurnStreamItem::StreamAssistantItem(
-                StreamedAssistantContent::Text(rig::message::Text { text: chunk.clone() }),
-            ));
-        }
-
-        yield Ok(MultiTurnStreamItem::FinalResponse(FinalResponse::empty()));
-    });
-
-    // Use a no-op commit: nothing is persisted to session history.
-    let (commit_tx, _commit_rx) = oneshot::channel::<(String, Option<RigUsage>)>();
-    let buffering = Box::pin(BufferingStream::new(chat_stream, commit_tx));
-    let commit_future = async move {};
-
-    StreamingResponse {
-        stream: buffering,
-        commit_future: Box::pin(commit_future),
-    }
 }
 
 /// A single result from [`App::search_paths`].
@@ -705,137 +439,4 @@ pub struct SkillSearchResult {
     pub skill: Skill,
     /// Matched character indices into the normalized skill name string.
     pub indices: Vec<u32>,
-}
-
-/// Prepared inputs for a single agent request, returned by [`App::prepare_request`].
-pub struct PreparedRequest {
-    pub history: Vec<rig::message::Message>,
-    pub selection: ModelSelection,
-}
-
-/// Returned by [`stream_message`]. Holds the live stream and the deferred commit.
-pub struct StreamingResponse {
-    /// Yields streamed assistant content as it arrives.
-    pub stream: ChatStream,
-    commit_future: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>,
-}
-
-impl StreamingResponse {
-    /// Drops the stream and persists the buffered assistant reply to the session.
-    ///
-    /// Must be called after the stream is consumed or abandoned. Safe to call after an
-    /// interrupt — whatever was buffered up to that point will be persisted.
-    pub async fn commit(self) {
-        drop(self.stream);
-        self.commit_future.await;
-    }
-}
-
-/// Expands `tokens` into a user message, persists it, then streams the agent response.
-///
-/// Returns a [`StreamingResponse`]. The caller must call [`StreamingResponse::commit`] after
-/// the stream is done or abandoned to persist the assistant reply and update token usage.
-pub async fn stream_message(
-    app: Arc<Mutex<App>>,
-    tokens: Vec<InputToken>,
-) -> Result<StreamingResponse> {
-    let mut guard = app.lock().await;
-    let PreparedRequest { history, selection } = guard.prepare_request(tokens).await?;
-    let system_prompt = guard.system_prompt.as_str().to_string();
-    let tools = guard.tools();
-    let agent = guard
-        .registry
-        .agent(&selection, Some(&system_prompt), tools)?;
-    let Some(prompt) = history.last().cloned() else {
-        anyhow::bail!("no messages to stream");
-    };
-    let history = history[..history.len() - 1].to_vec();
-    drop(guard);
-    let (commit_tx, commit_rx) = oneshot::channel::<(String, Option<RigUsage>)>();
-    let inner = agent.stream_chat(prompt, history).await;
-    let stream = Box::pin(BufferingStream::new(inner, commit_tx));
-    let commit_future = async move {
-        let Ok((text, usage)) = commit_rx.await else {
-            return;
-        };
-        let mut guard = app.lock().await;
-        if let Some(u) = usage {
-            let consumption = Usage::from(&u);
-            if !text.is_empty() {
-                let _ = guard
-                    .append_message_with_usage(Message::assistant(text), Some(consumption.clone()));
-            }
-            guard.total_consumption += consumption;
-            guard.last_usage = Some(u);
-        } else if !text.is_empty() {
-            let _ = guard.append_message(Message::assistant(text));
-        }
-    };
-    Ok(StreamingResponse {
-        stream,
-        commit_future: Box::pin(commit_future),
-    })
-}
-
-/// Wraps a [`ChatStream`], accumulating streamed text and usage. On drop (whether the stream
-/// was fully consumed or interrupted), sends the buffer through a oneshot channel so the
-/// caller's commit future can persist the assistant reply.
-struct BufferingStream {
-    inner: ChatStream,
-    commit_tx: Option<oneshot::Sender<(String, Option<RigUsage>)>>,
-    buffer: String,
-    usage: Option<RigUsage>,
-}
-
-impl BufferingStream {
-    fn new(inner: ChatStream, commit_tx: oneshot::Sender<(String, Option<RigUsage>)>) -> Self {
-        Self {
-            inner,
-            commit_tx: Some(commit_tx),
-            buffer: String::new(),
-            usage: None,
-        }
-    }
-
-    fn send_commit(&mut self) {
-        if let Some(tx) = self.commit_tx.take() {
-            let text = std::mem::take(&mut self.buffer);
-            let usage = self.usage.take();
-            let _ = tx.send((text, usage));
-        }
-    }
-}
-
-impl Drop for BufferingStream {
-    fn drop(&mut self) {
-        self.send_commit();
-    }
-}
-
-impl Stream for BufferingStream {
-    type Item = Result<MultiTurnStreamItem<()>, StreamingError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match Pin::new(&mut self.inner).poll_next(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Some(item)) => {
-                match &item {
-                    Ok(MultiTurnStreamItem::StreamAssistantItem(
-                        StreamedAssistantContent::Text(t),
-                    )) => {
-                        self.buffer.push_str(&t.text);
-                    }
-                    Ok(MultiTurnStreamItem::FinalResponse(f)) => {
-                        self.usage = Some(f.usage());
-                    }
-                    _ => {}
-                }
-                Poll::Ready(Some(item))
-            }
-            Poll::Ready(None) => {
-                self.send_commit();
-                Poll::Ready(None)
-            }
-        }
-    }
 }

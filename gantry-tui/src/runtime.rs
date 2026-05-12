@@ -264,7 +264,7 @@ impl Runtime {
         cancel.store(false, Ordering::SeqCst);
 
         let task = self.rt.spawn(async move {
-            let mut response = gantry_core::app::mock_chat();
+            let mut response = gantry_core::mock_stream_message();
             is_streaming.store(true, Ordering::SeqCst);
             while let Some(item) = response.stream.next().await {
                 if cancel.load(Ordering::SeqCst) || tx.send(Msg::StreamItem(item)).await.is_err() {
