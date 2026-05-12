@@ -40,14 +40,6 @@ pub fn load_skills(cwd: &Path) -> Result<Vec<Skill>> {
     let mut by_name: HashMap<String, Skill> = HashMap::new();
 
     let mut insert = |skill: Skill| {
-        if let Some(existing) = by_name.get(&skill.metadata.name) {
-            eprintln!(
-                "gantry: skill '{}' found at both '{}' and '{}'; the latter takes precedence",
-                skill.metadata.name,
-                existing.skill_file.display(),
-                skill.skill_file.display(),
-            );
-        }
         by_name.insert(skill.metadata.name.clone(), skill);
     };
 
@@ -101,7 +93,7 @@ fn scan_skills_dir(dir: &Path) -> Vec<Skill> {
         let skill_file = path.join(SKILL_FILE_NAME);
         match parse_skill_file(&skill_file) {
             Ok(skill) => skills.push(skill),
-            Err(e) => eprintln!("gantry: skipping skill at '{}': {e}", skill_file.display()),
+            Err(_) => continue,
         }
     }
     skills
@@ -126,20 +118,6 @@ pub fn parse_skill_file(path: &Path) -> Result<Skill> {
     let (name, description) = extract_frontmatter(&raw, path)?;
 
     let skill_file = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-
-    let dir_name = skill_file
-        .parent()
-        .and_then(|p| p.file_name())
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
-    if name != dir_name {
-        eprintln!(
-            "gantry: skill name '{}' does not match directory '{}' in '{}'",
-            name,
-            dir_name,
-            skill_file.display()
-        );
-    }
 
     Ok(Skill {
         metadata: SkillMetadata { name, description },
