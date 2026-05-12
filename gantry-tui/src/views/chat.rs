@@ -277,7 +277,8 @@ impl StatefulWidget for ChatView<'_> {
 ///
 /// For bash commands the raw command string is returned; callers should pass it through
 /// [`format_bash_command`] for display. For the read tool, optional `offset` and `limit`
-/// values are appended as `@<offset>` and `+<limit>`.
+/// values are appended as `@<offset>` and `+<limit>`. For the write tool, the line count
+/// of the written content is appended as `<N>L`.
 fn tool_display_arg(name: &str, args: &serde_json::Value) -> Option<String> {
     let key = match name {
         "bash" => "command",
@@ -285,17 +286,26 @@ fn tool_display_arg(name: &str, args: &serde_json::Value) -> Option<String> {
         _ => return None,
     };
     let path = args.get(key)?.as_str()?;
-    if name == "read" {
-        let mut s = path.to_string();
-        if let Some(offset) = args.get("offset").and_then(|v| v.as_u64()) {
-            s.push_str(&format!(" @{}", offset));
+    match name {
+        "read" => {
+            let mut s = path.to_string();
+            if let Some(offset) = args.get("offset").and_then(|v| v.as_u64()) {
+                s.push_str(&format!(" @{}", offset));
+            }
+            if let Some(limit) = args.get("limit").and_then(|v| v.as_u64()) {
+                s.push_str(&format!(" +{}", limit));
+            }
+            Some(s)
         }
-        if let Some(limit) = args.get("limit").and_then(|v| v.as_u64()) {
-            s.push_str(&format!(" +{}", limit));
+        "write" => {
+            let mut s = path.to_string();
+            if let Some(content) = args.get("content").and_then(|v| v.as_str()) {
+                let line_count = content.lines().count().max(1);
+                s.push_str(&format!(" {}L", line_count));
+            }
+            Some(s)
         }
-        Some(s)
-    } else {
-        Some(path.to_string())
+        _ => Some(path.to_string()),
     }
 }
 

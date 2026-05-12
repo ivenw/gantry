@@ -47,6 +47,7 @@ pub fn mock_stream_message() -> StreamingResponse {
     let edit_error_id = uuid::Uuid::new_v4().to_string();
     let edit_id = uuid::Uuid::new_v4().to_string();
     let bash_id = uuid::Uuid::new_v4().to_string();
+    let write_id = uuid::Uuid::new_v4().to_string();
 
     // Token delay — simulates the inter-token gap during LLM streaming.
     let token_ms = Duration::from_millis(200);
@@ -95,6 +96,8 @@ pub fn mock_stream_message() -> StreamingResponse {
         "to make sure nothing is broken.\n",
     ];
 
+    let pre_write_text_chunks: &[&str] = &["Let me write the updated config file.\n"];
+
     let final_text_chunks: &[&str] = &[
         "All tests pass. ",
         "The implementation looks correct.\n",
@@ -115,6 +118,10 @@ pub fn mock_stream_message() -> StreamingResponse {
         .collect();
     let pre_bash_text_chunks: Vec<String> =
         pre_bash_text_chunks.iter().map(|s| s.to_string()).collect();
+    let pre_write_text_chunks: Vec<String> = pre_write_text_chunks
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     let final_text_chunks: Vec<String> = final_text_chunks.iter().map(|s| s.to_string()).collect();
 
     let chat_stream: ChatStream = Box::pin(stream! {
@@ -279,6 +286,44 @@ pub fn mock_stream_message() -> StreamingResponse {
                     )),
                 },
                 bash_id,
+            ),
+        ));
+
+        for chunk in &pre_write_text_chunks {
+            sleep(token_ms).await;
+            yield Ok(MultiTurnStreamItem::StreamAssistantItem(
+                StreamedAssistantContent::Text(rig::message::Text { text: chunk.clone() }),
+            ));
+        }
+
+        yield Ok(MultiTurnStreamItem::StreamAssistantItem(
+            StreamedAssistantContent::ToolCall {
+                tool_call: ToolCall::new(
+                    write_id.clone(),
+                    ToolFunction::new(
+                        "write".to_string(),
+                        serde_json::json!({
+                            "path": "config/settings.toml",
+                            "content": "[server]\nhost = \"localhost\"\nport = 8080\n\n[database]\nurl = \"postgres://localhost/app\"\nmax_connections = 10\npool_timeout = 30\n"
+                        }),
+                    ),
+                ),
+                internal_call_id: write_id.clone(),
+            },
+        ));
+
+        // write: fast tool, ~200ms
+        sleep(Duration::from_millis(200)).await;
+        yield Ok(MultiTurnStreamItem::StreamUserItem(
+            StreamedUserContent::tool_result(
+                rig::message::ToolResult {
+                    id: write_id.clone(),
+                    call_id: None,
+                    content: rig::OneOrMany::one(rig::message::ToolResultContent::text(
+                        "File written successfully.",
+                    )),
+                },
+                write_id,
             ),
         ));
 
