@@ -12,6 +12,9 @@ pub use read::ReadTool;
 pub use tree::TreeTool;
 pub use write::WriteTool;
 
+/// Prefix that all tool error `Display` impls must start with so the TUI can detect failures.
+pub const TOOL_ERROR_PREFIX: &str = "Error: ";
+
 use std::path::{Path, PathBuf};
 
 /// Resolves `path` against `cwd`: returns `path` unchanged if absolute, otherwise joins it with `cwd`.

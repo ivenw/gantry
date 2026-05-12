@@ -12,7 +12,7 @@ use crate::{
     theme,
 };
 
-const PREFIX: &str = ">> ";
+const PREFIX: &str = "> ";
 const PREFIX_WIDTH: u16 = PREFIX.len() as u16;
 const BORDER_HEIGHT: u16 = 2;
 

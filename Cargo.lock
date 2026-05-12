@@ -905,6 +905,7 @@ dependencies = [
  "gantry-core",
  "nucleo-matcher",
  "ratatui",
+ "serde_json",
  "tokio",
 ]
 

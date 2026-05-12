@@ -45,6 +45,7 @@ impl fmt::Debug for ReadToolError {
 
 impl fmt::Display for ReadToolError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(super::TOOL_ERROR_PREFIX)?;
         match &self.0 {
             ReadError::Io(e) => write!(f, "failed to read file: {e}"),
         }

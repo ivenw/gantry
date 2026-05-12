@@ -44,6 +44,7 @@ impl StreamingResponse {
 /// streaming and tool execution latency.
 pub fn mock_stream_message() -> StreamingResponse {
     let read_id = uuid::Uuid::new_v4().to_string();
+    let edit_error_id = uuid::Uuid::new_v4().to_string();
     let edit_id = uuid::Uuid::new_v4().to_string();
     let bash_id = uuid::Uuid::new_v4().to_string();
 
@@ -156,6 +157,37 @@ pub fn mock_stream_message() -> StreamingResponse {
                     )),
                 },
                 read_id,
+            ),
+        ));
+
+        yield Ok(MultiTurnStreamItem::StreamAssistantItem(
+            StreamedAssistantContent::ToolCall {
+                tool_call: ToolCall::new(
+                    edit_error_id.clone(),
+                    ToolFunction::new(
+                        "edit".to_string(),
+                        serde_json::json!({
+                            "path": "src/main.rs",
+                            "old_string": "this string does not exist",
+                            "new_string": "irrelevant"
+                        }),
+                    ),
+                ),
+                internal_call_id: edit_error_id.clone(),
+            },
+        ));
+
+        sleep(Duration::from_millis(400)).await;
+        yield Ok(MultiTurnStreamItem::StreamUserItem(
+            StreamedUserContent::tool_result(
+                rig::message::ToolResult {
+                    id: edit_error_id.clone(),
+                    call_id: None,
+                    content: rig::OneOrMany::one(rig::message::ToolResultContent::text(
+                        &format!("{}stale line references:\nline 1 is stale: expected hash 'ab', got 'zz'", crate::tools::TOOL_ERROR_PREFIX),
+                    )),
+                },
+                edit_error_id,
             ),
         ));
 

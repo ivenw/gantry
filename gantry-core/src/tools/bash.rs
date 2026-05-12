@@ -15,8 +15,6 @@ pub struct BashTool {
 pub struct BashArgs {
     /// The shell command to execute.
     pub command: String,
-    /// Maximum execution time in milliseconds. Defaults to 30 000.
-    pub timeout_ms: Option<u64>,
 }
 
 pub struct BashToolError(pub BashError);
@@ -41,6 +39,7 @@ impl fmt::Debug for BashToolError {
 
 impl fmt::Display for BashToolError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(super::TOOL_ERROR_PREFIX)?;
         match &self.0 {
             BashError::Spawn(e) => write!(f, "failed to spawn process: {e}"),
             BashError::Timeout(ms) => write!(f, "command timed out after {ms}ms"),
@@ -67,10 +66,10 @@ impl Tool for BashTool {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let command = args.command.clone();
         let cwd = self.cwd.clone();
-        Ok(tokio::task::spawn_blocking(move || {
-            gantry_tools::run_bash(&cwd, &command, args.timeout_ms)
-        })
-        .await
-        .expect("bash task panicked")?)
+        Ok(
+            tokio::task::spawn_blocking(move || gantry_tools::run_bash(&cwd, &command, None))
+                .await
+                .expect("bash task panicked")?,
+        )
     }
 }

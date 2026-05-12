@@ -56,6 +56,7 @@ impl fmt::Debug for EditToolError {
 
 impl fmt::Display for EditToolError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(super::TOOL_ERROR_PREFIX)?;
         match &self.0 {
             EditError::InvalidLineRef { raw, reason } => {
                 let detail = match reason {
@@ -78,12 +79,10 @@ impl fmt::Display for EditToolError {
                 a_end,
                 b_start,
                 b_end,
-            } => {
-                write!(
-                    f,
-                    "overlapping edits: [{b_start}-{b_end}] and [{a_start}-{a_end}]"
-                )
-            }
+            } => write!(
+                f,
+                "overlapping edits: [{b_start}-{b_end}] and [{a_start}-{a_end}]"
+            ),
             EditError::Io(e) => write!(f, "I/O error while editing file: {e}"),
         }
     }

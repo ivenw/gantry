@@ -43,6 +43,7 @@ impl fmt::Debug for WriteToolError {
 
 impl fmt::Display for WriteToolError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(super::TOOL_ERROR_PREFIX)?;
         match &self.0 {
             WriteError::FileExists(path) => write!(
                 f,

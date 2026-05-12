@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use gantry_core::{
     ChatStreamItem, MultiTurnStreamItem, ReasoningContent, StreamedAssistantContent,
-    StreamedUserContent, StreamingError,
+    StreamedUserContent, StreamingError, ToolResultContent,
 };
 
 use crate::commands::KnownCommand;
@@ -150,17 +150,29 @@ fn handle_stream_item(
             tool_call,
             internal_call_id,
         })) => {
-            model
-                .chat
-                .push_tool_call(internal_call_id, tool_call.function.name);
+            model.chat.push_tool_call(
+                internal_call_id,
+                tool_call.function.name,
+                tool_call.function.arguments,
+            );
         }
         // A tool result closes the pending tool call and opens a fresh streaming slot so the
         // next assistant text turn renders as a separate message.
         Ok(MultiTurnStreamItem::StreamUserItem(StreamedUserContent::ToolResult {
             internal_call_id,
-            ..
+            tool_result,
         })) => {
-            model.chat.finish_tool_call(&internal_call_id);
+            let result_text = tool_result.content.iter().find_map(|c| {
+                if let ToolResultContent::Text(t) = c {
+                    Some(t.text.as_str())
+                } else {
+                    None
+                }
+            });
+            let is_error = result_text
+                .map(|t| t.starts_with(gantry_core::tools::TOOL_ERROR_PREFIX))
+                .unwrap_or(false);
+            model.chat.finish_tool_call(&internal_call_id, is_error);
             model.chat.start_streaming_message();
         }
         Ok(_) => {}

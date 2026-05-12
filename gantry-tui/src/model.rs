@@ -401,7 +401,9 @@ pub enum ChatMessage {
     ToolCall {
         id: String,
         name: String,
+        arguments: serde_json::Value,
         done: bool,
+        is_error: bool,
     },
 }
 
@@ -1038,24 +1040,30 @@ impl ChatModel {
     }
 
     /// Inserts a tool call row with `done: false`, flushing any pending assistant text first.
-    pub fn push_tool_call(&mut self, id: String, name: String) {
+    pub fn push_tool_call(&mut self, id: String, name: String, arguments: serde_json::Value) {
         self.flush_streaming();
         self.messages.push(ChatMessage::ToolCall {
             id,
             name,
+            arguments,
             done: false,
+            is_error: false,
         });
     }
 
-    /// Marks the tool call with `id` as done.
-    pub fn finish_tool_call(&mut self, id: &str) {
+    /// Marks the tool call with `id` as done, recording whether it produced an error.
+    pub fn finish_tool_call(&mut self, id: &str, is_error: bool) {
         for msg in &mut self.messages {
             if let ChatMessage::ToolCall {
-                id: msg_id, done, ..
+                id: msg_id,
+                done,
+                is_error: msg_is_error,
+                ..
             } = msg
                 && msg_id == id
             {
                 *done = true;
+                *msg_is_error = is_error;
                 break;
             }
         }

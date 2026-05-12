@@ -8,10 +8,11 @@ use ratatui::{
     widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
 
-const USER_PREFIX: &str = ">> ";
-const REASONING_PREFIX: &str = "** ";
-const ASSISTANT_PREFIX: &str = "<< ";
-const TOOL_CALL_PREFIX: &str = ".. ";
+const USER_PREFIX: &str = "> ";
+const REASONING_PREFIX: &str = "* ";
+const ASSISTANT_PREFIX: &str = "< ";
+const TOOL_SUCCESS_INDICATOR: &str = "+";
+const TOOL_ERROR_INDICATOR: &str = "-";
 
 pub struct ChatView<'a> {
     pub messages: &'a [ChatMessage],
@@ -73,7 +74,7 @@ impl StatefulWidget for ChatView<'_> {
                     }
                     ChatMessage::Reasoning { .. } => REASONING_PREFIX.len(),
                     ChatMessage::Assistant { .. } => ASSISTANT_PREFIX.len(),
-                    ChatMessage::ToolCall { name, .. } => TOOL_CALL_PREFIX.len() + name.len() + 1,
+                    ChatMessage::ToolCall { name, .. } => 2 + name.len() + 1,
                 };
                 let content = msg_content(m);
                 let text_width = area.width.saturating_sub(prefix_len as u16);
@@ -174,23 +175,30 @@ impl StatefulWidget for ChatView<'_> {
                         .scroll((clip_top, 0))
                         .render(text_area, buf);
                 }
-                ChatMessage::ToolCall { name, done, .. } => {
-                    let indicator = if *done {
-                        "✓"
-                    } else {
-                        &self.spinner.to_string()
+                ChatMessage::ToolCall {
+                    name,
+                    arguments,
+                    done,
+                    is_error,
+                    ..
+                } => {
+                    let indicator = match (done, is_error) {
+                        (false, _) => self.spinner.to_string(),
+                        (true, false) => "+".to_string(),
+                        (true, true) => "-".to_string(),
                     };
-                    let line = format!("{}{} {}", TOOL_CALL_PREFIX, indicator, name);
-                    buf.set_string(
-                        area.x,
-                        screen_y,
-                        &line,
-                        Style::default().fg(if *done {
-                            ratatui::style::Color::DarkGray
-                        } else {
-                            ratatui::style::Color::Cyan
-                        }),
-                    );
+                    let arg = tool_display_arg(name, arguments);
+                    let display_name = if name == "bash" { "$" } else { name.as_str() };
+                    let line = match arg {
+                        Some(a) => format!("{} {} {}", indicator, display_name, a),
+                        None => format!("{} {}", indicator, display_name),
+                    };
+                    let color = match (done, is_error) {
+                        (false, _) => ratatui::style::Color::Cyan,
+                        (true, false) => ratatui::style::Color::DarkGray,
+                        (true, true) => ratatui::style::Color::Red,
+                    };
+                    buf.set_string(area.x, screen_y, &line, Style::default().fg(color));
                 }
             }
 
@@ -223,6 +231,16 @@ impl StatefulWidget for ChatView<'_> {
             );
         }
     }
+}
+
+/// Returns a short display string for the most informative argument of a known tool.
+fn tool_display_arg<'a>(name: &str, args: &'a serde_json::Value) -> Option<&'a str> {
+    let key = match name {
+        "bash" => "command",
+        "read" | "write" | "edit" => "path",
+        _ => return None,
+    };
+    args.get(key)?.as_str()
 }
 
 fn msg_content(message: &ChatMessage) -> &str {

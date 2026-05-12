@@ -15,3 +15,4 @@ crossterm.workspace = true
 tokio.workspace = true
 gantry-core = { path = "../gantry-core" }
 nucleo-matcher = "0.3.1"
+serde_json = "1.0.149"

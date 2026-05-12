@@ -29,7 +29,7 @@ pub use provider::agent::{ChatStream, ChatStreamItem};
 pub use provider::registry::ProviderClientRegistry;
 pub use provider::{ModelId, ModelSelection, ProviderAlias};
 pub use rig::agent::{MultiTurnStreamItem, StreamingError};
-pub use rig::completion::message::ReasoningContent;
+pub use rig::completion::message::{ReasoningContent, ToolResultContent};
 pub use rig::streaming::{StreamedAssistantContent, StreamedUserContent};
 pub use skills::{Skill, SkillMetadata};
 pub use streaming::{StreamingResponse, mock_stream_message, stream_message};
