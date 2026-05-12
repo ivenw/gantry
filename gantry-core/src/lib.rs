@@ -26,7 +26,7 @@ pub use metrics::{CharCounts, ContextWindow, Usage};
 pub use provider::HookEvent;
 pub use provider::agent::{ChatStream, ChatStreamItem};
 pub use provider::registry::ProviderClientRegistry;
-pub use provider::{ModelAlias, ModelSelection, ProviderAlias};
+pub use provider::{ModelId, ModelSelection, ProviderAlias};
 pub use resource_loader::{Skill, SkillMetadata};
 pub use rig::agent::{MultiTurnStreamItem, StreamingError};
 pub use rig::streaming::StreamedAssistantContent;

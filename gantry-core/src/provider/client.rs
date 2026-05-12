@@ -10,7 +10,7 @@ use crate::config::{
     OpenAiCompletionsProviderConfig, OpenAiResponsesProviderConfig,
 };
 use crate::provider::agent::BoxedAgent;
-use crate::provider::{ModelAlias, PromptHook};
+use crate::provider::{ModelId, PromptHook};
 use crate::providers::cortecs;
 
 /// A constructed, ready-to-use provider client that can list models and create agents.
@@ -97,7 +97,7 @@ impl ProviderClient {
     /// Builds a [`BoxedAgent`] for the given model alias, optional preamble, hook, and tools.
     pub fn agent(
         &self,
-        model: &ModelAlias,
+        model: &ModelId,
         preamble: Option<&str>,
         hook: PromptHook,
         tools: Vec<Box<dyn ToolDyn>>,

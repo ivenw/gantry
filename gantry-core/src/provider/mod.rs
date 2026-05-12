@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 /// A resolved provider and model pair used to select a specific model for inference.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelSelection {
-    pub provider: ProviderAlias,
-    pub model: ModelAlias,
+    pub provider_alias: ProviderAlias,
+    pub model_id: ModelId,
     /// Context window size in tokens, if known for this model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_length: Option<u32>,
@@ -37,10 +37,10 @@ impl ProviderAlias {
 /// User-defined alias for a model within a provider.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct ModelAlias(pub String);
+pub struct ModelId(pub String);
 
-impl ModelAlias {
-    /// Creates a new [`ModelAlias`] from any string-like value.
+impl ModelId {
+    /// Creates a new [`ModelId`] from any string-like value.
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }

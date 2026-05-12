@@ -872,12 +872,12 @@ impl Model {
             .unwrap_or(0);
         let model_col_width = models
             .iter()
-            .map(|s| s.model.as_str().chars().count() as u16)
+            .map(|s| s.model_id.as_str().chars().count() as u16)
             .max()
             .unwrap_or(0);
         let provider_col_width = models
             .iter()
-            .map(|s| s.provider.as_str().chars().count() as u16)
+            .map(|s| s.provider_alias.as_str().chars().count() as u16)
             .max()
             .unwrap_or(0);
         let context_col_width = models
@@ -1644,7 +1644,7 @@ impl ModelPickerView {
             .filter_map(|s| {
                 let mut indices = Vec::new();
                 let score = pattern.indices(
-                    nucleo_matcher::Utf32Str::new(s.model.as_str(), &mut buf),
+                    nucleo_matcher::Utf32Str::new(s.model_id.as_str(), &mut buf),
                     &mut matcher,
                     &mut indices,
                 )?;

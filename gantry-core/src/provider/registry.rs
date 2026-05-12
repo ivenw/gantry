@@ -59,8 +59,8 @@ impl ProviderClientRegistry {
         hook: PromptHook,
         tools: Vec<Box<dyn ToolDyn>>,
     ) -> Result<BoxedAgent> {
-        self.client(&selection.provider)?
-            .agent(&selection.model, preamble, hook, tools)
+        self.client(&selection.provider_alias)?
+            .agent(&selection.model_id, preamble, hook, tools)
     }
 
     /// Constructs a fresh [`ProviderClient`] for the given alias.

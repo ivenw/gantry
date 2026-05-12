@@ -102,7 +102,7 @@ impl Widget for ModelPickerWidget<'_> {
             .take(max_visible)
             .map(|(i, entry)| {
                 let is_cursor = i == selected;
-                let model_str = entry.selection.model.as_str().to_owned();
+                let model_str = entry.selection.model_id.as_str().to_owned();
                 let model_line = if is_cursor {
                     Line::from(Span::styled(model_str, STYLE_SELECTED))
                 } else if entry.is_active {
@@ -111,7 +111,7 @@ impl Widget for ModelPickerWidget<'_> {
                     highlighted_line(&model_str, &entry.indices, STYLE_TEXT, STYLE_MATCH)
                 };
                 let provider_line = Line::from(Span::styled(
-                    entry.selection.provider.as_str().to_owned(),
+                    entry.selection.provider_alias.as_str().to_owned(),
                     STYLE_PROVIDER,
                 ));
                 let context_line = Line::from(Span::styled(

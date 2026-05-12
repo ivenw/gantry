@@ -25,7 +25,7 @@ use crate::fs::FsSessionRegistry;
 use crate::metrics::{CharCounts, ContextWindow, Usage};
 use crate::provider::agent::ChatStream;
 use crate::provider::registry::ProviderClientRegistry;
-use crate::provider::{HookEvent, ModelAlias, ModelSelection, PromptHook};
+use crate::provider::{HookEvent, ModelId, ModelSelection, PromptHook};
 use crate::resource_loader::{Skill, load_context_files, load_skills};
 use crate::session::registry::SessionRegistry;
 use crate::session::{NodeId, Session, SessionId, SessionTree};
@@ -187,7 +187,7 @@ impl App {
         self.registry
             .providers()
             .iter()
-            .find(|p| p.alias() == &selection.provider)
+            .find(|p| p.alias() == &selection.provider_alias)
             .and_then(|p| match p {
                 ProviderConfig::Ollama(cfg) => cfg.context_length,
                 _ => None,
@@ -237,13 +237,12 @@ impl App {
                     Ok(list) => {
                         for model in list.data {
                             let mut selection = ModelSelection {
-                                provider: provider_alias.clone(),
-                                model: ModelAlias::new(model.id),
+                                provider_alias: provider_alias.clone(),
+                                model_id: ModelId::new(model.id),
                                 context_length: model.context_length,
                             };
                             if selection.context_length.is_none() {
-                                selection.context_length =
-                                    self.resolve_context_length(&selection);
+                                selection.context_length = self.resolve_context_length(&selection);
                             }
                             selections.push(selection);
                         }
@@ -287,15 +286,15 @@ impl App {
     /// Validates and sets the active model, keeping the current provider.
     ///
     /// Returns an error if no selection is currently active.
-    pub fn set_active_model(&mut self, model_alias: ModelAlias) -> Result<()> {
+    pub fn set_active_model(&mut self, model_alias: ModelId) -> Result<()> {
         let provider_alias = self
             .selection
             .as_ref()
-            .map(|s| s.provider.clone())
+            .map(|s| s.provider_alias.clone())
             .ok_or_else(|| anyhow::anyhow!("no active model selection"))?;
         self.set_selection(ModelSelection {
-            provider: provider_alias,
-            model: model_alias,
+            provider_alias,
+            model_id: model_alias,
             context_length: None,
         });
         Ok(())

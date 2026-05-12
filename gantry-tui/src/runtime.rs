@@ -314,6 +314,7 @@ impl Runtime {
             .block_on(async { self.app.lock().await.add_provider(config, credential) })
         {
             Ok(()) => {
+                self.model.cached_models = None;
                 let providers = self
                     .rt
                     .block_on(async { self.app.lock().await.list_providers().to_vec() });
@@ -338,6 +339,7 @@ impl Runtime {
             .block_on(async { self.app.lock().await.remove_provider(&alias) })
         {
             Ok(()) => {
+                self.model.cached_models = None;
                 let providers = self
                     .rt
                     .block_on(async { self.app.lock().await.list_providers().to_vec() });
