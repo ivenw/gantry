@@ -1,3 +1,4 @@
+pub mod agentsmd;
 pub mod app;
 pub mod config;
 pub mod dirs;
@@ -7,8 +8,8 @@ pub mod message;
 pub mod metrics;
 pub mod provider;
 pub mod providers;
-pub mod resource_loader;
 pub mod session;
+pub mod skills;
 pub mod system_prompt;
 pub mod tools;
 
@@ -26,10 +27,10 @@ pub use metrics::{CharCounts, ContextWindow, Usage};
 pub use provider::agent::{ChatStream, ChatStreamItem};
 pub use provider::registry::ProviderClientRegistry;
 pub use provider::{ModelId, ModelSelection, ProviderAlias};
-pub use resource_loader::{Skill, SkillMetadata};
 pub use rig::agent::{MultiTurnStreamItem, StreamingError};
 pub use rig::completion::message::ReasoningContent;
 pub use rig::streaming::{StreamedAssistantContent, StreamedUserContent};
+pub use skills::{Skill, SkillMetadata};
 
 pub use fs::FsSessionRegistry;
 pub use session::{Branch, NodeId, Session, SessionId, SessionInfo, SessionRegistry, SessionTree};

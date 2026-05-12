@@ -29,10 +29,10 @@ use crate::metrics::{CharCounts, ContextWindow, Usage};
 use crate::provider::agent::ChatStream;
 use crate::provider::registry::ProviderClientRegistry;
 use crate::provider::{ModelId, ModelSelection};
-use crate::resource_loader::{Skill, load_context_files, load_skills};
 use crate::session::registry::SessionRegistry;
 use crate::session::{NodeId, Session, SessionId, SessionTree};
-use crate::system_prompt::{BASE_PROMPT, build_system_prompt};
+use crate::skills::{Skill, load_skills};
+use crate::system_prompt::SystemPrompt;
 use crate::tools::{BashTool, EditTool, GrepTool, ReadTool, TreeTool, WriteTool};
 use rig::completion::Usage as RigUsage;
 use rig::tool::ToolDyn;
@@ -45,17 +45,12 @@ type FsSession = Session<crate::fs::session_registry::FsSessionHistory>;
 /// provider registry. All chat and session operations go through this type.
 pub struct App {
     pub project_path: PathBuf,
-    root: ProjectRootDir,
+    cwd: PathBuf,
     sessions_dir: PathBuf,
     session: FsSession,
     pub selection: Option<ModelSelection>,
     registry: ProviderClientRegistry,
-    /// Cached system prompt (preamble), rebuilt by [`App::refresh_system_prompt`].
-    system_prompt: String,
-    /// Char counts per agent file, captured when the system prompt was last built.
-    agent_file_char_counts: Vec<(PathBuf, usize)>,
-    /// Total chars contributed by the skills catalog, captured when the system prompt was last built.
-    skills_catalog_char_count: usize,
+    system_prompt: SystemPrompt,
     /// Token usage from the most recently completed stream.
     last_usage: Option<RigUsage>,
     /// Character counts per component, captured just before the most recent request.
@@ -72,6 +67,7 @@ impl App {
     pub fn new(
         global_config_dir: GlobalGantryDir,
         project_root_dir: ProjectRootDir,
+        cwd: PathBuf,
         registry: ProviderClientRegistry,
     ) -> Result<Self> {
         let default_model = registry.providers.catalog.default_model.clone();
@@ -87,19 +83,16 @@ impl App {
             session_registry.create_session()?
         };
         let total_consumption = session.total_consumption();
-        let (system_prompt, agent_file_char_counts, skills_catalog_char_count) =
-            Self::build_system_prompt_with_counts(&project_root_dir);
+        let system_prompt = SystemPrompt::new(&cwd);
 
         Ok(Self {
             project_path,
-            root: project_root_dir,
+            cwd,
             sessions_dir,
             session,
             selection: default_model,
             registry,
             system_prompt,
-            agent_file_char_counts,
-            skills_catalog_char_count,
             last_usage: None,
             last_char_counts: None,
             total_consumption,
@@ -303,33 +296,9 @@ impl App {
         Ok(())
     }
 
-    /// Rebuilds the cached system prompt, agent file char counts, and skill catalog char count from
-    /// disk.
+    /// Rebuilds the cached system prompt from disk.
     pub fn refresh_system_prompt(&mut self) {
-        let (prompt, counts, skill_chars) = Self::build_system_prompt_with_counts(&self.root);
-        self.system_prompt = prompt;
-        self.agent_file_char_counts = counts;
-        self.skills_catalog_char_count = skill_chars;
-    }
-
-    fn build_system_prompt_with_counts(
-        project_root: &ProjectRootDir,
-    ) -> (String, Vec<(PathBuf, usize)>, usize) {
-        let agent_files = load_context_files(project_root).unwrap_or_default();
-        let skills = load_skills(project_root).unwrap_or_default();
-        let counts = agent_files
-            .iter()
-            .map(|f| (f.path.clone(), f.contents.len()))
-            .collect();
-        let skill_chars = skills
-            .iter()
-            .map(|s| s.metadata.name.len() + s.metadata.description.len())
-            .sum();
-        (
-            build_system_prompt(&agent_files, &skills),
-            counts,
-            skill_chars,
-        )
+        self.system_prompt.refresh(&self.cwd);
     }
 
     /// Returns the tools available for the current request.
@@ -412,7 +381,7 @@ impl App {
     /// All skills are returned when `query` is empty. Each result includes the matched
     /// character indices into the skill name string.
     pub fn search_skills(&self, query: &str) -> Vec<SkillSearchResult> {
-        let mut skills = load_skills(&self.root).unwrap_or_default();
+        let mut skills = load_skills(&self.cwd).unwrap_or_default();
 
         if query.is_empty() {
             skills.sort_by(|a, b| a.metadata.name.cmp(&b.metadata.name));
@@ -465,31 +434,26 @@ impl App {
         self.append_message(message)?;
         let history: Vec<rig::message::Message> =
             self.history().into_iter().map(Into::into).collect();
-        let char_counts = CharCounts {
-            base_prompt: BASE_PROMPT.len(),
-            agent_files: self.agent_file_char_counts.clone(),
-            skills_catalog: self.skills_catalog_char_count,
-            messages: history.iter().fold(0, |acc, m| {
-                acc + match m {
-                    rig::message::Message::User { content } => content.iter().fold(0, |a, c| {
+        let messages_chars = history.iter().fold(0, |acc, m| {
+            acc + match m {
+                rig::message::Message::User { content } => content.iter().fold(0, |a, c| {
+                    a + match c {
+                        UserContent::Text(t) => t.text.len(),
+                        _ => 0,
+                    }
+                }),
+                rig::message::Message::Assistant { content, .. } => {
+                    content.iter().fold(0, |a, c| {
                         a + match c {
-                            UserContent::Text(t) => t.text.len(),
+                            AssistantContent::Text(t) => t.text.len(),
                             _ => 0,
                         }
-                    }),
-                    rig::message::Message::Assistant { content, .. } => {
-                        content.iter().fold(0, |a, c| {
-                            a + match c {
-                                AssistantContent::Text(t) => t.text.len(),
-                                _ => 0,
-                            }
-                        })
-                    }
-                    rig::message::Message::System { content } => content.len(),
+                    })
                 }
-            }),
-        };
-        self.last_char_counts = Some(char_counts);
+                rig::message::Message::System { content } => content.len(),
+            }
+        });
+        self.last_char_counts = Some(self.system_prompt.char_counts(messages_chars));
         let selection = self
             .selection
             .clone()
@@ -777,7 +741,7 @@ pub async fn stream_message(
 ) -> Result<StreamingResponse> {
     let mut guard = app.lock().await;
     let PreparedRequest { history, selection } = guard.prepare_request(tokens).await?;
-    let system_prompt = guard.system_prompt.clone();
+    let system_prompt = guard.system_prompt.as_str().to_string();
     let tools = guard.tools();
     let agent = guard
         .registry

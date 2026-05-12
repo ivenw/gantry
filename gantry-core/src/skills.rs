@@ -4,68 +4,13 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde::Deserialize;
 
-use crate::dirs::{GlobalAgentsDir, GlobalGantryDir, ProjectRootDir};
+use crate::dirs::{GlobalAgentsDir, GlobalGantryDir};
 
-const CONTEXT_FILE_CANDIDATES: &[&str] = &["AGENTS.md", "CLAUDE.md"];
+const AGENTS_DIR: &str = ".agents";
+const GANTRY_DIR: &str = ".gantry";
+const SKILLS_DIR: &str = "skills";
 const SKILL_FILE_NAME: &str = "SKILL.md";
 const SKIP_DIRS: &[&str] = &[".git", "node_modules"];
-
-/// A discovered context file with its resolved path and raw contents.
-pub struct ContextFile {
-    pub path: PathBuf,
-    pub contents: String,
-}
-
-/// Discovers and loads context files for a given project root.
-///
-/// Insertion order: global first (`~/.gantry/AGENTS.md`, falling back to `~/.agents/AGENTS.md`),
-/// then files found walking up from `project_root` toward the filesystem root, ordered
-/// root-first so the most-root file comes before the project-level file.
-pub fn load_context_files(project_root: &ProjectRootDir) -> Result<Vec<ContextFile>> {
-    let mut results: Vec<ContextFile> = Vec::new();
-
-    let global_candidates = [
-        GlobalGantryDir::new()
-            .ok()
-            .map(|d| d.path().join("AGENTS.md")),
-        GlobalAgentsDir::new()
-            .ok()
-            .map(|d| d.path().join("AGENTS.md")),
-    ];
-    for path in global_candidates.into_iter().flatten() {
-        if let Ok(file) = load_context_file(&path) {
-            results.push(file);
-            break;
-        }
-    }
-
-    let mut walk_results: Vec<ContextFile> = Vec::new();
-    let mut current = project_root.path().to_path_buf();
-    loop {
-        for name in CONTEXT_FILE_CANDIDATES {
-            if let Ok(file) = load_context_file(&current.join(name)) {
-                walk_results.push(file);
-                break;
-            }
-        }
-        match current.parent() {
-            Some(parent) => current = parent.to_path_buf(),
-            None => break,
-        }
-    }
-
-    walk_results.reverse();
-    results.extend(walk_results);
-    Ok(results)
-}
-
-/// Loads a single context file from `path`, returning an error if it does not exist or is
-/// unreadable.
-pub fn load_context_file(path: &Path) -> Result<ContextFile> {
-    let contents = std::fs::read_to_string(path)?;
-    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    Ok(ContextFile { path, contents })
-}
 
 /// Parsed metadata from a `SKILL.md` frontmatter block.
 pub struct SkillMetadata {
@@ -80,43 +25,53 @@ pub struct Skill {
     pub skill_file: PathBuf,
 }
 
-/// Discovers and loads skills for a given project root.
+/// Discovers and loads skills starting from `cwd`.
 ///
-/// Scans four locations in priority order (user-global first, then project-level). Project-level
-/// skills shadow user-level skills that share the same `name`. Within the same scope,
-/// first-found wins. A warning is logged when a collision occurs.
+/// Scans in ascending priority order so that later insertions win on name collision:
+/// 1. `~/.agents/skills/`
+/// 2. `~/.gantry/skills/`
+/// 3. For each ancestor of `cwd` walking root-first toward `cwd`:
+///    a. `<dir>/.agents/skills/`
+///    b. `<dir>/.gantry/skills/`
 ///
-/// Scan order:
-/// 1. `~/.gantry/skills/`
-/// 2. `~/.agents/skills/`
-/// 3. `<project>/.gantry/skills/`
-/// 4. `<project>/.agents/skills/`
-pub fn load_skills(project_root: &ProjectRootDir) -> Result<Vec<Skill>> {
-    // Collect skills in ascending priority order so that higher-priority entries overwrite lower.
-    // Pair each dir with a flag indicating whether it is project-level (higher priority).
-    let scan_dirs: Vec<(PathBuf, bool)> = [
-        GlobalGantryDir::new().ok().map(|d| (d.skills_dir(), false)),
-        GlobalAgentsDir::new().ok().map(|d| (d.skills_dir(), false)),
-        Some((project_root.gantry_dir().skills_dir(), true)),
-        Some((project_root.agents_dir().skills_dir(), true)),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-
-    // user-level entries first, project-level second — later entries win on collision.
+/// Within the same directory, `.gantry/` beats `.agents/` because it is inserted last.
+/// Closer ancestors beat further ones for the same reason.
+pub fn load_skills(cwd: &Path) -> Result<Vec<Skill>> {
     let mut by_name: HashMap<String, Skill> = HashMap::new();
-    for (dir, _is_project) in scan_dirs {
-        for skill in scan_skills_dir(&dir) {
-            if let Some(existing) = by_name.get(&skill.metadata.name) {
-                eprintln!(
-                    "gantry: skill '{}' found at both '{}' and '{}'; the latter takes precedence",
-                    skill.metadata.name,
-                    existing.skill_file.display(),
-                    skill.skill_file.display(),
-                );
+
+    let mut insert = |skill: Skill| {
+        if let Some(existing) = by_name.get(&skill.metadata.name) {
+            eprintln!(
+                "gantry: skill '{}' found at both '{}' and '{}'; the latter takes precedence",
+                skill.metadata.name,
+                existing.skill_file.display(),
+                skill.skill_file.display(),
+            );
+        }
+        by_name.insert(skill.metadata.name.clone(), skill);
+    };
+
+    // Global dirs — lowest priority.
+    if let Some(d) = GlobalAgentsDir::new().ok() {
+        for skill in scan_skills_dir(&d.skills_dir()) {
+            insert(skill);
+        }
+    }
+    if let Some(d) = GlobalGantryDir::new().ok() {
+        for skill in scan_skills_dir(&d.skills_dir()) {
+            insert(skill);
+        }
+    }
+
+    // Ancestors of cwd, root-first, so closer dirs overwrite further ones.
+    let mut ancestors: Vec<PathBuf> = cwd.ancestors().map(|p| p.to_path_buf()).collect();
+    ancestors.reverse();
+    for ancestor in &ancestors {
+        for config_dir in &[AGENTS_DIR, GANTRY_DIR] {
+            let skills_dir = ancestor.join(config_dir).join(SKILLS_DIR);
+            for skill in scan_skills_dir(&skills_dir) {
+                insert(skill);
             }
-            by_name.insert(skill.metadata.name.clone(), skill);
         }
     }
 
@@ -172,7 +127,6 @@ pub fn parse_skill_file(path: &Path) -> Result<Skill> {
 
     let skill_file = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 
-    // Warn if the name doesn't match the parent directory.
     let dir_name = skill_file
         .parent()
         .and_then(|p| p.file_name())
@@ -206,7 +160,6 @@ fn extract_frontmatter(raw: &str, path: &Path) -> Result<(String, String)> {
         .map_err(|e| anyhow::anyhow!("could not parse frontmatter in '{}': {e}", path.display()))?;
 
     let name = fm.name.filter(|s| !s.is_empty()).unwrap_or_else(|| {
-        // Fall back to the parent directory name.
         path.parent()
             .and_then(|p| p.file_name())
             .and_then(|n| n.to_str())
@@ -225,7 +178,6 @@ fn extract_frontmatter(raw: &str, path: &Path) -> Result<(String, String)> {
 /// Returns the YAML block between the first pair of `---` delimiters, or `None` if not found.
 fn slice_frontmatter(raw: &str) -> Option<&str> {
     let rest = raw.strip_prefix("---")?;
-    // Accept `---\n` or `---\r\n`
     let rest = rest
         .strip_prefix('\n')
         .or_else(|| rest.strip_prefix("\r\n"))?;
