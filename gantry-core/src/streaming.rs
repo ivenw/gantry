@@ -138,7 +138,7 @@ pub fn mock_stream_message() -> StreamingResponse {
                     read_id.clone(),
                     ToolFunction::new(
                         "read".to_string(),
-                        serde_json::json!({ "path": "src/main.rs" }),
+                        serde_json::json!({ "path": "src/main.rs", "offset": 50, "limit": 100 }),
                     ),
                 ),
                 internal_call_id: read_id.clone(),

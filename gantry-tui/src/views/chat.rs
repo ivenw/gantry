@@ -74,9 +74,9 @@ impl StatefulWidget for ChatView<'_> {
                     let display_name = if name == "bash" { "$" } else { name.as_str() };
                     let formatted = raw_arg.map(|a| {
                         if name == "bash" {
-                            format_bash_command(a)
+                            format_bash_command(&a)
                         } else {
-                            a.to_string()
+                            a
                         }
                     });
                     // Count newlines in the full rendered line to get the true height.
@@ -212,9 +212,9 @@ impl StatefulWidget for ChatView<'_> {
                     let display_name = if name == "bash" { "$" } else { name.as_str() };
                     let formatted_arg: Option<String> = raw_arg.map(|a| {
                         if name == "bash" {
-                            format_bash_command(a)
+                            format_bash_command(&a)
                         } else {
-                            a.to_string()
+                            a
                         }
                     });
                     let line = match &formatted_arg {
@@ -276,14 +276,27 @@ impl StatefulWidget for ChatView<'_> {
 /// Returns a short display string for the most informative argument of a known tool.
 ///
 /// For bash commands the raw command string is returned; callers should pass it through
-/// [`format_bash_command`] for display.
-fn tool_display_arg<'a>(name: &str, args: &'a serde_json::Value) -> Option<&'a str> {
+/// [`format_bash_command`] for display. For the read tool, optional `offset` and `limit`
+/// values are appended as `@<offset>` and `+<limit>`.
+fn tool_display_arg(name: &str, args: &serde_json::Value) -> Option<String> {
     let key = match name {
         "bash" => "command",
         "read" | "write" | "edit" => "path",
         _ => return None,
     };
-    args.get(key)?.as_str()
+    let path = args.get(key)?.as_str()?;
+    if name == "read" {
+        let mut s = path.to_string();
+        if let Some(offset) = args.get("offset").and_then(|v| v.as_u64()) {
+            s.push_str(&format!(" @{}", offset));
+        }
+        if let Some(limit) = args.get("limit").and_then(|v| v.as_u64()) {
+            s.push_str(&format!(" +{}", limit));
+        }
+        Some(s)
+    } else {
+        Some(path.to_string())
+    }
 }
 
 /// Formats a bash command for display by splitting on unescaped `&&` operators.
