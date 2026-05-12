@@ -516,7 +516,8 @@ pub fn mock_chat() -> StreamingResponse {
     let reasoning_chunks: &[&str] = &[
         "The user wants me to look at the codebase. ",
         "I should start by reading the main entry point ",
-        "to understand the overall structure. ",
+        "to understand the overall structure.\n",
+        "\n",
         "Once I have a picture of the module layout ",
         "I can identify the specific file the user mentioned.",
     ];
@@ -527,6 +528,10 @@ pub fn mock_chat() -> StreamingResponse {
         "Let me start by reading `src/main.rs` ",
         "to understand the entry point, ",
         "then I'll follow the module tree from there.\n",
+        "\n",
+        "This is the second paragraph. ",
+        "It should only appear after the double newline above ",
+        "has been received by the renderer.\n",
     ];
 
     let edit_reasoning_chunks: &[&str] = &[
@@ -559,8 +564,10 @@ pub fn mock_chat() -> StreamingResponse {
     // Clone all string data up-front so the stream owns it.
     let reasoning_chunks: Vec<String> = reasoning_chunks.iter().map(|s| s.to_string()).collect();
     let text_chunks: Vec<String> = text_chunks.iter().map(|s| s.to_string()).collect();
-    let edit_reasoning_chunks: Vec<String> =
-        edit_reasoning_chunks.iter().map(|s| s.to_string()).collect();
+    let edit_reasoning_chunks: Vec<String> = edit_reasoning_chunks
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     let edit_text_chunks: Vec<String> = edit_text_chunks.iter().map(|s| s.to_string()).collect();
     let second_reasoning_chunks: Vec<String> = second_reasoning_chunks
         .iter()

@@ -392,6 +392,9 @@ pub enum ChatMessage {
         sender: Option<UserId>,
         content: String,
     },
+    Reasoning {
+        content: String,
+    },
     Assistant {
         content: String,
     },
@@ -426,6 +429,15 @@ pub struct ChatModel {
     pub streaming_message_idx: Option<usize>,
     /// False until the first content is appended — delays the assistant message from appearing.
     pub streaming_message_pushed: bool,
+    /// Byte offset into `streaming_content` up to which content has been synced to `messages`.
+    /// Tokens are only flushed to the visible message on paragraph boundaries (`\n\n`).
+    streaming_rendered_len: usize,
+    pub streaming_reasoning_content: Option<String>,
+    pub streaming_reasoning_message_idx: Option<usize>,
+    /// False until the first reasoning content is appended.
+    pub streaming_reasoning_pushed: bool,
+    /// Byte offset into `streaming_reasoning_content` up to which content has been synced to `messages`.
+    streaming_reasoning_rendered_len: usize,
     /// Number of lines scrolled up from the bottom (0 = pinned to bottom).
     pub scroll_offset: u16,
     /// True while the user has manually scrolled up; suppresses auto-scroll-to-bottom.
@@ -1008,6 +1020,11 @@ impl ChatModel {
             streaming_content: None,
             streaming_message_idx: None,
             streaming_message_pushed: false,
+            streaming_rendered_len: 0,
+            streaming_reasoning_content: None,
+            streaming_reasoning_message_idx: None,
+            streaming_reasoning_pushed: false,
+            streaming_reasoning_rendered_len: 0,
             scroll_offset: 0,
             user_is_scrolling: false,
         }
@@ -1016,15 +1033,8 @@ impl ChatModel {
     /// Ensures any accumulated streaming text is committed to `messages` before an
     /// interleaved event (tool call or new streaming turn) modifies the list.
     fn flush_streaming(&mut self) {
-        let Some(ref streaming) = self.streaming_content else {
-            return;
-        };
-        if !streaming.is_empty() && !self.streaming_message_pushed {
-            self.messages.push(ChatMessage::Assistant {
-                content: streaming.clone(),
-            });
-            self.streaming_message_pushed = true;
-        }
+        self.flush_reasoning_rendered();
+        self.flush_rendered();
     }
 
     /// Inserts a tool call row with `done: false`, flushing any pending assistant text first.
@@ -1063,28 +1073,137 @@ impl ChatModel {
     /// slot first so that text arriving before a tool result is not discarded.
     pub fn start_streaming_message(&mut self) {
         self.flush_streaming();
+        self.streaming_reasoning_content = Some(String::new());
+        self.streaming_reasoning_message_idx = None;
+        self.streaming_reasoning_pushed = false;
+        self.streaming_reasoning_rendered_len = 0;
         self.streaming_content = Some(String::new());
-        self.streaming_message_idx = Some(self.messages.len());
+        self.streaming_message_idx = None;
         self.streaming_message_pushed = false;
+        self.streaming_rendered_len = 0;
     }
 
-    /// Appends `content` to the current streaming turn, pushing the assistant entry on first call.
+    /// Appends `content` to the current reasoning turn, syncing to the visible message only
+    /// at paragraph boundaries (`\n\n`). The message slot is not pushed until the first flush.
+    pub fn append_to_reasoning(&mut self, content: &str) {
+        let Some(ref mut streaming) = self.streaming_reasoning_content else {
+            return;
+        };
+        streaming.push_str(content);
+
+        let unrendered = &streaming[self.streaming_reasoning_rendered_len..];
+        let flush_end = match unrendered.rfind("\n\n") {
+            Some(pos) => self.streaming_reasoning_rendered_len + pos + 2,
+            None => return,
+        };
+
+        if flush_end <= self.streaming_reasoning_rendered_len {
+            return;
+        }
+
+        let pending = streaming[self.streaming_reasoning_rendered_len..flush_end].to_owned();
+        self.streaming_reasoning_rendered_len = flush_end;
+
+        if !self.streaming_reasoning_pushed {
+            self.messages
+                .push(ChatMessage::Reasoning { content: pending });
+            self.streaming_reasoning_message_idx = Some(self.messages.len() - 1);
+            self.streaming_reasoning_pushed = true;
+        } else if let Some(idx) = self.streaming_reasoning_message_idx
+            && let Some(ChatMessage::Reasoning {
+                content: msg_content,
+            }) = self.messages.get_mut(idx)
+        {
+            msg_content.push_str(&pending);
+        }
+    }
+
+    /// Syncs all buffered reasoning content to the visible message entry.
+    fn flush_reasoning_rendered(&mut self) {
+        let Some(ref streaming) = self.streaming_reasoning_content else {
+            return;
+        };
+        if self.streaming_reasoning_rendered_len >= streaming.len() {
+            return;
+        }
+        let pending = streaming[self.streaming_reasoning_rendered_len..].to_owned();
+        self.streaming_reasoning_rendered_len = streaming.len();
+
+        if !self.streaming_reasoning_pushed {
+            self.messages
+                .push(ChatMessage::Reasoning { content: pending });
+            self.streaming_reasoning_message_idx = Some(self.messages.len() - 1);
+            self.streaming_reasoning_pushed = true;
+        } else if let Some(idx) = self.streaming_reasoning_message_idx
+            && let Some(ChatMessage::Reasoning {
+                content: msg_content,
+            }) = self.messages.get_mut(idx)
+        {
+            msg_content.push_str(&pending);
+        }
+    }
+
+    /// Appends `content` to the current streaming turn, syncing to the visible message only
+    /// at paragraph boundaries (`\n\n`) to reduce render churn. The message slot is not pushed
+    /// until the first flush so that an empty `<<` never appears.
     pub fn append_to_streaming(&mut self, content: &str) {
         let Some(ref mut streaming) = self.streaming_content else {
             return;
         };
-        if !self.streaming_message_pushed {
-            self.messages.push(ChatMessage::Assistant {
-                content: String::new(),
-            });
-            self.streaming_message_pushed = true;
-        }
         streaming.push_str(content);
-        if let Some(idx) = self.streaming_message_idx
-            && let Some(ChatMessage::Assistant { content: msg_content }) =
-                self.messages.get_mut(idx)
+
+        // Flush up to the end of the last complete paragraph. Hold back content that hasn't
+        // reached a paragraph boundary yet — it will be flushed by finish_streaming.
+        let unrendered = &streaming[self.streaming_rendered_len..];
+        let flush_end = match unrendered.rfind("\n\n") {
+            Some(pos) => self.streaming_rendered_len + pos + 2,
+            None => return,
+        };
+
+        if flush_end <= self.streaming_rendered_len {
+            return;
+        }
+
+        let pending = streaming[self.streaming_rendered_len..flush_end].to_owned();
+        self.streaming_rendered_len = flush_end;
+
+        if !self.streaming_message_pushed {
+            self.messages
+                .push(ChatMessage::Assistant { content: pending });
+            self.streaming_message_idx = Some(self.messages.len() - 1);
+            self.streaming_message_pushed = true;
+        } else if let Some(idx) = self.streaming_message_idx
+            && let Some(ChatMessage::Assistant {
+                content: msg_content,
+            }) = self.messages.get_mut(idx)
         {
-            msg_content.push_str(content);
+            msg_content.push_str(&pending);
+        }
+    }
+
+    /// Syncs all buffered streaming content to the visible message entry, pushing the message
+    /// slot if it hasn't been created yet.
+    fn flush_rendered(&mut self) {
+        let Some(ref streaming) = self.streaming_content else {
+            return;
+        };
+        if self.streaming_rendered_len >= streaming.len() {
+            return;
+        }
+        let pending = streaming[self.streaming_rendered_len..].to_owned();
+        self.streaming_rendered_len = streaming.len();
+
+        if !self.streaming_message_pushed {
+            self.messages
+                .push(ChatMessage::Assistant { content: pending });
+            self.streaming_message_idx = Some(self.messages.len() - 1);
+            self.streaming_message_pushed = true;
+        } else if let Some(idx) = self.streaming_message_idx
+            && let Some(ChatMessage::Assistant {
+                content: msg_content,
+            }) = self.messages.get_mut(idx)
+        {
+            msg_content.push_str(&pending);
         }
     }
 
@@ -1119,25 +1238,43 @@ impl ChatModel {
         } else {
             None
         };
+        self.streaming_reasoning_content = None;
+        self.streaming_reasoning_message_idx = None;
+        self.streaming_reasoning_pushed = false;
+        self.streaming_reasoning_rendered_len = 0;
         self.streaming_content = None;
         self.streaming_message_idx = None;
         self.streaming_message_pushed = false;
+        self.streaming_rendered_len = 0;
         restored
     }
 
-    /// Finalizes the current streaming turn, clearing all streaming state.
+    /// Finalizes the current streaming turn, flushing any remaining buffered content and
+    /// clearing all streaming state.
     pub fn finish_streaming(&mut self) {
+        self.flush_reasoning_rendered();
+        self.streaming_reasoning_content = None;
+        self.streaming_reasoning_message_idx = None;
+        self.streaming_reasoning_pushed = false;
+        self.streaming_reasoning_rendered_len = 0;
+        self.flush_rendered();
         self.streaming_content = None;
         self.streaming_message_idx = None;
         self.streaming_message_pushed = false;
+        self.streaming_rendered_len = 0;
     }
 
     /// Clears all chat state, resetting to a fresh empty session.
     pub fn reset(&mut self) {
         self.messages.clear();
+        self.streaming_reasoning_content = None;
+        self.streaming_reasoning_message_idx = None;
+        self.streaming_reasoning_pushed = false;
+        self.streaming_reasoning_rendered_len = 0;
         self.streaming_content = None;
         self.streaming_message_idx = None;
         self.streaming_message_pushed = false;
+        self.streaming_rendered_len = 0;
         self.scroll_offset = 0;
         self.user_is_scrolling = false;
     }

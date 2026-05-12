@@ -4,8 +4,8 @@ use gantry_core::{
     StreamingError, Usage,
 };
 
-use crate::model::ChatMessage;
 use crate::commands::KnownCommand;
+use crate::model::ChatMessage;
 
 pub enum Msg {
     // Input

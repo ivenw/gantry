@@ -9,8 +9,8 @@ use crate::config::{
     ApiKeyCredential, CortecsProviderConfig, Credential, OllamaProviderConfig,
     OpenAiCompletionsProviderConfig, OpenAiResponsesProviderConfig,
 };
-use crate::provider::agent::BoxedAgent;
 use crate::provider::ModelId;
+use crate::provider::agent::BoxedAgent;
 use crate::providers::cortecs;
 
 /// A constructed, ready-to-use provider client that can list models and create agents.

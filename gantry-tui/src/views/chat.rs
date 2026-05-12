@@ -9,6 +9,7 @@ use ratatui::{
 };
 
 const USER_PREFIX: &str = ">> ";
+const REASONING_PREFIX: &str = "** ";
 const ASSISTANT_PREFIX: &str = "<< ";
 const TOOL_CALL_PREFIX: &str = ".. ";
 
@@ -70,6 +71,7 @@ impl StatefulWidget for ChatView<'_> {
                         USER_PREFIX.len()
                             + sender.as_ref().map(|s| s.as_str().len() + 2).unwrap_or(0)
                     }
+                    ChatMessage::Reasoning { .. } => REASONING_PREFIX.len(),
                     ChatMessage::Assistant { .. } => ASSISTANT_PREFIX.len(),
                     ChatMessage::ToolCall { name, .. } => TOOL_CALL_PREFIX.len() + name.len() + 1,
                 };
@@ -128,6 +130,26 @@ impl StatefulWidget for ChatView<'_> {
                     );
                     Paragraph::new(Text::raw(content))
                         .style(Style::default().fg(ratatui::style::Color::White))
+                        .wrap(ratatui::widgets::Wrap { trim: false })
+                        .scroll((clip_top, 0))
+                        .render(text_area, buf);
+                }
+                ChatMessage::Reasoning { .. } => {
+                    let text_width = area.width.saturating_sub(REASONING_PREFIX.len() as u16);
+                    let text_area = Rect::new(
+                        area.x + REASONING_PREFIX.len() as u16,
+                        screen_y,
+                        text_width,
+                        visible_lines,
+                    );
+                    buf.set_string(
+                        area.x,
+                        screen_y,
+                        REASONING_PREFIX,
+                        Style::default().fg(ratatui::style::Color::DarkGray),
+                    );
+                    Paragraph::new(Text::raw(content))
+                        .style(Style::default().fg(ratatui::style::Color::DarkGray))
                         .wrap(ratatui::widgets::Wrap { trim: false })
                         .scroll((clip_top, 0))
                         .render(text_area, buf);
@@ -205,7 +227,9 @@ impl StatefulWidget for ChatView<'_> {
 
 fn msg_content(message: &ChatMessage) -> &str {
     match message {
-        ChatMessage::User { content, .. } | ChatMessage::Assistant { content } => content,
+        ChatMessage::User { content, .. }
+        | ChatMessage::Reasoning { content }
+        | ChatMessage::Assistant { content } => content.trim(),
         ChatMessage::ToolCall { .. } => "",
     }
 }

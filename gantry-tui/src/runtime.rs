@@ -267,9 +267,7 @@ impl Runtime {
             let mut response = gantry_core::app::mock_chat();
             is_streaming.store(true, Ordering::SeqCst);
             while let Some(item) = response.stream.next().await {
-                if cancel.load(Ordering::SeqCst)
-                    || tx.send(Msg::StreamItem(item)).await.is_err()
-                {
+                if cancel.load(Ordering::SeqCst) || tx.send(Msg::StreamItem(item)).await.is_err() {
                     break;
                 }
             }
@@ -491,8 +489,7 @@ impl Runtime {
                             drop(guard);
                             let _ = tx
                                 .send(Msg::SetStatus(
-                                    "no context window data yet — send a message first"
-                                        .to_string(),
+                                    "no context window data yet — send a message first".to_string(),
                                 ))
                                 .await;
                         }

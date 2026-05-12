@@ -1,8 +1,11 @@
 use crossterm::event::{KeyCode, KeyModifiers};
-use gantry_core::{ChatStreamItem, MultiTurnStreamItem, StreamedAssistantContent, StreamedUserContent, StreamingError};
+use gantry_core::{
+    ChatStreamItem, MultiTurnStreamItem, ReasoningContent, StreamedAssistantContent,
+    StreamedUserContent, StreamingError,
+};
 
-use crate::message::Msg;
 use crate::commands::KnownCommand;
+use crate::message::Msg;
 use crate::model::{
     CommandEntry, CopilotAuthKind, InputMode, Model, ProviderWizard, ProvidersSubView,
     WizardProviderKind, branch_rows, prev_char_boundary,
@@ -20,7 +23,7 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             }
             None
         }
-Msg::StreamError(e) => {
+        Msg::StreamError(e) => {
             if let Some(text) = model.chat.cancel_streaming() {
                 model.input.set_text(text);
             }
@@ -118,6 +121,25 @@ fn handle_stream_item(
     item: Result<ChatStreamItem, StreamingError>,
 ) -> Option<Msg> {
     match item {
+        Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(r))) => {
+            let text: String = r
+                .content
+                .iter()
+                .filter_map(|c| {
+                    if let ReasoningContent::Text { text, .. } = c {
+                        Some(text.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if !text.is_empty() {
+                model.chat.append_to_reasoning(&text);
+                if !model.chat.user_is_scrolling {
+                    model.chat.scroll_offset = 0;
+                }
+            }
+        }
         Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text))) => {
             model.chat.append_to_streaming(&text.text);
             if !model.chat.user_is_scrolling {
@@ -128,7 +150,9 @@ fn handle_stream_item(
             tool_call,
             internal_call_id,
         })) => {
-            model.chat.push_tool_call(internal_call_id, tool_call.function.name);
+            model
+                .chat
+                .push_tool_call(internal_call_id, tool_call.function.name);
         }
         // A tool result closes the pending tool call and opens a fresh streaming slot so the
         // next assistant text turn renders as a separate message.

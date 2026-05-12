@@ -28,6 +28,7 @@ pub use provider::registry::ProviderClientRegistry;
 pub use provider::{ModelId, ModelSelection, ProviderAlias};
 pub use resource_loader::{Skill, SkillMetadata};
 pub use rig::agent::{MultiTurnStreamItem, StreamingError};
+pub use rig::completion::message::ReasoningContent;
 pub use rig::streaming::{StreamedAssistantContent, StreamedUserContent};
 
 pub use fs::FsSessionRegistry;
