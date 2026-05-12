@@ -424,8 +424,7 @@ pub struct ChatModel {
     pub messages: Vec<ChatMessage>,
     pub streaming_content: Option<String>,
     pub streaming_message_idx: Option<usize>,
-    pub streaming_buffer: String,
-    /// False until the first content is flushed — delays the assistant message from appearing.
+    /// False until the first content is appended — delays the assistant message from appearing.
     pub streaming_message_pushed: bool,
     /// Number of lines scrolled up from the bottom (0 = pinned to bottom).
     pub scroll_offset: u16,
@@ -1008,15 +1007,29 @@ impl ChatModel {
             messages: Vec::new(),
             streaming_content: None,
             streaming_message_idx: None,
-            streaming_buffer: String::new(),
             streaming_message_pushed: false,
             scroll_offset: 0,
             user_is_scrolling: false,
         }
     }
 
-    /// Inserts a tool call row with `done: false`. Returns the message index for later lookup.
+    /// Ensures any accumulated streaming text is committed to `messages` before an
+    /// interleaved event (tool call or new streaming turn) modifies the list.
+    fn flush_streaming(&mut self) {
+        let Some(ref streaming) = self.streaming_content else {
+            return;
+        };
+        if !streaming.is_empty() && !self.streaming_message_pushed {
+            self.messages.push(ChatMessage::Assistant {
+                content: streaming.clone(),
+            });
+            self.streaming_message_pushed = true;
+        }
+    }
+
+    /// Inserts a tool call row with `done: false`, flushing any pending assistant text first.
     pub fn push_tool_call(&mut self, id: String, name: String) {
+        self.flush_streaming();
         self.messages.push(ChatMessage::ToolCall {
             id,
             name,
@@ -1046,37 +1059,32 @@ impl ChatModel {
         });
     }
 
+    /// Begins a new assistant streaming slot. Flushes any buffered text from the previous
+    /// slot first so that text arriving before a tool result is not discarded.
     pub fn start_streaming_message(&mut self) {
+        self.flush_streaming();
         self.streaming_content = Some(String::new());
         self.streaming_message_idx = Some(self.messages.len());
         self.streaming_message_pushed = false;
-        // The actual message is not pushed until the first content is flushed,
-        // so the assistant prefix doesn't appear before any text arrives.
     }
 
+    /// Appends `content` to the current streaming turn, pushing the assistant entry on first call.
     pub fn append_to_streaming(&mut self, content: &str) {
-        if self.streaming_content.is_none() {
+        let Some(ref mut streaming) = self.streaming_content else {
             return;
+        };
+        if !self.streaming_message_pushed {
+            self.messages.push(ChatMessage::Assistant {
+                content: String::new(),
+            });
+            self.streaming_message_pushed = true;
         }
-        self.streaming_buffer.push_str(content);
-        while let Some(newline_idx) = self.streaming_buffer.find('\n') {
-            let line: String = self.streaming_buffer.drain(..=newline_idx).collect();
-            if let Some(ref mut streaming) = self.streaming_content {
-                // Push the message on first flush.
-                if !self.streaming_message_pushed {
-                    self.messages.push(ChatMessage::Assistant {
-                        content: String::new(),
-                    });
-                    self.streaming_message_pushed = true;
-                }
-                streaming.push_str(&line);
-                if let Some(idx) = self.streaming_message_idx
-                    && idx < self.messages.len()
-                    && let ChatMessage::Assistant { ref mut content } = self.messages[idx]
-                {
-                    content.push_str(&line);
-                }
-            }
+        streaming.push_str(content);
+        if let Some(idx) = self.streaming_message_idx
+            && let Some(ChatMessage::Assistant { content: msg_content }) =
+                self.messages.get_mut(idx)
+        {
+            msg_content.push_str(content);
         }
     }
 
@@ -1113,40 +1121,22 @@ impl ChatModel {
         };
         self.streaming_content = None;
         self.streaming_message_idx = None;
-        self.streaming_buffer.clear();
         self.streaming_message_pushed = false;
         restored
     }
 
+    /// Finalizes the current streaming turn, clearing all streaming state.
     pub fn finish_streaming(&mut self) {
-        if !self.streaming_buffer.is_empty()
-            && let Some(ref mut streaming) = self.streaming_content
-        {
-            if !self.streaming_message_pushed {
-                self.messages.push(ChatMessage::Assistant {
-                    content: String::new(),
-                });
-                self.streaming_message_pushed = true;
-            }
-            streaming.push_str(&self.streaming_buffer);
-            if let Some(idx) = self.streaming_message_idx
-                && idx < self.messages.len()
-                && let ChatMessage::Assistant { ref mut content } = self.messages[idx]
-            {
-                content.push_str(&self.streaming_buffer);
-            }
-        }
         self.streaming_content = None;
         self.streaming_message_idx = None;
-        self.streaming_buffer.clear();
         self.streaming_message_pushed = false;
     }
 
+    /// Clears all chat state, resetting to a fresh empty session.
     pub fn reset(&mut self) {
         self.messages.clear();
         self.streaming_content = None;
         self.streaming_message_idx = None;
-        self.streaming_buffer.clear();
         self.streaming_message_pushed = false;
         self.scroll_offset = 0;
         self.user_is_scrolling = false;

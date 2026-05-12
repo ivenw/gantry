@@ -11,6 +11,7 @@ async-trait = "0.1"
 jiff = { version = "0.2", features = ["serde"] }
 dirs.workspace = true
 git2.workspace = true
+async-stream = "0.3"
 futures = "0.3"
 gantry-tools = { path = "../gantry-tools" }
 rig = { package = "rig-core", version = "0.36.0" }

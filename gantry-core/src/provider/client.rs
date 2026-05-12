@@ -10,7 +10,7 @@ use crate::config::{
     OpenAiCompletionsProviderConfig, OpenAiResponsesProviderConfig,
 };
 use crate::provider::agent::BoxedAgent;
-use crate::provider::{ModelId, PromptHook};
+use crate::provider::ModelId;
 use crate::providers::cortecs;
 
 /// A constructed, ready-to-use provider client that can list models and create agents.
@@ -94,49 +94,46 @@ impl ProviderClient {
         }
     }
 
-    /// Builds a [`BoxedAgent`] for the given model alias, optional preamble, hook, and tools.
+    /// Builds a [`BoxedAgent`] for the given model alias, optional preamble, and tools.
     pub fn agent(
         &self,
         model: &ModelId,
         preamble: Option<&str>,
-        hook: PromptHook,
         tools: Vec<Box<dyn ToolDyn>>,
     ) -> Result<BoxedAgent> {
         let agent = match self {
             ProviderClient::Ollama(client) => {
-                configure_agent(client.agent(model.as_str()), hook, preamble, tools)
+                configure_agent(client.agent(model.as_str()), preamble, tools)
             }
             ProviderClient::GitHubCopilot { client, .. } => {
-                configure_agent(client.agent(model.as_str()), hook, preamble, tools)
+                configure_agent(client.agent(model.as_str()), preamble, tools)
             }
             ProviderClient::OpenAiCompletions(client) => {
-                configure_agent(client.agent(model.as_str()), hook, preamble, tools)
+                configure_agent(client.agent(model.as_str()), preamble, tools)
             }
             ProviderClient::OpenAiResponses(client) => {
-                configure_agent(client.agent(model.as_str()), hook, preamble, tools)
+                configure_agent(client.agent(model.as_str()), preamble, tools)
             }
             ProviderClient::Cortecs(client) => {
-                configure_agent(client.agent(model.as_str()), hook, preamble, tools)
+                configure_agent(client.agent(model.as_str()), preamble, tools)
             }
         };
         Ok(agent)
     }
 }
 
-/// Applies the shared configuration — hook, preamble, and tools — to any provider's agent builder,
+/// Applies the shared configuration — preamble and tools — to any provider's agent builder,
 /// returning a type-erased [`BoxedAgent`].
-fn configure_agent<M, P>(
+fn configure_agent<M>(
     builder: rig::agent::AgentBuilder<M>,
-    hook: P,
     preamble: Option<&str>,
     tools: Vec<Box<dyn ToolDyn>>,
 ) -> BoxedAgent
 where
     M: rig::completion::CompletionModel + Send + Sync + 'static,
     M::StreamingResponse: rig::wasm_compat::WasmCompatSend,
-    P: rig::agent::PromptHook<M> + Send + Sync + 'static,
 {
-    let mut b = builder.hook(hook).tools(tools);
+    let mut b = builder.tools(tools);
     if let Some(p) = preamble {
         b = b.preamble(p);
     }

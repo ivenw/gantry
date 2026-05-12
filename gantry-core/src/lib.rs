@@ -23,13 +23,12 @@ pub use dirs::{GlobalGantryDir, ProjectRootDir};
 pub use input::InputToken;
 pub use message::{Message, UserId};
 pub use metrics::{CharCounts, ContextWindow, Usage};
-pub use provider::HookEvent;
 pub use provider::agent::{ChatStream, ChatStreamItem};
 pub use provider::registry::ProviderClientRegistry;
 pub use provider::{ModelId, ModelSelection, ProviderAlias};
 pub use resource_loader::{Skill, SkillMetadata};
 pub use rig::agent::{MultiTurnStreamItem, StreamingError};
-pub use rig::streaming::StreamedAssistantContent;
+pub use rig::streaming::{StreamedAssistantContent, StreamedUserContent};
 
 pub use fs::FsSessionRegistry;
 pub use session::{Branch, NodeId, Session, SessionId, SessionInfo, SessionRegistry, SessionTree};

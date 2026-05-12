@@ -1,5 +1,5 @@
 use crossterm::event::{KeyCode, KeyModifiers};
-use gantry_core::{ChatStreamItem, MultiTurnStreamItem, StreamedAssistantContent, StreamingError};
+use gantry_core::{ChatStreamItem, MultiTurnStreamItem, StreamedAssistantContent, StreamedUserContent, StreamingError};
 
 use crate::message::Msg;
 use crate::commands::KnownCommand;
@@ -20,15 +20,7 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             }
             None
         }
-        Msg::ToolCallStarted { name, id } => {
-            model.chat.push_tool_call(id, name);
-            None
-        }
-        Msg::ToolCallFinished { id } => {
-            model.chat.finish_tool_call(&id);
-            None
-        }
-        Msg::StreamError(e) => {
+Msg::StreamError(e) => {
             if let Some(text) = model.chat.cancel_streaming() {
                 model.input.set_text(text);
             }
@@ -131,6 +123,21 @@ fn handle_stream_item(
             if !model.chat.user_is_scrolling {
                 model.chat.scroll_offset = 0;
             }
+        }
+        Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ToolCall {
+            tool_call,
+            internal_call_id,
+        })) => {
+            model.chat.push_tool_call(internal_call_id, tool_call.function.name);
+        }
+        // A tool result closes the pending tool call and opens a fresh streaming slot so the
+        // next assistant text turn renders as a separate message.
+        Ok(MultiTurnStreamItem::StreamUserItem(StreamedUserContent::ToolResult {
+            internal_call_id,
+            ..
+        })) => {
+            model.chat.finish_tool_call(&internal_call_id);
+            model.chat.start_streaming_message();
         }
         Ok(_) => {}
         Err(e) => {

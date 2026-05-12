@@ -222,7 +222,6 @@ impl Runtime {
         let app = self.app.clone();
         let app_ref = self.app.clone();
         let is_streaming = self.is_streaming.clone();
-
         let cancel = self.cancel_stream.clone();
         cancel.store(false, Ordering::SeqCst);
 
@@ -231,24 +230,8 @@ impl Runtime {
                 Err(e) => {
                     let _ = tx.send(Msg::StreamError(e.to_string())).await;
                 }
-                Ok((mut response, mut hook_rx)) => {
+                Ok(mut response) => {
                     is_streaming.store(true, Ordering::SeqCst);
-                    let hook_tx = tx.clone();
-                    tokio::spawn(async move {
-                        while let Some(event) = hook_rx.recv().await {
-                            let msg = match event {
-                                gantry_core::HookEvent::ToolCallStarted { name, id } => {
-                                    Msg::ToolCallStarted { name, id }
-                                }
-                                gantry_core::HookEvent::ToolCallFinished { id } => {
-                                    Msg::ToolCallFinished { id }
-                                }
-                            };
-                            if hook_tx.send(msg).await.is_err() {
-                                break;
-                            }
-                        }
-                    });
                     while let Some(item) = response.stream.next().await {
                         if cancel.load(Ordering::SeqCst)
                             || tx.send(Msg::StreamItem(item)).await.is_err()
@@ -264,6 +247,35 @@ impl Runtime {
                     let _ = tx.send(Msg::StreamDone).await;
                 }
             }
+        });
+        self.stream_task = Some(task);
+    }
+
+    /// Starts a mock streaming response for testing the TUI rendering pipeline.
+    fn spawn_mock_chat(&mut self) {
+        self.cancel_stream.store(true, Ordering::SeqCst);
+        if let Some(old) = self.stream_task.take() {
+            old.abort();
+        }
+
+        let tx = self.msg_tx.clone();
+        let is_streaming = self.is_streaming.clone();
+        let cancel = self.cancel_stream.clone();
+        cancel.store(false, Ordering::SeqCst);
+
+        let task = self.rt.spawn(async move {
+            let mut response = gantry_core::app::mock_chat();
+            is_streaming.store(true, Ordering::SeqCst);
+            while let Some(item) = response.stream.next().await {
+                if cancel.load(Ordering::SeqCst)
+                    || tx.send(Msg::StreamItem(item)).await.is_err()
+                {
+                    break;
+                }
+            }
+            response.commit().await;
+            is_streaming.store(false, Ordering::SeqCst);
+            let _ = tx.send(Msg::StreamDone).await;
         });
         self.stream_task = Some(task);
     }
@@ -459,6 +471,10 @@ impl Runtime {
                         }
                     }
                 });
+            }
+            KnownCommand::Debug => {
+                self.model.chat.start_streaming_message();
+                self.spawn_mock_chat();
             }
             KnownCommand::Usage => {
                 let tx = self.msg_tx.clone();

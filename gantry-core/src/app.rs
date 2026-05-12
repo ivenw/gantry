@@ -12,12 +12,15 @@ use nucleo_matcher::{
 use crate::input::{InputToken, build_user_message};
 use crate::message::Message;
 use anyhow::Result;
+use async_stream::stream;
 use futures::Stream;
-use rig::agent::{MultiTurnStreamItem, StreamingError};
-use rig::message::{AssistantContent, UserContent};
-use rig::streaming::StreamedAssistantContent;
+use rig::agent::{FinalResponse, MultiTurnStreamItem, StreamingError};
+use rig::message::{AssistantContent, Reasoning, ToolCall, ToolFunction, UserContent};
+use rig::streaming::{StreamedAssistantContent, StreamedUserContent};
+use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::sync::oneshot;
+use tokio::time::sleep;
 
 use crate::config::{ProjectConfig, ProviderConfig};
 use crate::dirs::{GlobalGantryDir, ProjectRootDir};
@@ -25,7 +28,7 @@ use crate::fs::FsSessionRegistry;
 use crate::metrics::{CharCounts, ContextWindow, Usage};
 use crate::provider::agent::ChatStream;
 use crate::provider::registry::ProviderClientRegistry;
-use crate::provider::{HookEvent, ModelId, ModelSelection, PromptHook};
+use crate::provider::{ModelId, ModelSelection};
 use crate::resource_loader::{Skill, load_context_files, load_skills};
 use crate::session::registry::SessionRegistry;
 use crate::session::{NodeId, Session, SessionId, SessionTree};
@@ -495,6 +498,230 @@ impl App {
     }
 }
 
+/// Produces a fake streaming response for exercising the TUI rendering pipeline.
+///
+/// Emits a scripted sequence of reasoning tokens, text, two tool calls with their
+/// results, and a final text turn, with realistic per-item delays to simulate token
+/// streaming and tool execution latency.
+pub fn mock_chat() -> StreamingResponse {
+    let read_id = uuid::Uuid::new_v4().to_string();
+    let edit_id = uuid::Uuid::new_v4().to_string();
+    let bash_id = uuid::Uuid::new_v4().to_string();
+
+    // Token delay — simulates the inter-token gap during LLM streaming.
+    let token_ms = Duration::from_millis(200);
+    // Slightly longer gap between reasoning chunks to feel deliberate.
+    let reasoning_ms = Duration::from_millis(200);
+
+    let reasoning_chunks: &[&str] = &[
+        "The user wants me to look at the codebase. ",
+        "I should start by reading the main entry point ",
+        "to understand the overall structure. ",
+        "Once I have a picture of the module layout ",
+        "I can identify the specific file the user mentioned.",
+    ];
+
+    let text_chunks: &[&str] = &[
+        "Sure, ",
+        "I'll take a look at the codebase for you.\n",
+        "Let me start by reading `src/main.rs` ",
+        "to understand the entry point, ",
+        "then I'll follow the module tree from there.\n",
+    ];
+
+    let edit_reasoning_chunks: &[&str] = &[
+        "The main function just prints hello. ",
+        "I should update it to print a proper greeting ",
+        "with the program name included.",
+    ];
+
+    let edit_text_chunks: &[&str] = &[
+        "The entry point is simple. ",
+        "I'll update the greeting to be more descriptive.\n",
+    ];
+
+    let second_reasoning_chunks: &[&str] = &[
+        "The edit looks good. ",
+        "Now I should run the tests to verify correctness.",
+    ];
+
+    let pre_bash_text_chunks: &[&str] = &[
+        "Now let me run the tests ",
+        "to make sure nothing is broken.\n",
+    ];
+
+    let final_text_chunks: &[&str] = &[
+        "All tests pass. ",
+        "The implementation looks correct.\n",
+        "Anything else I can help with?",
+    ];
+
+    // Clone all string data up-front so the stream owns it.
+    let reasoning_chunks: Vec<String> = reasoning_chunks.iter().map(|s| s.to_string()).collect();
+    let text_chunks: Vec<String> = text_chunks.iter().map(|s| s.to_string()).collect();
+    let edit_reasoning_chunks: Vec<String> =
+        edit_reasoning_chunks.iter().map(|s| s.to_string()).collect();
+    let edit_text_chunks: Vec<String> = edit_text_chunks.iter().map(|s| s.to_string()).collect();
+    let second_reasoning_chunks: Vec<String> = second_reasoning_chunks
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let pre_bash_text_chunks: Vec<String> =
+        pre_bash_text_chunks.iter().map(|s| s.to_string()).collect();
+    let final_text_chunks: Vec<String> = final_text_chunks.iter().map(|s| s.to_string()).collect();
+
+    let chat_stream: crate::provider::agent::ChatStream = Box::pin(stream! {
+        for chunk in &reasoning_chunks {
+            sleep(reasoning_ms).await;
+            yield Ok(MultiTurnStreamItem::StreamAssistantItem(
+                StreamedAssistantContent::Reasoning(Reasoning::new(chunk.as_str())),
+            ));
+        }
+
+        for chunk in &text_chunks {
+            sleep(token_ms).await;
+            yield Ok(MultiTurnStreamItem::StreamAssistantItem(
+                StreamedAssistantContent::Text(rig::message::Text { text: chunk.clone() }),
+            ));
+        }
+
+        yield Ok(MultiTurnStreamItem::StreamAssistantItem(
+            StreamedAssistantContent::ToolCall {
+                tool_call: ToolCall::new(
+                    read_id.clone(),
+                    ToolFunction::new(
+                        "read".to_string(),
+                        serde_json::json!({ "path": "src/main.rs" }),
+                    ),
+                ),
+                internal_call_id: read_id.clone(),
+            },
+        ));
+
+        // read: fast tool, ~100ms
+        sleep(Duration::from_millis(100)).await;
+        yield Ok(MultiTurnStreamItem::StreamUserItem(
+            StreamedUserContent::tool_result(
+                rig::message::ToolResult {
+                    id: read_id.clone(),
+                    call_id: None,
+                    content: rig::OneOrMany::one(rig::message::ToolResultContent::text(
+                        "fn main() { println!(\"hello\"); }",
+                    )),
+                },
+                read_id,
+            ),
+        ));
+
+        for chunk in &edit_reasoning_chunks {
+            sleep(reasoning_ms).await;
+            yield Ok(MultiTurnStreamItem::StreamAssistantItem(
+                StreamedAssistantContent::Reasoning(Reasoning::new(chunk.as_str())),
+            ));
+        }
+
+        for chunk in &edit_text_chunks {
+            sleep(token_ms).await;
+            yield Ok(MultiTurnStreamItem::StreamAssistantItem(
+                StreamedAssistantContent::Text(rig::message::Text { text: chunk.clone() }),
+            ));
+        }
+
+        yield Ok(MultiTurnStreamItem::StreamAssistantItem(
+            StreamedAssistantContent::ToolCall {
+                tool_call: ToolCall::new(
+                    edit_id.clone(),
+                    ToolFunction::new(
+                        "edit".to_string(),
+                        serde_json::json!({
+                            "path": "src/main.rs",
+                            "old_string": "fn main() { println!(\"hello\"); }",
+                            "new_string": "fn main() {\n    println!(\"gantry: hello from main\");\n}"
+                        }),
+                    ),
+                ),
+                internal_call_id: edit_id.clone(),
+            },
+        ));
+
+        // edit: medium tool, ~800ms
+        sleep(Duration::from_millis(800)).await;
+        yield Ok(MultiTurnStreamItem::StreamUserItem(
+            StreamedUserContent::tool_result(
+                rig::message::ToolResult {
+                    id: edit_id.clone(),
+                    call_id: None,
+                    content: rig::OneOrMany::one(rig::message::ToolResultContent::text(
+                        "Edit applied successfully.",
+                    )),
+                },
+                edit_id,
+            ),
+        ));
+
+        for chunk in &second_reasoning_chunks {
+            sleep(reasoning_ms).await;
+            yield Ok(MultiTurnStreamItem::StreamAssistantItem(
+                StreamedAssistantContent::Reasoning(Reasoning::new(chunk.as_str())),
+            ));
+        }
+
+        for chunk in &pre_bash_text_chunks {
+            sleep(token_ms).await;
+            yield Ok(MultiTurnStreamItem::StreamAssistantItem(
+                StreamedAssistantContent::Text(rig::message::Text { text: chunk.clone() }),
+            ));
+        }
+
+        yield Ok(MultiTurnStreamItem::StreamAssistantItem(
+            StreamedAssistantContent::ToolCall {
+                tool_call: ToolCall::new(
+                    bash_id.clone(),
+                    ToolFunction::new(
+                        "bash".to_string(),
+                        serde_json::json!({ "command": "cargo test" }),
+                    ),
+                ),
+                internal_call_id: bash_id.clone(),
+            },
+        ));
+
+        // bash: slow tool, ~3s
+        sleep(Duration::from_millis(3000)).await;
+        yield Ok(MultiTurnStreamItem::StreamUserItem(
+            StreamedUserContent::tool_result(
+                rig::message::ToolResult {
+                    id: bash_id.clone(),
+                    call_id: None,
+                    content: rig::OneOrMany::one(rig::message::ToolResultContent::text(
+                        "test result: ok. 3 passed.",
+                    )),
+                },
+                bash_id,
+            ),
+        ));
+
+        for chunk in &final_text_chunks {
+            sleep(token_ms).await;
+            yield Ok(MultiTurnStreamItem::StreamAssistantItem(
+                StreamedAssistantContent::Text(rig::message::Text { text: chunk.clone() }),
+            ));
+        }
+
+        yield Ok(MultiTurnStreamItem::FinalResponse(FinalResponse::empty()));
+    });
+
+    // Use a no-op commit: nothing is persisted to session history.
+    let (commit_tx, _commit_rx) = oneshot::channel::<(String, Option<RigUsage>)>();
+    let buffering = Box::pin(BufferingStream::new(chat_stream, commit_tx));
+    let commit_future = async move {};
+
+    StreamingResponse {
+        stream: buffering,
+        commit_future: Box::pin(commit_future),
+    }
+}
+
 /// A single result from [`App::search_paths`].
 pub struct PathSearchResult {
     pub path: PathBuf,
@@ -535,25 +762,19 @@ impl StreamingResponse {
 
 /// Expands `tokens` into a user message, persists it, then streams the agent response.
 ///
-/// Returns a [`StreamingResponse`] and a receiver for tool call lifecycle events. The caller
-/// must call [`StreamingResponse::commit`] after the stream is done or abandoned to persist
-/// the assistant reply and update token usage.
+/// Returns a [`StreamingResponse`]. The caller must call [`StreamingResponse::commit`] after
+/// the stream is done or abandoned to persist the assistant reply and update token usage.
 pub async fn stream_message(
     app: Arc<Mutex<App>>,
     tokens: Vec<InputToken>,
-) -> Result<(
-    StreamingResponse,
-    tokio::sync::mpsc::UnboundedReceiver<HookEvent>,
-)> {
-    let (hook_tx, hook_rx) = tokio::sync::mpsc::unbounded_channel();
+) -> Result<StreamingResponse> {
     let mut guard = app.lock().await;
     let PreparedRequest { history, selection } = guard.prepare_request(tokens).await?;
     let system_prompt = guard.system_prompt.clone();
     let tools = guard.tools();
-    let hook = PromptHook::new(hook_tx);
     let agent = guard
         .registry
-        .agent(&selection, Some(&system_prompt), hook, tools)?;
+        .agent(&selection, Some(&system_prompt), tools)?;
     let Some(prompt) = history.last().cloned() else {
         anyhow::bail!("no messages to stream");
     };
@@ -579,13 +800,10 @@ pub async fn stream_message(
             let _ = guard.append_message(Message::assistant(text));
         }
     };
-    Ok((
-        StreamingResponse {
-            stream,
-            commit_future: Box::pin(commit_future),
-        },
-        hook_rx,
-    ))
+    Ok(StreamingResponse {
+        stream,
+        commit_future: Box::pin(commit_future),
+    })
 }
 
 /// Wraps a [`ChatStream`], accumulating streamed text and usage. On drop (whether the stream

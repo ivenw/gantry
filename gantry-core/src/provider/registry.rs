@@ -7,7 +7,6 @@ use rig::tool::ToolDyn;
 use crate::config::{
     ApiKeyCredential, Credential, CredentialsRepository, ProviderConfig, ProviderConfigRepository,
 };
-use crate::provider::PromptHook;
 use crate::provider::agent::BoxedAgent;
 use crate::provider::client::ProviderClient;
 use crate::provider::{ModelSelection, ProviderAlias};
@@ -51,16 +50,15 @@ impl ProviderClientRegistry {
         Ok(self.cache.get(alias).expect("just inserted"))
     }
 
-    /// Builds a [`BoxedAgent`] for the given model selection, optional preamble, hook, and tools.
+    /// Builds a [`BoxedAgent`] for the given model selection, optional preamble, and tools.
     pub fn agent(
         &mut self,
         selection: &ModelSelection,
         preamble: Option<&str>,
-        hook: PromptHook,
         tools: Vec<Box<dyn ToolDyn>>,
     ) -> Result<BoxedAgent> {
         self.client(&selection.provider_alias)?
-            .agent(&selection.model_id, preamble, hook, tools)
+            .agent(&selection.model_id, preamble, tools)
     }
 
     /// Constructs a fresh [`ProviderClient`] for the given alias.

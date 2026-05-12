@@ -14,13 +14,6 @@ pub enum Msg {
     // Stream events from the agent
     StreamItem(Result<ChatStreamItem, StreamingError>),
     StreamDone,
-    ToolCallStarted {
-        name: String,
-        id: String,
-    },
-    ToolCallFinished {
-        id: String,
-    },
 
     // Streaming error (stream task failed; StreamDone is not sent in this case)
     StreamError(String),

@@ -1,6 +1,7 @@
 /// Every command that can be invoked from the command picker.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum KnownCommand {
+    Debug,
     Model,
     New,
     Providers,
@@ -12,6 +13,7 @@ pub enum KnownCommand {
 
 impl KnownCommand {
     pub const ALL: &[KnownCommand] = &[
+        KnownCommand::Debug,
         KnownCommand::Model,
         KnownCommand::New,
         KnownCommand::Providers,
@@ -24,6 +26,7 @@ impl KnownCommand {
     /// Short name shown in the command picker filter.
     pub const fn name(&self) -> &'static str {
         match self {
+            KnownCommand::Debug => "debug",
             KnownCommand::Model => "model",
             KnownCommand::New => "new",
             KnownCommand::Providers => "providers",
@@ -37,6 +40,7 @@ impl KnownCommand {
     /// One-line description shown next to the name in the command picker.
     pub const fn description(&self) -> &'static str {
         match self {
+            KnownCommand::Debug => "Stream a mock response for UI testing",
             KnownCommand::Model => "Pick the active model",
             KnownCommand::New => "Start a new session",
             KnownCommand::Providers => "Manage configured providers",

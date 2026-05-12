@@ -33,11 +33,10 @@ pub type ChatStream = Pin<Box<dyn Stream<Item = Result<ChatStreamItem, Streaming
 /// [`MultiTurnStreamItem::FinalResponse`].
 pub type ChatStreamItem = MultiTurnStreamItem<()>;
 
-impl<M, P> AgentT for rig::agent::Agent<M, P>
+impl<M> AgentT for rig::agent::Agent<M>
 where
     M: CompletionModel + Send + Sync + 'static,
     M::StreamingResponse: WasmCompatSend,
-    P: rig::agent::PromptHook<M> + Send + Sync + 'static,
 {
     fn stream_chat(
         &self,

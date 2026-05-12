@@ -1,9 +1,6 @@
 pub mod agent;
 pub mod client;
-pub mod hook;
 pub mod registry;
-
-pub use hook::{HookEvent, PromptHook};
 
 use serde::{Deserialize, Serialize};
 
