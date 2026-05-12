@@ -8,7 +8,7 @@ use async_stream::stream;
 use futures::Stream;
 use rig::agent::{FinalResponse, MultiTurnStreamItem, StreamingError};
 use rig::completion::Usage as RigUsage;
-use rig::message::{AssistantContent, Reasoning, ToolCall, ToolFunction, UserContent};
+use rig::message::{Reasoning, ToolCall, ToolFunction};
 use rig::streaming::{StreamedAssistantContent, StreamedUserContent};
 use tokio::sync::Mutex;
 use tokio::sync::oneshot;
@@ -16,6 +16,7 @@ use tokio::time::sleep;
 
 use crate::app::App;
 use crate::input::{InputToken, build_user_message};
+use crate::metrics::CharCounts;
 use crate::provider::agent::ChatStream;
 
 /// Returned by [`stream_message`]. Holds the live stream and the deferred commit.
@@ -279,16 +280,12 @@ pub async fn stream_message(
     let message = build_user_message(tokens, &guard.project_path).await?;
     guard.append_message(message)?;
     let history: Vec<rig::message::Message> = guard.history().into_iter().map(Into::into).collect();
-    guard.last_char_counts = Some(
-        guard
-            .system_prompt
-            .char_counts(count_message_chars(&history)),
-    );
+    guard.last_char_counts = Some(CharCounts::new(&guard.system_prompt, &history));
     let selection = guard
         .selection
         .clone()
         .ok_or_else(|| anyhow::anyhow!("no active model selection"))?;
-    let system_prompt = guard.system_prompt.as_str().to_string();
+    let system_prompt = guard.system_prompt.to_string();
     let tools = guard.tools();
     let agent = guard
         .registry
@@ -310,27 +307,6 @@ pub async fn stream_message(
     Ok(StreamingResponse {
         stream,
         commit_future: Box::pin(commit_future),
-    })
-}
-
-/// Counts the total number of text characters across all messages in `history`.
-fn count_message_chars(history: &[rig::message::Message]) -> usize {
-    history.iter().fold(0, |acc, m| {
-        acc + match m {
-            rig::message::Message::User { content } => content.iter().fold(0, |a, c| {
-                a + match c {
-                    UserContent::Text(t) => t.text.len(),
-                    _ => 0,
-                }
-            }),
-            rig::message::Message::Assistant { content, .. } => content.iter().fold(0, |a, c| {
-                a + match c {
-                    AssistantContent::Text(t) => t.text.len(),
-                    _ => 0,
-                }
-            }),
-            rig::message::Message::System { content } => content.len(),
-        }
     })
 }
 

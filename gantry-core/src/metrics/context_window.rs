@@ -140,6 +140,38 @@ pub struct CharCounts {
 }
 
 impl CharCounts {
+    /// Builds a [`CharCounts`] from a system prompt and conversation history.
+    pub fn new(
+        system_prompt: &crate::system_prompt::SystemPrompt,
+        history: &[rig::message::Message],
+    ) -> Self {
+        let messages = history.iter().fold(0, |acc, m| {
+            acc + match m {
+                rig::message::Message::User { content } => content.iter().fold(0, |a, c| {
+                    a + match c {
+                        rig::message::UserContent::Text(t) => t.text.len(),
+                        _ => 0,
+                    }
+                }),
+                rig::message::Message::Assistant { content, .. } => {
+                    content.iter().fold(0, |a, c| {
+                        a + match c {
+                            rig::message::AssistantContent::Text(t) => t.text.len(),
+                            _ => 0,
+                        }
+                    })
+                }
+                rig::message::Message::System { content } => content.len(),
+            }
+        });
+        Self {
+            base_prompt: system_prompt.base_prompt_char_count(),
+            agent_files: system_prompt.agent_file_char_counts().to_vec(),
+            skills_catalog: system_prompt.skills_catalog_char_count(),
+            messages,
+        }
+    }
+
     /// Total character count across all measured components.
     pub fn total(&self) -> usize {
         self.base_prompt

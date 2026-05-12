@@ -1,7 +1,7 @@
+use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::agentsmd::load_agentsmd_files;
-use crate::metrics::CharCounts;
 use crate::skills::load_skills;
 
 const SYSTEM_MD_NAME: &str = "SYSTEM.md";
@@ -21,10 +21,8 @@ directory (the parent of SKILL.md) and use absolute paths in tool calls.";
 /// in place when the underlying files change.
 pub struct SystemPrompt {
     prompt: String,
-    base_prompt_len: usize,
-    /// Char count per discovered agent file, in the order they appear in the prompt.
+    base_prompt_char_count: usize,
     agent_file_char_counts: Vec<(PathBuf, usize)>,
-    /// Total chars contributed by the skills catalog section.
     skills_catalog_char_count: usize,
 }
 
@@ -50,7 +48,7 @@ impl SystemPrompt {
 
         Self {
             prompt,
-            base_prompt_len,
+            base_prompt_char_count: base_prompt_len,
             agent_file_char_counts,
             skills_catalog_char_count,
         }
@@ -61,20 +59,25 @@ impl SystemPrompt {
         *self = Self::new(cwd);
     }
 
-    /// Returns the built system prompt string.
-    pub fn as_str(&self) -> &str {
-        &self.prompt
+    /// Returns the char count of the base prompt component.
+    pub fn base_prompt_char_count(&self) -> usize {
+        self.base_prompt_char_count
     }
 
-    /// Returns a [`CharCounts`] snapshot for the most recent build, to be combined with message
-    /// char counts before a request.
-    pub fn char_counts(&self, messages_chars: usize) -> CharCounts {
-        CharCounts {
-            base_prompt: self.base_prompt_len,
-            agent_files: self.agent_file_char_counts.clone(),
-            skills_catalog: self.skills_catalog_char_count,
-            messages: messages_chars,
-        }
+    /// Returns the char count per discovered agent file, in the order they appear in the prompt.
+    pub fn agent_file_char_counts(&self) -> &[(PathBuf, usize)] {
+        &self.agent_file_char_counts
+    }
+
+    /// Returns the total chars contributed by the skills catalog section.
+    pub fn skills_catalog_char_count(&self) -> usize {
+        self.skills_catalog_char_count
+    }
+}
+
+impl fmt::Display for SystemPrompt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.prompt)
     }
 }
 
