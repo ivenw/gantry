@@ -309,8 +309,8 @@ impl App {
             Box::new(ReadTool { cwd: cwd.clone() }),
             Box::new(WriteTool { cwd: cwd.clone() }),
             Box::new(EditTool { cwd: cwd.clone() }),
-            Box::new(GrepTool { cwd: cwd.clone() }),
-            Box::new(TreeTool { cwd: cwd.clone() }),
+            // Box::new(GrepTool { cwd: cwd.clone() }),
+            // Box::new(TreeTool { cwd: cwd.clone() }),
             Box::new(BashTool { cwd }),
         ]
     }
