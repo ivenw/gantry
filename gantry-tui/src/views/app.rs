@@ -1,7 +1,7 @@
+use crate::chat::view::ChatView;
 use crate::model::Model;
 use crate::views::ViewState;
 use crate::views::attachment_picker::AttachmentPickerView;
-use crate::views::chat::ChatView;
 use crate::views::command_picker::CommandPickerView;
 use crate::views::input::InputView;
 use crate::views::model_picker::ModelPickerWidget;

@@ -1,6 +1,5 @@
 pub mod app;
 pub mod attachment_picker;
-pub mod chat;
 pub mod command_picker;
 pub mod input;
 pub mod model_picker;
@@ -14,7 +13,7 @@ pub mod usage;
 
 pub use app::render;
 
-use chat::ChatViewState;
+use crate::chat::ChatViewState;
 use statusline::StatuslineViewState;
 
 #[derive(Default)]

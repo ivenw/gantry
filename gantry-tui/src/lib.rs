@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+mod chat;
 mod commands;
 pub mod effects;
 mod message;

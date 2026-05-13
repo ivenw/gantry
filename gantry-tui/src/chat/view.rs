@@ -1,6 +1,6 @@
 use gantry_core::DiffHunk;
 
-use crate::model::ChatMessage;
+use crate::chat::model::ChatMessage;
 use ratatui::{
     buffer::Buffer,
     layout::{Margin, Rect},

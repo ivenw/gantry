@@ -11,8 +11,9 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinHandle;
 
+use crate::chat::ChatMessage;
 use crate::message::Msg;
-use crate::model::{ChatMessage, Model};
+use crate::model::Model;
 use crate::update::update;
 use crate::views::{self, ViewState};
 
