@@ -8,7 +8,7 @@ use crate::command_picker::CommandEntry;
 use crate::commands::KnownCommand;
 use crate::input::prev_char_boundary;
 use crate::message::Msg;
-use crate::model::{InputMode, Model};
+use crate::model::{InputOverlay, Mode, Model, StreamState};
 use crate::providers::{CopilotAuthKind, ProviderWizard, ProvidersSubView, WizardProviderKind};
 use crate::tree::branch_rows;
 use crate::view::ViewState;
@@ -18,7 +18,7 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
     match msg {
         Msg::StreamItem(item) => handle_stream_item(model, item),
         Msg::StreamDone => {
-            if !model.stream_interrupted {
+            if !matches!(model.stream, StreamState::Interrupted { .. }) {
                 model.finish_stream();
                 if !model.chat.user_is_scrolling {
                     model.chat.scroll_offset = 0;
@@ -52,20 +52,20 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             None
         }
         Msg::OpenSessionsView(sessions, active_id) => {
-            model.activate_sessions_view(sessions, active_id);
+            model.open_sessions_view(sessions, active_id);
             None
         }
         // ResumeSession is handled in Runtime before update() is called.
         Msg::ResumeSession(_) => None,
         Msg::OpenTreeView(nodes) => {
-            model.activate_tree_view(nodes);
+            model.open_tree_view(nodes);
             None
         }
         Msg::ReloadMessages(messages) => {
             model.chat.messages = messages;
             model.chat.scroll_offset = 0;
             model.chat.user_is_scrolling = false;
-            model.deactivate_tree_view();
+            model.overlay = InputOverlay::Chat(Mode::Normal);
             None
         }
         Msg::ReloadMessagesWithInput(messages, input) => {
@@ -73,7 +73,7 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             model.chat.scroll_offset = 0;
             model.chat.user_is_scrolling = false;
             model.input.set_text(input);
-            model.deactivate_tree_view();
+            model.overlay = InputOverlay::Chat(Mode::Normal);
             None
         }
         Msg::ContextWindowUpdated(cw) => {
@@ -81,29 +81,37 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             None
         }
         Msg::OpenProvidersView(providers) => {
-            model.activate_providers_view(providers);
+            use crate::providers::{ProvidersSubView, ProvidersView};
+            model.overlay = InputOverlay::Providers(ProvidersView {
+                providers,
+                sub: ProvidersSubView::List { selected_idx: 0 },
+            });
             None
         }
         // AddProvider and RemoveProvider are handled in Runtime before update() is called.
         Msg::AddProvider(_, _) | Msg::RemoveProvider(_) => None,
         Msg::OpenModelPicker(selections) => {
-            model.activate_model_picker_view(selections);
+            model.open_model_picker(selections);
             None
         }
         // SelectModel is handled in Runtime before update() is called.
         Msg::SelectModel(_) => None,
-        Msg::OpenUsageView(cw, history) => {
-            model.activate_usage_view(cw, history);
+        Msg::OpenUsageView(cw, consumption) => {
+            use crate::usage::UsageView;
+            model.overlay = InputOverlay::UsageView(UsageView {
+                context_window: cw,
+                consumption,
+            });
             None
         }
         Msg::SetPathPickerResults(results) => {
-            if let Some(ref mut picker) = model.attachment_picker {
+            if let InputOverlay::AttachmentPicker(ref mut picker) = model.overlay {
                 picker.set_path_results(results);
             }
             None
         }
         Msg::SetSkillPickerResults(results) => {
-            if let Some(ref mut picker) = model.attachment_picker {
+            if let InputOverlay::AttachmentPicker(ref mut picker) = model.overlay {
                 picker.set_skill_results(results);
             }
             None
@@ -196,44 +204,22 @@ fn handle_key(
     view_state: &ViewState,
     key: crossterm::event::KeyEvent,
 ) -> Option<Msg> {
-    // Overlay states are handled before normal/insert mode.
-    if model.is_model_picker_active() {
-        return handle_key_model_picker(model, key);
-    }
-
-    if model.is_providers_view_active() {
-        return handle_key_providers_view(model, key);
-    }
-
-    if model.is_sessions_view_active() {
-        return handle_key_sessions_view(model, key);
-    }
-
-    if model.is_tree_view_active() {
-        return handle_key_tree_view(model, key);
-    }
-
-    if model.is_usage_view_active() {
-        return handle_key_usage_view(model, key);
-    }
-
-    if model.is_command_picker_active() {
-        return handle_key_command_picker(model, key);
-    }
-
-    if model.is_attachment_picker_active() {
-        return handle_key_attachment_picker(model, key);
-    }
-
-    match model.mode {
-        InputMode::Normal => handle_key_normal(model, view_state, key),
-        InputMode::Insert => handle_key_insert(model, view_state, key),
+    match &model.overlay {
+        InputOverlay::ModelPicker(_) => handle_key_model_picker(model, key),
+        InputOverlay::Providers(_) => handle_key_providers_view(model, key),
+        InputOverlay::SessionsView(_) => handle_key_sessions_view(model, key),
+        InputOverlay::TreeView(_) => handle_key_tree_view(model, key),
+        InputOverlay::UsageView(_) => handle_key_usage_view(model, key),
+        InputOverlay::CommandPicker(_) => handle_key_command_picker(model, key),
+        InputOverlay::AttachmentPicker(_) => handle_key_attachment_picker(model, key),
+        InputOverlay::Chat(Mode::Normal) => handle_key_normal(model, view_state, key),
+        InputOverlay::Chat(Mode::Insert) => handle_key_insert(model, view_state, key),
     }
 }
 
 fn handle_key_usage_view(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
     if key.code == KeyCode::Esc {
-        model.deactivate_usage_view();
+        model.overlay = InputOverlay::Chat(Mode::Normal);
     }
     None
 }
@@ -241,41 +227,58 @@ fn handle_key_usage_view(model: &mut Model, key: crossterm::event::KeyEvent) -> 
 fn handle_key_model_picker(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
     match key.code {
         KeyCode::Esc => {
-            model.deactivate_model_picker_view();
-            None
-        }
-        KeyCode::Up => {
-            model.move_model_picker_selection_up();
-            None
-        }
-        KeyCode::Down => {
-            model.move_model_picker_selection_down();
-            None
-        }
-        KeyCode::Backspace => {
-            model.model_picker_filter_pop();
-            None
+            model.overlay = InputOverlay::Chat(Mode::Normal);
+            return None;
         }
         KeyCode::Enter => {
             let msg = model.selected_model_in_picker().map(Msg::SelectModel);
-            model.deactivate_model_picker_view();
-            msg
+            model.overlay = InputOverlay::Chat(Mode::Normal);
+            return msg;
+        }
+        _ => {}
+    }
+    let InputOverlay::ModelPicker(ref mut mv) = model.overlay else {
+        return None;
+    };
+    match key.code {
+        KeyCode::Up => {
+            let count = mv.filtered.len();
+            if count > 0 {
+                mv.selected_idx = mv.selected_idx.checked_sub(1).unwrap_or(count - 1);
+            }
+        }
+        KeyCode::Down => {
+            let count = mv.filtered.len();
+            if count > 0 {
+                mv.selected_idx = (mv.selected_idx + 1) % count;
+            }
+        }
+        KeyCode::Backspace => {
+            mv.filter.pop();
+            mv.selected_idx = 0;
+            mv.refilter();
         }
         KeyCode::Char(c) => {
-            model.model_picker_filter_push(c);
-            None
+            mv.filter.push(c);
+            mv.selected_idx = 0;
+            mv.refilter();
         }
-        _ => None,
+        _ => {}
     }
+    None
 }
 
 fn handle_key_providers_view(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
-    let sub_kind = model.providers_view.as_ref().map(|pv| match pv.sub {
-        ProvidersSubView::List { .. } => 0u8,
-        ProvidersSubView::TypePicker { .. } => 1,
-        ProvidersSubView::CopilotAuthPicker { .. } => 2,
-        ProvidersSubView::Wizard(_) => 3,
-    })?;
+    let sub_kind = if let InputOverlay::Providers(ref pv) = model.overlay {
+        match pv.sub {
+            ProvidersSubView::List { .. } => 0u8,
+            ProvidersSubView::TypePicker { .. } => 1,
+            ProvidersSubView::CopilotAuthPicker { .. } => 2,
+            ProvidersSubView::Wizard(_) => 3,
+        }
+    } else {
+        return None;
+    };
 
     match sub_kind {
         0 => handle_key_providers_list(model, key),
@@ -288,10 +291,28 @@ fn handle_key_providers_view(model: &mut Model, key: crossterm::event::KeyEvent)
 fn handle_key_providers_list(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
     match key.code {
         KeyCode::Esc => {
-            model.deactivate_providers_view();
+            model.overlay = InputOverlay::Chat(Mode::Normal);
+            return None;
         }
+        KeyCode::Char('d') => {
+            let InputOverlay::Providers(ref pv) = model.overlay else {
+                return None;
+            };
+            if let ProvidersSubView::List { selected_idx } = pv.sub
+                && selected_idx < pv.providers.len()
+            {
+                let alias = pv.providers[selected_idx].alias().clone();
+                return Some(Msg::RemoveProvider(alias));
+            }
+            return None;
+        }
+        _ => {}
+    }
+    let InputOverlay::Providers(ref mut pv) = model.overlay else {
+        return None;
+    };
+    match key.code {
         KeyCode::Up | KeyCode::Char('k') => {
-            let pv = model.providers_view.as_mut()?;
             if let ProvidersSubView::List {
                 ref mut selected_idx,
             } = pv.sub
@@ -303,7 +324,6 @@ fn handle_key_providers_list(model: &mut Model, key: crossterm::event::KeyEvent)
             }
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            let pv = model.providers_view.as_mut()?;
             if let ProvidersSubView::List {
                 ref mut selected_idx,
             } = pv.sub
@@ -313,17 +333,7 @@ fn handle_key_providers_list(model: &mut Model, key: crossterm::event::KeyEvent)
             }
         }
         KeyCode::Char('a') => {
-            let pv = model.providers_view.as_mut()?;
             pv.sub = ProvidersSubView::TypePicker { selected_idx: 0 };
-        }
-        KeyCode::Char('d') => {
-            let pv = model.providers_view.as_ref()?;
-            if let ProvidersSubView::List { selected_idx } = pv.sub
-                && selected_idx < pv.providers.len()
-            {
-                let alias = pv.providers[selected_idx].alias().clone();
-                return Some(Msg::RemoveProvider(alias));
-            }
         }
         _ => {}
     }
@@ -334,13 +344,14 @@ fn handle_key_providers_type_picker(
     model: &mut Model,
     key: crossterm::event::KeyEvent,
 ) -> Option<Msg> {
+    let InputOverlay::Providers(ref mut pv) = model.overlay else {
+        return None;
+    };
     match key.code {
         KeyCode::Esc => {
-            let pv = model.providers_view.as_mut()?;
             pv.sub = ProvidersSubView::List { selected_idx: 0 };
         }
         KeyCode::Up | KeyCode::Char('k') => {
-            let pv = model.providers_view.as_mut()?;
             if let ProvidersSubView::TypePicker {
                 ref mut selected_idx,
             } = pv.sub
@@ -350,7 +361,6 @@ fn handle_key_providers_type_picker(
             }
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            let pv = model.providers_view.as_mut()?;
             if let ProvidersSubView::TypePicker {
                 ref mut selected_idx,
             } = pv.sub
@@ -359,7 +369,6 @@ fn handle_key_providers_type_picker(
             }
         }
         KeyCode::Enter => {
-            let pv = model.providers_view.as_mut()?;
             if let ProvidersSubView::TypePicker { selected_idx } = pv.sub {
                 let kind = WizardProviderKind::ALL[selected_idx];
                 if kind == WizardProviderKind::Copilot {
@@ -378,13 +387,14 @@ fn handle_key_copilot_auth_picker(
     model: &mut Model,
     key: crossterm::event::KeyEvent,
 ) -> Option<Msg> {
+    let InputOverlay::Providers(ref mut pv) = model.overlay else {
+        return None;
+    };
     match key.code {
         KeyCode::Esc => {
-            let pv = model.providers_view.as_mut()?;
             pv.sub = ProvidersSubView::TypePicker { selected_idx: 0 };
         }
         KeyCode::Up | KeyCode::Char('k') => {
-            let pv = model.providers_view.as_mut()?;
             if let ProvidersSubView::CopilotAuthPicker {
                 ref mut selected_idx,
             } = pv.sub
@@ -394,7 +404,6 @@ fn handle_key_copilot_auth_picker(
             }
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            let pv = model.providers_view.as_mut()?;
             if let ProvidersSubView::CopilotAuthPicker {
                 ref mut selected_idx,
             } = pv.sub
@@ -403,7 +412,6 @@ fn handle_key_copilot_auth_picker(
             }
         }
         KeyCode::Enter => {
-            let pv = model.providers_view.as_mut()?;
             if let ProvidersSubView::CopilotAuthPicker { selected_idx } = pv.sub {
                 let auth = CopilotAuthKind::ALL[selected_idx];
                 pv.sub = ProvidersSubView::Wizard(ProviderWizard::new(
@@ -418,9 +426,11 @@ fn handle_key_copilot_auth_picker(
 }
 
 fn handle_key_wizard(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
+    let InputOverlay::Providers(ref mut pv) = model.overlay else {
+        return None;
+    };
     match key.code {
         KeyCode::Esc => {
-            let pv = model.providers_view.as_mut()?;
             let is_copilot = matches!(&pv.sub, ProvidersSubView::Wizard(w) if w.kind == WizardProviderKind::Copilot);
             if is_copilot {
                 pv.sub = ProvidersSubView::CopilotAuthPicker { selected_idx: 0 };
@@ -429,7 +439,6 @@ fn handle_key_wizard(model: &mut Model, key: crossterm::event::KeyEvent) -> Opti
             }
         }
         KeyCode::Up | KeyCode::Char('k') => {
-            let pv = model.providers_view.as_mut()?;
             if let ProvidersSubView::Wizard(ref mut w) = pv.sub
                 && w.focused_idx > 0
             {
@@ -442,7 +451,6 @@ fn handle_key_wizard(model: &mut Model, key: crossterm::event::KeyEvent) -> Opti
             }
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            let pv = model.providers_view.as_mut()?;
             if let ProvidersSubView::Wizard(ref mut w) = pv.sub
                 && w.focused_idx + 1 < w.row_count()
             {
@@ -455,7 +463,6 @@ fn handle_key_wizard(model: &mut Model, key: crossterm::event::KeyEvent) -> Opti
             }
         }
         KeyCode::Enter => {
-            let pv = model.providers_view.as_mut()?;
             if let ProvidersSubView::Wizard(ref mut w) = pv.sub {
                 if w.is_on_confirm() {
                     match w.build() {
@@ -466,21 +473,17 @@ fn handle_key_wizard(model: &mut Model, key: crossterm::event::KeyEvent) -> Opti
                             w.error = Some(msg);
                         }
                     }
-                } else {
-                    // Advance to the next row, skipping optional empty fields.
-                    if w.focused_idx + 1 < w.row_count() {
-                        w.focused_idx += 1;
-                        w.cursor = w
-                            .fields
-                            .get(w.focused_idx)
-                            .map(|f| f.value.len())
-                            .unwrap_or(0);
-                    }
+                } else if w.focused_idx + 1 < w.row_count() {
+                    w.focused_idx += 1;
+                    w.cursor = w
+                        .fields
+                        .get(w.focused_idx)
+                        .map(|f| f.value.len())
+                        .unwrap_or(0);
                 }
             }
         }
         KeyCode::Char(c) => {
-            let pv = model.providers_view.as_mut()?;
             if let ProvidersSubView::Wizard(ref mut w) = pv.sub
                 && !w.is_on_confirm()
             {
@@ -491,7 +494,6 @@ fn handle_key_wizard(model: &mut Model, key: crossterm::event::KeyEvent) -> Opti
             }
         }
         KeyCode::Backspace => {
-            let pv = model.providers_view.as_mut()?;
             if let ProvidersSubView::Wizard(ref mut w) = pv.sub
                 && !w.is_on_confirm()
                 && w.cursor > 0
@@ -504,7 +506,6 @@ fn handle_key_wizard(model: &mut Model, key: crossterm::event::KeyEvent) -> Opti
             }
         }
         KeyCode::Left => {
-            let pv = model.providers_view.as_mut()?;
             if let ProvidersSubView::Wizard(ref mut w) = pv.sub
                 && !w.is_on_confirm()
             {
@@ -512,7 +513,6 @@ fn handle_key_wizard(model: &mut Model, key: crossterm::event::KeyEvent) -> Opti
             }
         }
         KeyCode::Right => {
-            let pv = model.providers_view.as_mut()?;
             if let ProvidersSubView::Wizard(ref mut w) = pv.sub
                 && !w.is_on_confirm()
             {
@@ -531,91 +531,127 @@ fn handle_key_wizard(model: &mut Model, key: crossterm::event::KeyEvent) -> Opti
 fn handle_key_sessions_view(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
     match key.code {
         KeyCode::Esc => {
-            model.deactivate_sessions_view();
-            None
-        }
-        KeyCode::Up | KeyCode::Char('k') => {
-            model.move_sessions_selection_up();
-            None
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            model.move_sessions_selection_down();
-            None
+            model.overlay = InputOverlay::Chat(Mode::Normal);
+            return None;
         }
         KeyCode::Enter => {
             let session_id: Option<SessionId> = model.selected_session().map(|s| s.id.clone());
-            model.deactivate_sessions_view();
-            session_id.map(Msg::ResumeSession)
+            model.overlay = InputOverlay::Chat(Mode::Normal);
+            return session_id.map(Msg::ResumeSession);
         }
-        _ => None,
+        _ => {}
     }
+    let InputOverlay::SessionsView(ref mut sv) = model.overlay else {
+        return None;
+    };
+    match key.code {
+        KeyCode::Up | KeyCode::Char('k') => {
+            if !sv.sessions.is_empty() {
+                sv.selected_idx = sv
+                    .selected_idx
+                    .checked_sub(1)
+                    .unwrap_or(sv.sessions.len() - 1);
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if !sv.sessions.is_empty() {
+                sv.selected_idx = (sv.selected_idx + 1) % sv.sessions.len();
+            }
+        }
+        _ => {}
+    }
+    None
 }
 
 fn handle_key_tree_view(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
     match key.code {
         KeyCode::Esc => {
-            model.deactivate_tree_view();
-            None
+            model.overlay = InputOverlay::Chat(Mode::Normal);
+            return None;
         }
-        KeyCode::Enter => handle_enter_tree_view(model),
+        KeyCode::Enter => return handle_enter_tree_view(model),
+        _ => {}
+    }
+    let InputOverlay::TreeView(ref mut tv) = model.overlay else {
+        return None;
+    };
+    match key.code {
         KeyCode::Up | KeyCode::Char('k') => {
-            model.move_tree_selection_up();
-            None
+            tv.selected_idx = tv.selected_idx.saturating_sub(1);
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            model.move_tree_selection_down();
-            None
+            let count = branch_rows(&tv.tree.stem, 0).len();
+            if count > 0 {
+                tv.selected_idx = (tv.selected_idx + 1).min(count - 1);
+            }
         }
-        _ => None,
+        _ => {}
     }
+    None
 }
 
 fn handle_key_command_picker(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
     match key.code {
         KeyCode::Esc => {
-            model.deactivate_command_picker();
-            None
+            model.overlay = InputOverlay::Chat(Mode::Normal);
+            return None;
         }
         KeyCode::Enter => {
-            let selected = model.selected_command();
-            model.deactivate_command_picker();
-            selected.map(|cmd| Msg::RunCommand(cmd.command))
+            let selected = if let InputOverlay::CommandPicker(ref p) = model.overlay {
+                p.filtered.get(p.selected_idx).cloned()
+            } else {
+                None
+            };
+            model.overlay = InputOverlay::Chat(Mode::Normal);
+            return selected.map(|cmd| Msg::RunCommand(cmd.command));
         }
+        _ => {}
+    }
+    let InputOverlay::CommandPicker(ref mut picker) = model.overlay else {
+        return None;
+    };
+    match key.code {
         KeyCode::Up => {
-            model.move_command_selection_up();
-            None
+            let count = picker.filtered.len();
+            if count > 0 {
+                picker.selected_idx = picker.selected_idx.checked_sub(1).unwrap_or(count - 1);
+            }
         }
         KeyCode::Down => {
-            model.move_command_selection_down();
-            None
+            let count = picker.filtered.len();
+            if count > 0 {
+                picker.selected_idx = (picker.selected_idx + 1) % count;
+            }
         }
         KeyCode::Char(c) => {
-            model.command_picker_filter_push(c);
-            None
+            picker.filter.push(c);
+            picker.selected_idx = 0;
+            picker.refilter();
         }
         KeyCode::Backspace => {
-            model.command_picker_filter_pop();
-            None
+            picker.filter.pop();
+            picker.selected_idx = 0;
+            picker.refilter();
         }
-        _ => None,
+        _ => {}
     }
+    None
 }
 
 fn handle_key_attachment_picker(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
     match key.code {
         KeyCode::Esc => {
-            model.deactivate_attachment_picker();
-            None
+            model.overlay = InputOverlay::Chat(Mode::Insert);
+            return None;
         }
         KeyCode::Backspace => {
-            // Pop one filter char; close the picker if the filter is already empty.
             let had_chars = model.attachment_picker_filter_pop();
             if !had_chars {
-                model.deactivate_attachment_picker();
+                model.overlay = InputOverlay::Chat(Mode::Insert);
                 return None;
             }
             let query = model.attachment_picker_filter().unwrap_or("").to_string();
-            Some(Msg::RefineAttachmentPicker(query))
+            return Some(Msg::RefineAttachmentPicker(query));
         }
         KeyCode::Enter => {
             let token = model.selected_attachment();
@@ -623,22 +659,14 @@ fn handle_key_attachment_picker(model: &mut Model, key: crossterm::event::KeyEve
                 .attachment_picker_filter()
                 .map(|f| f.len())
                 .unwrap_or(0);
-            model.deactivate_attachment_picker();
+            model.overlay = InputOverlay::Chat(Mode::Insert);
             if let Some(token) = token {
                 // +1 for the sigil character that was inserted into the input on activation.
                 model
                     .input
                     .replace_filter_with_attachment(1 + filter_len, token);
             }
-            None
-        }
-        KeyCode::Up => {
-            model.move_attachment_selection_up();
-            None
-        }
-        KeyCode::Down => {
-            model.move_attachment_selection_down();
-            None
+            return None;
         }
         KeyCode::Char('c')
             if key
@@ -650,19 +678,38 @@ fn handle_key_attachment_picker(model: &mut Model, key: crossterm::event::KeyEve
                 .map(|f| f.is_empty())
                 .unwrap_or(true);
             if is_empty {
-                // Remove the sigil from the input and close the picker cleanly.
                 model.input.delete_before_cursor();
-                model.deactivate_attachment_picker();
+                model.overlay = InputOverlay::Chat(Mode::Insert);
             } else {
                 model.attachment_picker_filter_clear();
                 return Some(Msg::RefineAttachmentPicker(String::new()));
             }
-            None
+            return None;
         }
         KeyCode::Char(c) => {
             model.attachment_picker_filter_push(c);
             let query = model.attachment_picker_filter().unwrap_or("").to_string();
-            Some(Msg::RefineAttachmentPicker(query))
+            return Some(Msg::RefineAttachmentPicker(query));
+        }
+        _ => {}
+    }
+    let InputOverlay::AttachmentPicker(ref mut picker) = model.overlay else {
+        return None;
+    };
+    match key.code {
+        KeyCode::Up => {
+            let count = picker.len();
+            if count > 0 {
+                picker.selected_idx = picker.selected_idx.checked_sub(1).unwrap_or(count - 1);
+            }
+            None
+        }
+        KeyCode::Down => {
+            let count = picker.len();
+            if count > 0 {
+                picker.selected_idx = (picker.selected_idx + 1) % count;
+            }
+            None
         }
         _ => None,
     }
@@ -675,11 +722,25 @@ fn handle_key_normal(
 ) -> Option<Msg> {
     match key.code {
         KeyCode::Char('i') => {
-            model.mode = InputMode::Insert;
+            model.overlay = InputOverlay::Chat(Mode::Insert);
             None
         }
         KeyCode::Char(' ') => {
-            model.activate_command_picker(available_command_entries());
+            let commands = available_command_entries();
+            let cmd_col_width = commands
+                .iter()
+                .map(|c| c.name.chars().count() as u16)
+                .max()
+                .unwrap_or(0);
+            let mut picker = crate::command_picker::CommandPicker {
+                commands,
+                filter: String::new(),
+                selected_idx: 0,
+                filtered: Vec::new(),
+                cmd_col_width,
+            };
+            picker.refilter();
+            model.overlay = InputOverlay::CommandPicker(picker);
             None
         }
         KeyCode::Char('j') | KeyCode::Down => {
@@ -722,7 +783,7 @@ fn handle_key_insert(
 
     match key.code {
         KeyCode::Esc => {
-            model.mode = InputMode::Normal;
+            model.overlay = InputOverlay::Chat(Mode::Normal);
             if model.is_streaming() {
                 return Some(Msg::InterruptStream);
             }
@@ -785,11 +846,13 @@ fn handle_key_insert(
 }
 
 fn handle_enter_tree_view(model: &mut Model) -> Option<Msg> {
-    let node = model.selected_tree_node()?;
+    let InputOverlay::TreeView(ref tv) = model.overlay else {
+        return None;
+    };
+    let rows = branch_rows(&tv.tree.stem, 0);
+    let (node, _) = rows.get(tv.selected_idx)?;
     let msg = if matches!(node.node.message, gantry_core::Message::User { .. }) {
         let input = node.node.message.text();
-        let tv = model.tree_view.as_ref()?;
-        let rows = branch_rows(&tv.tree.stem, 0);
         let preceding = rows[..tv.selected_idx]
             .iter()
             .rfind(|(n, _)| !matches!(n.node.message, gantry_core::Message::User { .. }))

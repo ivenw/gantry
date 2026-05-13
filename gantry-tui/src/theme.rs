@@ -1,12 +1,12 @@
 use ratatui::{style::Color, symbols::border};
 
-use crate::model::InputMode;
+use crate::model::Mode;
 
-/// Returns the color associated with the given input mode.
-pub fn mode_color(mode: InputMode) -> Color {
+/// Returns the color associated with the given chat mode.
+pub fn mode_color(mode: Mode) -> Color {
     match mode {
-        InputMode::Normal => Color::DarkGray,
-        InputMode::Insert => Color::LightGreen,
+        Mode::Normal => Color::DarkGray,
+        Mode::Insert => Color::LightGreen,
     }
 }
 

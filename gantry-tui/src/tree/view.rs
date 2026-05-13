@@ -16,6 +16,14 @@ impl<'a> TreeViewWidget<'a> {
     pub fn new(state: &'a TreeView) -> Self {
         Self { state }
     }
+
+    /// Returns the height required to render all tree rows without a cap.
+    ///
+    /// Layout: 1 top-padding + all rows + 1 footer + 1 bottom-padding.
+    pub fn height(&self) -> u16 {
+        let row_count = branch_rows(&self.state.tree.stem, 0).len() as u16;
+        1 + row_count.max(1) + 1 + 1
+    }
 }
 
 impl Widget for TreeViewWidget<'_> {

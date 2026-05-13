@@ -14,7 +14,7 @@ use tokio::task::JoinHandle;
 use crate::chat::ChatMessage;
 use crate::message::Msg;
 use crate::model::Model;
-use crate::providers::ProvidersSubView;
+use crate::providers::{ProvidersSubView, ProvidersView};
 use crate::update::update;
 use crate::view::{self, ViewState};
 
@@ -192,8 +192,9 @@ impl Runtime {
             }
             Msg::RefineAttachmentPicker(ref query) => {
                 let is_skill = matches!(
-                    self.model.attachment_picker.as_ref().map(|p| &p.kind),
-                    Some(crate::input::AttachmentPickerKind::Skill(_))
+                    &self.model.overlay,
+                    crate::model::InputOverlay::AttachmentPicker(p)
+                        if matches!(p.kind, crate::input::AttachmentPickerKind::Skill(_))
                 );
                 if is_skill {
                     let skills = self
@@ -351,11 +352,14 @@ impl Runtime {
                 let providers = self
                     .rt
                     .block_on(async { self.app.lock().await.list_providers().to_vec() });
-                self.model.activate_providers_view(providers);
+                self.model.overlay = crate::model::InputOverlay::Providers(ProvidersView {
+                    providers,
+                    sub: ProvidersSubView::List { selected_idx: 0 },
+                });
             }
             Err(e) => {
                 // Surface the error inside the wizard.
-                if let Some(ref mut pv) = self.model.providers_view
+                if let crate::model::InputOverlay::Providers(ref mut pv) = self.model.overlay
                     && let ProvidersSubView::Wizard(ref mut w) = pv.sub
                 {
                     w.error = Some(e.to_string());
@@ -377,7 +381,7 @@ impl Runtime {
                     .rt
                     .block_on(async { self.app.lock().await.list_providers().to_vec() });
                 // Refresh the list view, clamping selection if it is now out of bounds.
-                if let Some(ref mut pv) = self.model.providers_view
+                if let crate::model::InputOverlay::Providers(ref mut pv) = self.model.overlay
                     && let ProvidersSubView::List {
                         ref mut selected_idx,
                     } = pv.sub
@@ -437,7 +441,7 @@ impl Runtime {
             }
             KnownCommand::Model => {
                 if let Some(models) = self.model.cached_models.clone() {
-                    self.model.activate_model_picker_view(models);
+                    self.model.open_model_picker(models);
                     return;
                 }
                 let tx = self.msg_tx.clone();

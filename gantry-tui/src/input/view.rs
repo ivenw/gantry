@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::{input::InputModel, model::InputMode, theme};
+use crate::{input::InputModel, model::Mode, theme};
 
 const PREFIX: &str = "> ";
 const PREFIX_WIDTH: u16 = PREFIX.len() as u16;
@@ -23,7 +23,7 @@ pub struct InputView<'a> {
     /// Number of trailing bytes in the raw display string that belong to an active picker filter.
     /// These characters are rendered in LightYellow to indicate the pending picker state.
     picker_filter_len: usize,
-    mode: InputMode,
+    mode: Mode,
 }
 
 impl<'a> InputView<'a> {
@@ -36,12 +36,12 @@ impl<'a> InputView<'a> {
             cursor,
             raw_display,
             picker_filter_len: 0,
-            mode: InputMode::Normal,
+            mode: Mode::Normal,
         }
     }
 
     /// Sets the input mode, used to color the border.
-    pub fn with_mode(mut self, mode: InputMode) -> Self {
+    pub fn with_mode(mut self, mode: Mode) -> Self {
         self.mode = mode;
         self
     }

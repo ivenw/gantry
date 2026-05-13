@@ -18,6 +18,19 @@ impl<'a> ProvidersViewWidget<'a> {
     pub fn new(state: &'a ProvidersView) -> Self {
         Self { state }
     }
+
+    /// Returns the height required to render the current sub-view, capped at 10 content rows.
+    ///
+    /// Layout: 2 borders + content rows (capped) + 1 footer.
+    pub fn height(&self) -> u16 {
+        let content_rows = match &self.state.sub {
+            ProvidersSubView::List { .. } => (self.state.providers.len() as u16).min(10).max(1),
+            ProvidersSubView::TypePicker { .. } => WizardProviderKind::ALL.len() as u16,
+            ProvidersSubView::CopilotAuthPicker { .. } => CopilotAuthKind::ALL.len() as u16,
+            ProvidersSubView::Wizard(w) => w.row_count() as u16,
+        };
+        2 + content_rows + 1
+    }
 }
 
 impl Widget for ProvidersViewWidget<'_> {

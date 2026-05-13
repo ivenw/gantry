@@ -16,6 +16,14 @@ impl<'a> SessionsViewWidget<'a> {
     pub fn new(state: &'a SessionsView) -> Self {
         Self { state }
     }
+
+    /// Returns the height required to render the sessions list, capped at 10 content rows.
+    ///
+    /// Layout: 1 top-padding + content rows (capped) + 1 footer + 1 bottom-padding.
+    pub fn height(&self) -> u16 {
+        let content_rows = (self.state.sessions.len() as u16).min(10).max(1);
+        1 + content_rows + 1 + 1
+    }
 }
 
 impl Widget for SessionsViewWidget<'_> {

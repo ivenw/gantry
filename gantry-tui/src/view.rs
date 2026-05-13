@@ -1,4 +1,3 @@
-
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout},
@@ -8,7 +7,7 @@ use crate::chat::ChatViewState;
 use crate::chat::view::ChatView;
 use crate::command_picker::CommandPickerView;
 use crate::input::{AttachmentPickerView, InputView};
-use crate::model::Model;
+use crate::model::{InputOverlay, Mode, Model};
 use crate::model_picker::ModelPickerWidget;
 use crate::providers::ProvidersViewWidget;
 use crate::sessions::SessionsViewWidget;
@@ -26,44 +25,26 @@ pub struct ViewState {
 pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) {
     let area = frame.area();
 
-    if let Some(ref sv) = model.sessions_view {
-        frame.render_widget(SessionsViewWidget::new(sv), area);
-        return;
-    }
-
-    if let Some(ref tv) = model.tree_view {
-        frame.render_widget(TreeViewWidget::new(tv), area);
-        return;
-    }
-
-    if let Some(ref pv) = model.providers_view {
-        frame.render_widget(ProvidersViewWidget::new(pv), area);
-        return;
-    }
-
-    let input_height = if let Some(ref uv) = model.usage_view {
-        UsageViewWidget::new(uv).height()
-    } else if let Some(ref picker) = model.command_picker {
-        CommandPickerView::new(picker).height()
-    } else if let Some(ref mv) = model.model_picker_view {
-        ModelPickerWidget::new(mv).height()
-    } else {
-        InputView::new(&model.input, &model.cwd).height(area.width)
+    let input_height = match &model.overlay {
+        InputOverlay::UsageView(uv) => UsageViewWidget::new(uv).height(),
+        InputOverlay::CommandPicker(picker) => CommandPickerView::new(picker).height(),
+        InputOverlay::ModelPicker(mv) => ModelPickerWidget::new(mv).height(),
+        InputOverlay::SessionsView(sv) => SessionsViewWidget::new(sv).height(),
+        InputOverlay::TreeView(tv) => TreeViewWidget::new(tv).height(),
+        InputOverlay::Providers(pv) => ProvidersViewWidget::new(pv).height(),
+        InputOverlay::AttachmentPicker(_) | InputOverlay::Chat(_) => {
+            InputView::new(&model.input, &model.cwd).height(area.width)
+        }
     };
 
-    let app_statusline_height = if let Some(ref picker) = model.attachment_picker {
-        AttachmentPickerView::new(picker, &model.cwd).height()
-    } else {
-        1
+    let app_statusline_height = match &model.overlay {
+        InputOverlay::AttachmentPicker(picker) => {
+            AttachmentPickerView::new(picker, &model.cwd).height()
+        }
+        _ => 1,
     };
 
-    let agent_statusline = AgentStatusline::new(
-        model.is_streaming(),
-        model.stream_interrupted,
-        model.stream_started_at(),
-        model.stream_duration(),
-        model.status_message.as_deref(),
-    );
+    let agent_statusline = AgentStatusline::new(&model.stream, model.status_message.as_deref());
     let agent_statusline_height = agent_statusline.height();
 
     let agent_statusline_bottom_pad = if agent_statusline_height > 0 { 1 } else { 0 };
@@ -98,36 +79,61 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
         &mut view_state.agent_statusline,
     );
 
-    if let Some(ref uv) = model.usage_view {
-        frame.render_widget(UsageViewWidget::new(uv), input_area);
-    } else if let Some(ref picker) = model.command_picker {
-        frame.render_widget(CommandPickerView::new(picker), input_area);
-    } else if let Some(ref mv) = model.model_picker_view {
-        frame.render_widget(ModelPickerWidget::new(mv), input_area);
-    } else {
-        // Input is always visible; compute picker_filter_len for highlight when picker is active.
-        let picker_filter_len = model
-            .attachment_picker
-            .as_ref()
-            .map(|p| 1 + p.filter.len()) // sigil + filter chars
-            .unwrap_or(0);
-        frame.render_widget(
-            InputView::new(&model.input, &model.cwd)
-                .with_mode(model.mode)
-                .with_picker_filter_len(picker_filter_len),
-            input_area,
-        );
+    match &model.overlay {
+        InputOverlay::UsageView(uv) => {
+            frame.render_widget(UsageViewWidget::new(uv), input_area);
+        }
+        InputOverlay::CommandPicker(picker) => {
+            frame.render_widget(CommandPickerView::new(picker), input_area);
+        }
+        InputOverlay::ModelPicker(mv) => {
+            frame.render_widget(ModelPickerWidget::new(mv), input_area);
+        }
+        InputOverlay::SessionsView(sv) => {
+            frame.render_widget(SessionsViewWidget::new(sv), input_area);
+        }
+        InputOverlay::TreeView(tv) => {
+            frame.render_widget(TreeViewWidget::new(tv), input_area);
+        }
+        InputOverlay::Providers(pv) => {
+            frame.render_widget(ProvidersViewWidget::new(pv), input_area);
+        }
+        InputOverlay::AttachmentPicker(_) | InputOverlay::Chat(_) => {
+            let picker_filter_len =
+                if let InputOverlay::AttachmentPicker(ref picker) = model.overlay {
+                    1 + picker.filter.len() // sigil + filter chars
+                } else {
+                    0
+                };
+            let mode = match &model.overlay {
+                InputOverlay::Chat(m) => *m,
+                _ => Mode::Insert,
+            };
+            frame.render_widget(
+                InputView::new(&model.input, &model.cwd)
+                    .with_mode(mode)
+                    .with_picker_filter_len(picker_filter_len),
+                input_area,
+            );
+        }
     }
 
-    if let Some(ref picker) = model.attachment_picker {
-        frame.render_widget(
-            AttachmentPickerView::new(picker, &model.cwd),
-            app_statusline_area,
-        );
-    } else {
-        frame.render_widget(
-            AppStatusline::new(model.mode, model.context_window.clone()),
-            app_statusline_area,
-        );
+    match &model.overlay {
+        InputOverlay::AttachmentPicker(picker) => {
+            frame.render_widget(
+                AttachmentPickerView::new(picker, &model.cwd),
+                app_statusline_area,
+            );
+        }
+        _ => {
+            let mode = match &model.overlay {
+                InputOverlay::Chat(m) => *m,
+                _ => Mode::Normal,
+            };
+            frame.render_widget(
+                AppStatusline::new(mode, model.context_window.clone()),
+                app_statusline_area,
+            );
+        }
     }
 }
