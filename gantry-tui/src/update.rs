@@ -517,7 +517,7 @@ fn handle_key_sessions_view(model: &mut Model, key: crossterm::event::KeyEvent) 
         }
         _ => {}
     }
-    let InputOverlay::Sessions(ref mut sv) = model.overlay else {
+    let InputOverlay::SessionPicker(ref mut sv) = model.overlay else {
         return None;
     };
     match key.code {

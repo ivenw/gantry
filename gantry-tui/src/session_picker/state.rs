@@ -1,7 +1,7 @@
 use gantry_core::{SessionId, SessionInfo};
 
 /// State for the sessions browser overlay.
-pub struct SessionsState {
+pub struct SessionPickerState {
     pub sessions: Vec<SessionInfo>,
     /// Index of the highlighted row.
     pub selected_idx: usize,

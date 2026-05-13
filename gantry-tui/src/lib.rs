@@ -14,7 +14,7 @@ mod model_picker;
 mod picker;
 mod provider_config;
 mod runtime;
-mod sessions;
+mod session_picker;
 pub mod theme;
 mod tree;
 mod update;

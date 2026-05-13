@@ -5,15 +5,15 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::sessions::SessionsState;
+use crate::session_picker::SessionPickerState;
 
-pub struct SessionsWidget<'a> {
-    state: &'a SessionsState,
+pub struct SessionPickerWidget<'a> {
+    state: &'a SessionPickerState,
 }
 
-impl<'a> SessionsWidget<'a> {
+impl<'a> SessionPickerWidget<'a> {
     /// Creates a widget for the sessions browser overlay.
-    pub fn new(state: &'a SessionsState) -> Self {
+    pub fn new(state: &'a SessionPickerState) -> Self {
         Self { state }
     }
 
@@ -26,7 +26,7 @@ impl<'a> SessionsWidget<'a> {
     }
 }
 
-impl Widget for SessionsWidget<'_> {
+impl Widget for SessionPickerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let block = Block::default().borders(Borders::NONE);
         block.render(area, buf);

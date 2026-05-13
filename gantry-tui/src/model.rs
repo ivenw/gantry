@@ -22,7 +22,7 @@ use crate::attachment_picker::{AttachmentPickerKind, AttachmentPickerState};
 use crate::chat::ChatState;
 use crate::input::InputState;
 use crate::model_picker::ModelPickerState;
-use crate::sessions::SessionsState;
+use crate::session_picker::SessionPickerState;
 use crate::tree::{TreeState, branch_rows};
 
 /// The editing sub-mode active when no overlay is open.
@@ -42,7 +42,7 @@ pub enum InputOverlay {
     ModelPicker(crate::model_picker::ModelPickerState),
     AttachmentPicker(crate::attachment_picker::AttachmentPickerState),
     Usage(crate::usage::UsageState),
-    Sessions(crate::sessions::SessionsState),
+    SessionPicker(crate::session_picker::SessionPickerState),
     Tree(crate::tree::TreeState),
     ProviderConfig(crate::provider_config::ProvidersConfigState),
 }
@@ -238,7 +238,7 @@ impl Model {
             .iter()
             .rposition(|s| s.id == active_session_id)
             .unwrap_or(sessions.len().saturating_sub(1));
-        self.overlay = InputOverlay::Sessions(SessionsState {
+        self.overlay = InputOverlay::SessionPicker(SessionPickerState {
             sessions,
             selected_idx,
             active_session_id,
@@ -247,7 +247,7 @@ impl Model {
 
     /// Returns the session highlighted in the sessions browser, if any.
     pub fn selected_session(&self) -> Option<&SessionInfo> {
-        if let InputOverlay::Sessions(ref sv) = self.overlay {
+        if let InputOverlay::SessionPicker(ref sv) = self.overlay {
             sv.sessions.get(sv.selected_idx)
         } else {
             None

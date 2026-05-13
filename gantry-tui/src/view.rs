@@ -13,7 +13,7 @@ use crate::input::InputWidget;
 use crate::model::{InputOverlay, Mode, Model};
 use crate::model_picker::ModelPickerWidget;
 use crate::provider_config::ProviderConfigWidget;
-use crate::sessions::SessionsWidget;
+use crate::session_picker::SessionPickerWidget;
 use crate::tree::TreeWidget;
 use crate::usage::UsageWidget;
 
@@ -31,7 +31,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
         InputOverlay::Usage(uv) => UsageWidget::new(uv).height(),
         InputOverlay::CommandPicker(picker) => CommandPickerWidget::new(picker).height(),
         InputOverlay::ModelPicker(mv) => ModelPickerWidget::new(mv).height(),
-        InputOverlay::Sessions(sv) => SessionsWidget::new(sv).height(),
+        InputOverlay::SessionPicker(sv) => SessionPickerWidget::new(sv).height(),
         InputOverlay::Tree(tv) => TreeWidget::new(tv).height(),
         InputOverlay::ProviderConfig(pv) => ProviderConfigWidget::new(pv).height(),
         InputOverlay::AttachmentPicker(_) | InputOverlay::Input(_) => {
@@ -92,8 +92,8 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
         InputOverlay::ModelPicker(mv) => {
             frame.render_widget(ModelPickerWidget::new(mv), input_area);
         }
-        InputOverlay::Sessions(sv) => {
-            frame.render_widget(SessionsWidget::new(sv), input_area);
+        InputOverlay::SessionPicker(sv) => {
+            frame.render_widget(SessionPickerWidget::new(sv), input_area);
         }
         InputOverlay::Tree(tv) => {
             frame.render_widget(TreeWidget::new(tv), input_area);
