@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crossterm::event::{Event, KeyEventKind, MouseEventKind};
+use crossterm::event::{Event as CrosstermEvent, KeyEventKind, MouseEventKind};
 use futures::StreamExt;
 use gantry_core::App;
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -12,19 +12,37 @@ use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinHandle;
 
 use crate::chat::ChatMessage;
-use crate::message::Msg;
+use crate::message::{Cmd, Msg};
 use crate::model::Model;
-use crate::providers::{ProvidersSubView, ProvidersView};
+use crate::providers::{ProvidersState, ProvidersSubView};
 use crate::update::update;
-use crate::view::{self, ViewState};
+use crate::view::{self, WidgetState};
+
+/// Internal channel carrier: either a model-update message or a side-effect command.
+enum Event {
+    Msg(Msg),
+    Cmd(Cmd),
+}
+
+impl From<Msg> for Event {
+    fn from(m: Msg) -> Self {
+        Event::Msg(m)
+    }
+}
+
+impl From<Cmd> for Event {
+    fn from(c: Cmd) -> Self {
+        Event::Cmd(c)
+    }
+}
 
 pub struct Runtime {
     model: Model,
     rt: tokio::runtime::Runtime,
-    msg_tx: Sender<Msg>,
-    msg_rx: Receiver<Msg>,
+    msg_tx: Sender<Event>,
+    msg_rx: Receiver<Event>,
     app: Arc<Mutex<App>>,
-    view_state: ViewState,
+    view_state: WidgetState,
     stream_task: Option<JoinHandle<()>>,
     is_streaming: Arc<AtomicBool>,
     cancel_stream: Arc<AtomicBool>,
@@ -35,7 +53,7 @@ impl Runtime {
     /// Creates a new runtime, loading existing messages from the app.
     pub fn new(app: Arc<Mutex<App>>, cwd: std::path::PathBuf) -> Result<Self> {
         let rt = tokio::runtime::Runtime::new()?;
-        let (msg_tx, msg_rx) = channel::<Msg>(256);
+        let (msg_tx, msg_rx) = channel::<Event>(256);
 
         let mut model = Model::new();
 
@@ -60,7 +78,7 @@ impl Runtime {
             loop {
                 match event_rx.recv().await {
                     Ok(event) => {
-                        if event_tx.send(Msg::AppEvent(event)).await.is_err() {
+                        if event_tx.send(Msg::AppEvent(event).into()).await.is_err() {
                             break;
                         }
                     }
@@ -76,7 +94,7 @@ impl Runtime {
             msg_tx,
             msg_rx,
             app,
-            view_state: ViewState::default(),
+            view_state: WidgetState::default(),
             stream_task: None,
             is_streaming: Arc::new(AtomicBool::new(false)),
             cancel_stream: Arc::new(AtomicBool::new(false)),
@@ -93,19 +111,19 @@ impl Runtime {
         loop {
             if crossterm::event::poll(Duration::from_millis(10))? {
                 match crossterm::event::read()? {
-                    Event::Key(key)
+                    CrosstermEvent::Key(key)
                         if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat =>
                     {
-                        let _ = self.msg_tx.try_send(Msg::Key(key));
+                        let _ = self.msg_tx.try_send(Msg::Key(key).into());
                     }
-                    Event::Mouse(mouse) => {
+                    CrosstermEvent::Mouse(mouse) => {
                         let delta: i32 = match mouse.kind {
                             MouseEventKind::ScrollUp => 1,
                             MouseEventKind::ScrollDown => -1,
                             _ => 0,
                         };
                         if delta != 0 {
-                            let _ = self.msg_tx.try_send(Msg::ScrollChat(delta));
+                            let _ = self.msg_tx.try_send(Msg::ScrollChat(delta).into());
                         }
                     }
                     _ => {}
@@ -132,65 +150,77 @@ impl Runtime {
         }
     }
 
-    fn dispatch(&mut self, msg: Msg) -> bool {
-        let is_quit = matches!(msg, Msg::Quit);
-        let mut next = self.process(msg);
-        while let Some(msg) = next {
-            next = self.process(msg);
+    fn dispatch(&mut self, event: Event) -> bool {
+        let is_quit = matches!(event, Event::Cmd(Cmd::Quit));
+        let mut next_cmd = self.process(event);
+        while let Some(cmd) = next_cmd {
+            next_cmd = match self.handle_cmd(cmd) {
+                Some(msg) => self.process(Event::Msg(msg)),
+                None => None,
+            };
         }
         is_quit
     }
 
-    fn process(&mut self, msg: Msg) -> Option<Msg> {
+    /// Routes an event: `Msg` goes to `update()`, `Cmd` goes to `handle_cmd()`.
+    fn process(&mut self, event: Event) -> Option<Cmd> {
+        match event {
+            Event::Msg(msg) => update(&mut self.model, &self.view_state, msg),
+            Event::Cmd(cmd) => self
+                .handle_cmd(cmd)
+                .and_then(|msg| self.process(Event::Msg(msg))),
+        }
+    }
+
+    /// Handles all side-effect messages, returning an optional follow-up message.
+    fn handle_cmd(&mut self, msg: Cmd) -> Option<Msg> {
         match msg {
-            Msg::NewSession => {
-                let result = self
+            Cmd::Quit => None,
+            Cmd::NewSession => {
+                match self
                     .rt
-                    .block_on(async { self.app.lock().await.new_session() });
-                if let Err(e) = result {
-                    return Some(Msg::SetStatus(format!("failed to create session: {}", e)));
+                    .block_on(async { self.app.lock().await.new_session() })
+                {
+                    Ok(()) => Some(Msg::SessionCreated),
+                    Err(e) => Some(Msg::SetStatus(format!("failed to create session: {e}"))),
                 }
-                self.model.chat.messages.clear();
-                return None;
             }
-            Msg::RunCommand(cmd) => {
+            Cmd::RunCommand(cmd) => {
                 self.run_command(cmd);
-                return None;
+                None
             }
-            Msg::InterruptStream => {
+            Cmd::InterruptStream => {
                 self.interrupt_stream();
                 self.model.cancel_stream();
-                return None;
+                None
             }
-            Msg::BranchTo(ref entry_id) => {
-                self.spawn_branch(entry_id.clone());
-                return None;
+            Cmd::BranchTo(entry_id) => {
+                self.spawn_branch(entry_id);
+                None
             }
-            Msg::BranchToWithInput {
-                ref branch_id,
-                ref input,
-            } => {
-                self.spawn_branch_with_input(branch_id.clone(), input.clone());
-                return None;
+            Cmd::BranchToWithInput { branch_id, input } => {
+                self.spawn_branch_with_input(branch_id, input);
+                None
             }
-            Msg::SendMessage(ref tokens) => {
-                self.spawn_send_message(tokens.clone());
+            Cmd::SendMessage(tokens) => {
+                self.spawn_send_message(tokens);
+                None
             }
-            Msg::OpenPathPicker(ref query) => {
+            Cmd::OpenPathPicker(query) => {
                 let paths = self
                     .rt
-                    .block_on(async { self.app.lock().await.search_paths(query) });
+                    .block_on(async { self.app.lock().await.search_paths(&query) });
                 self.model.activate_path_picker(paths);
-                return None;
+                None
             }
-            Msg::OpenSkillPicker(ref query) => {
+            Cmd::OpenSkillPicker(query) => {
                 let skills = self
                     .rt
-                    .block_on(async { self.app.lock().await.search_skills(query) });
+                    .block_on(async { self.app.lock().await.search_skills(&query) });
                 self.model.activate_skill_picker(skills);
-                return None;
+                None
             }
-            Msg::RefineAttachmentPicker(ref query) => {
+            Cmd::RefineAttachmentPicker(query) => {
                 let is_skill = matches!(
                     &self.model.overlay,
                     crate::model::InputOverlay::AttachmentPicker(p)
@@ -199,37 +229,32 @@ impl Runtime {
                 if is_skill {
                     let skills = self
                         .rt
-                        .block_on(async { self.app.lock().await.search_skills(query) });
-                    return Some(Msg::SetSkillPickerResults(skills));
+                        .block_on(async { self.app.lock().await.search_skills(&query) });
+                    Some(Msg::SetSkillPickerResults(skills))
                 } else {
                     let paths = self
                         .rt
-                        .block_on(async { self.app.lock().await.search_paths(query) });
-                    return Some(Msg::SetPathPickerResults(paths));
+                        .block_on(async { self.app.lock().await.search_paths(&query) });
+                    Some(Msg::SetPathPickerResults(paths))
                 }
             }
-            Msg::AddProvider(ref config, ref credential) => {
-                self.handle_add_provider(config.clone(), credential.clone());
-                return None;
+            Cmd::AddProvider(config, credential) => {
+                self.handle_add_provider(config, credential);
+                None
             }
-            Msg::RemoveProvider(ref alias) => {
-                self.handle_remove_provider(alias.clone());
-                return None;
+            Cmd::RemoveProvider(alias) => {
+                self.handle_remove_provider(alias);
+                None
             }
-            Msg::OpenModelPicker(ref models) => {
-                self.model.cached_models = Some(models.clone());
+            Cmd::SelectModel(selection) => {
+                self.handle_select_model(selection);
+                None
             }
-            Msg::SelectModel(ref selection) => {
-                self.handle_select_model(selection.clone());
-                return None;
+            Cmd::ResumeSession(session_id) => {
+                self.handle_resume_session(session_id);
+                None
             }
-            Msg::ResumeSession(ref session_id) => {
-                self.handle_resume_session(session_id.clone());
-                return None;
-            }
-            _ => {}
         }
-        update(&mut self.model, &self.view_state, msg)
     }
 
     fn spawn_send_message(&mut self, input: Vec<gantry_core::InputToken>) {
@@ -249,23 +274,23 @@ impl Runtime {
         let task = self.rt.spawn(async move {
             match gantry_core::stream_message(app, input.clone()).await {
                 Err(e) => {
-                    let _ = tx.send(Msg::StreamError(e.to_string())).await;
+                    let _ = tx.send(Msg::StreamError(e.to_string()).into()).await;
                 }
                 Ok(mut response) => {
                     is_streaming.store(true, Ordering::SeqCst);
                     while let Some(item) = response.stream.next().await {
                         if cancel.load(Ordering::SeqCst)
-                            || tx.send(Msg::StreamItem(item)).await.is_err()
+                            || tx.send(Msg::StreamItem(item).into()).await.is_err()
                         {
                             break;
                         }
                     }
                     response.commit().await;
                     if let Some(cw) = app_ref.lock().await.context_window() {
-                        let _ = tx.send(Msg::ContextWindowUpdated(cw)).await;
+                        let _ = tx.send(Msg::ContextWindowUpdated(cw).into()).await;
                     }
                     is_streaming.store(false, Ordering::SeqCst);
-                    let _ = tx.send(Msg::StreamDone).await;
+                    let _ = tx.send(Msg::StreamDone.into()).await;
                 }
             }
         });
@@ -291,13 +316,15 @@ impl Runtime {
             let mut response = gantry_core::mock_stream_message(event_tx);
             is_streaming.store(true, Ordering::SeqCst);
             while let Some(item) = response.stream.next().await {
-                if cancel.load(Ordering::SeqCst) || tx.send(Msg::StreamItem(item)).await.is_err() {
+                if cancel.load(Ordering::SeqCst)
+                    || tx.send(Msg::StreamItem(item).into()).await.is_err()
+                {
                     break;
                 }
             }
             response.commit().await;
             is_streaming.store(false, Ordering::SeqCst);
-            let _ = tx.send(Msg::StreamDone).await;
+            let _ = tx.send(Msg::StreamDone.into()).await;
         });
         self.stream_task = Some(task);
     }
@@ -314,12 +341,12 @@ impl Runtime {
         self.rt.spawn(async move {
             if let Err(e) = app.lock().await.branch(&entry_id) {
                 let _ = tx
-                    .send(Msg::SetStatus(format!("branch failed: {}", e)))
+                    .send(Msg::SetStatus(format!("branch failed: {}", e)).into())
                     .await;
                 return;
             }
             let messages = ChatMessage::messages_from(app.lock().await.history());
-            let _ = tx.send(Msg::ReloadMessages(messages)).await;
+            let _ = tx.send(Msg::ReloadMessages(messages).into()).await;
         });
     }
 
@@ -329,12 +356,14 @@ impl Runtime {
         self.rt.spawn(async move {
             if let Err(e) = app.lock().await.branch(&branch_id) {
                 let _ = tx
-                    .send(Msg::SetStatus(format!("branch failed: {}", e)))
+                    .send(Msg::SetStatus(format!("branch failed: {}", e)).into())
                     .await;
                 return;
             }
             let messages = ChatMessage::messages_from(app.lock().await.history());
-            let _ = tx.send(Msg::ReloadMessagesWithInput(messages, input)).await;
+            let _ = tx
+                .send(Msg::ReloadMessagesWithInput(messages, input).into())
+                .await;
         });
     }
 
@@ -352,7 +381,7 @@ impl Runtime {
                 let providers = self
                     .rt
                     .block_on(async { self.app.lock().await.list_providers().to_vec() });
-                self.model.overlay = crate::model::InputOverlay::Providers(ProvidersView {
+                self.model.overlay = crate::model::InputOverlay::Providers(ProvidersState {
                     providers,
                     sub: ProvidersSubView::List { selected_idx: 0 },
                 });
@@ -434,10 +463,10 @@ impl Runtime {
         use crate::commands::KnownCommand;
         match cmd {
             KnownCommand::Quit => {
-                let _ = self.msg_tx.try_send(Msg::Quit);
+                let _ = self.msg_tx.try_send(Cmd::Quit.into());
             }
             KnownCommand::New => {
-                let _ = self.msg_tx.try_send(Msg::NewSession);
+                let _ = self.msg_tx.try_send(Cmd::NewSession.into());
             }
             KnownCommand::Model => {
                 if let Some(models) = self.model.cached_models.clone() {
@@ -449,11 +478,11 @@ impl Runtime {
                 self.rt.spawn(async move {
                     match app.lock().await.list_models().await {
                         Ok(models) => {
-                            let _ = tx.send(Msg::OpenModelPicker(models)).await;
+                            let _ = tx.send(Msg::OpenModelPicker(models).into()).await;
                         }
                         Err(e) => {
                             let _ = tx
-                                .send(Msg::SetStatus(format!("Failed to list models: {e}")))
+                                .send(Msg::SetStatus(format!("Failed to list models: {e}")).into())
                                 .await;
                         }
                     }
@@ -464,7 +493,7 @@ impl Runtime {
                 let app = self.app.clone();
                 self.rt.spawn(async move {
                     let providers = app.lock().await.list_providers().to_vec();
-                    let _ = tx.send(Msg::OpenProvidersView(providers)).await;
+                    let _ = tx.send(Msg::OpenProvidersState(providers).into()).await;
                 });
             }
             KnownCommand::Sessions => {
@@ -475,11 +504,15 @@ impl Runtime {
                     match app.list_sessions() {
                         Ok(sessions) => {
                             let active_id = app.session_id().clone();
-                            let _ = tx.send(Msg::OpenSessionsView(sessions, active_id)).await;
+                            let _ = tx
+                                .send(Msg::OpenSessionsState(sessions, active_id).into())
+                                .await;
                         }
                         Err(e) => {
                             let _ = tx
-                                .send(Msg::SetStatus(format!("failed to list sessions: {e}")))
+                                .send(
+                                    Msg::SetStatus(format!("failed to list sessions: {e}")).into(),
+                                )
                                 .await;
                         }
                     }
@@ -491,10 +524,12 @@ impl Runtime {
                 self.rt.spawn(async move {
                     match app.lock().await.get_tree() {
                         Some(tree) => {
-                            let _ = tx.send(Msg::OpenTreeView(tree)).await;
+                            let _ = tx.send(Msg::OpenTreeView(tree).into()).await;
                         }
                         None => {
-                            let _ = tx.send(Msg::SetStatus("No messages yet".into())).await;
+                            let _ = tx
+                                .send(Msg::SetStatus("No messages yet".to_string()).into())
+                                .await;
                         }
                     }
                 });
@@ -512,14 +547,18 @@ impl Runtime {
                         Some(cw) => {
                             let consumption = guard.total_consumption().clone();
                             drop(guard);
-                            let _ = tx.send(Msg::OpenUsageView(cw, consumption)).await;
+                            let _ = tx.send(Msg::OpenUsageState(cw, consumption).into()).await;
                         }
                         None => {
                             drop(guard);
                             let _ = tx
-                                .send(Msg::SetStatus(
-                                    "no context window data yet — send a message first".to_string(),
-                                ))
+                                .send(
+                                    Msg::SetStatus(
+                                        "no context window data yet — send a message first"
+                                            .to_string(),
+                                    )
+                                    .into(),
+                                )
                                 .await;
                         }
                     }

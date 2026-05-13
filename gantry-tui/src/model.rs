@@ -18,11 +18,11 @@ pub enum StreamState {
     Done { duration: Duration },
 }
 
-use crate::chat::ChatModel;
-use crate::input::{AttachmentPicker, AttachmentPickerKind, InputModel};
-use crate::model_picker::{ModelPickerView, format_context_length};
-use crate::sessions::SessionsView;
-use crate::tree::{TreeView, branch_rows};
+use crate::chat::ChatState;
+use crate::input::{AttachmentPickerKind, AttachmentPickerState, InputState};
+use crate::model_picker::ModelPickerState;
+use crate::sessions::SessionsState;
+use crate::tree::{TreeState, branch_rows};
 
 /// The editing sub-mode active when no overlay is open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,25 +33,25 @@ pub enum Mode {
     Insert,
 }
 
-/// The active overlay occupying the input area, or `Chat` when none is open.
+/// The active overlay occupying the input area, or `Input` when none is open.
 pub enum InputOverlay {
     /// No overlay; the input buffer is active in the given mode.
-    Chat(Mode),
-    CommandPicker(crate::command_picker::CommandPicker),
-    ModelPicker(crate::model_picker::ModelPickerView),
-    AttachmentPicker(crate::input::AttachmentPicker),
-    UsageView(crate::usage::UsageView),
-    SessionsView(crate::sessions::SessionsView),
-    TreeView(crate::tree::TreeView),
-    Providers(crate::providers::ProvidersView),
+    Input(Mode),
+    CommandPicker(crate::command_picker::CommandPickerState),
+    ModelPicker(crate::model_picker::ModelPickerState),
+    AttachmentPicker(crate::input::AttachmentPickerState),
+    Usage(crate::usage::UsageState),
+    Sessions(crate::sessions::SessionsState),
+    Tree(crate::tree::TreeState),
+    Providers(crate::providers::ProvidersState),
 }
 
 pub struct Model {
     pub session_id: Option<SessionId>,
     pub selection: Option<ModelSelection>,
     pub overlay: InputOverlay,
-    pub chat: ChatModel,
-    pub input: InputModel,
+    pub chat: ChatState,
+    pub input: InputState,
     pub project_path: std::path::PathBuf,
     pub cwd: std::path::PathBuf,
     pub status_message: Option<String>,
@@ -67,9 +67,9 @@ impl Model {
         Self {
             session_id: None,
             selection: None,
-            overlay: InputOverlay::Chat(Mode::Normal),
-            chat: ChatModel::new(),
-            input: InputModel::new(),
+            overlay: InputOverlay::Input(Mode::Normal),
+            chat: ChatState::new(),
+            input: InputState::new(),
             project_path: std::path::PathBuf::new(),
             cwd: std::path::PathBuf::new(),
             status_message: None,
@@ -122,13 +122,13 @@ impl Model {
     /// Opens the path attachment picker, inserting `+` into the input to seed the filter display.
     pub fn activate_path_picker(&mut self, results: Vec<PathSearchResult>) {
         self.input.insert('+');
-        self.overlay = InputOverlay::AttachmentPicker(AttachmentPicker::new_path(results));
+        self.overlay = InputOverlay::AttachmentPicker(AttachmentPickerState::new_path(results));
     }
 
     /// Opens the skill attachment picker, inserting `/` into the input to seed the filter display.
     pub fn activate_skill_picker(&mut self, results: Vec<SkillSearchResult>) {
         self.input.insert('/');
-        self.overlay = InputOverlay::AttachmentPicker(AttachmentPicker::new_skill(results));
+        self.overlay = InputOverlay::AttachmentPicker(AttachmentPickerState::new_skill(results));
     }
 
     /// Appends a character to the attachment picker filter string and mirrors it into the input.
@@ -206,46 +206,26 @@ impl Model {
     /// Opens the model picker with the given list of available models.
     pub fn open_model_picker(&mut self, models: Vec<ModelSelection>) {
         let active_selection = self.selection.clone();
-        let selected_idx = active_selection
-            .as_ref()
-            .and_then(|s| models.iter().position(|m| m == s))
-            .unwrap_or(0);
-        let model_col_width = models
-            .iter()
-            .map(|s| s.model_id.as_str().chars().count() as u16)
-            .max()
-            .unwrap_or(0);
-        let provider_col_width = models
-            .iter()
-            .map(|s| s.provider_alias.as_str().chars().count() as u16)
-            .max()
-            .unwrap_or(0);
-        let context_col_width = models
-            .iter()
-            .filter_map(|s| s.context_length)
-            .map(|n| format_context_length(n).len() as u16)
-            .max()
-            .unwrap_or(0);
-        let mut picker = ModelPickerView {
-            models,
-            filter: String::new(),
-            selected_idx,
-            active_selection,
-            filtered: Vec::new(),
-            model_col_width,
-            provider_col_width,
-            context_col_width,
-        };
-        picker.refilter();
+        let active_ref = active_selection.clone();
+        let mut picker = ModelPickerState::new(models, active_selection);
+        // Pre-select the currently active model if it is in the list.
+        if let Some(active) = active_ref {
+            if let Some(idx) = picker
+                .picker
+                .filtered
+                .iter()
+                .position(|e| e.item.selection == active)
+            {
+                picker.picker.selected_idx = idx;
+            }
+        }
         self.overlay = InputOverlay::ModelPicker(picker);
     }
 
     /// Returns the currently highlighted model selection in the model picker, if any.
     pub fn selected_model_in_picker(&self) -> Option<ModelSelection> {
         if let InputOverlay::ModelPicker(ref mv) = self.overlay {
-            mv.filtered
-                .get(mv.selected_idx)
-                .map(|e| e.selection.clone())
+            mv.picker.selected().map(|e| e.selection.clone())
         } else {
             None
         }
@@ -257,7 +237,7 @@ impl Model {
             .iter()
             .rposition(|s| s.id == active_session_id)
             .unwrap_or(sessions.len().saturating_sub(1));
-        self.overlay = InputOverlay::SessionsView(SessionsView {
+        self.overlay = InputOverlay::Sessions(SessionsState {
             sessions,
             selected_idx,
             active_session_id,
@@ -266,7 +246,7 @@ impl Model {
 
     /// Returns the session highlighted in the sessions browser, if any.
     pub fn selected_session(&self) -> Option<&SessionInfo> {
-        if let InputOverlay::SessionsView(ref sv) = self.overlay {
+        if let InputOverlay::Sessions(ref sv) = self.overlay {
             sv.sessions.get(sv.selected_idx)
         } else {
             None
@@ -279,7 +259,7 @@ impl Model {
             .iter()
             .position(|(b, _)| b.node.id == tree.current_leaf_id)
             .unwrap_or(0);
-        self.overlay = InputOverlay::TreeView(TreeView {
+        self.overlay = InputOverlay::Tree(TreeState {
             tree,
             selected_idx,
             scroll_offset: 0,

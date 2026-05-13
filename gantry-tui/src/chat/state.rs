@@ -1,6 +1,6 @@
 use gantry_core::{DiffHunk, UserId};
 
-pub struct ChatModel {
+pub struct ChatState {
     pub messages: Vec<ChatMessage>,
     pub streaming_content: Option<String>,
     pub streaming_message_idx: Option<usize>,
@@ -21,8 +21,8 @@ pub struct ChatModel {
     pub user_is_scrolling: bool,
 }
 
-impl ChatModel {
-    /// Creates a new empty `ChatModel`.
+impl ChatState {
+    /// Creates a new empty `ChatState`.
     pub fn new() -> Self {
         Self {
             messages: Vec::new(),

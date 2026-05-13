@@ -7,6 +7,10 @@ use gantry_core::{
 use crate::chat::ChatMessage;
 use crate::commands::KnownCommand;
 
+/// Pure model-update messages handled by `update()`.
+///
+/// These drive all state transitions in `Model`. `update()` may return a `Cmd` to request
+/// a side effect from `Runtime`.
 pub enum Msg {
     // Input
     Key(crossterm::event::KeyEvent),
@@ -23,50 +27,71 @@ pub enum Msg {
 
     // Command results
     SetStatus(String),
-    NewSession,
+    /// Applied after `Cmd::NewSession` creates a fresh session in the app.
+    SessionCreated,
 
     // Scroll the chat window (positive = up, negative = down)
     ScrollChat(i32),
 
     // Tree view
     OpenTreeView(SessionTree),
+    ReloadMessages(Vec<ChatMessage>),
+    ReloadMessagesWithInput(Vec<ChatMessage>, String),
+
+    // Sessions browser
+    OpenSessionsState(Vec<SessionInfo>, SessionId),
+
+    ContextWindowUpdated(ContextWindow),
+    OpenUsageState(ContextWindow, Usage),
+
+    // Providers overlay
+    OpenProvidersState(Vec<ProviderConfig>),
+
+    // Model picker overlay
+    OpenModelPicker(Vec<ModelSelection>),
+
+    // Attachment picker results (produced by Runtime after a search)
+    SetPathPickerResults(Vec<PathSearchResult>),
+    SetSkillPickerResults(Vec<SkillSearchResult>),
+}
+
+/// Side-effect commands returned by `update()` and executed by `Runtime`.
+///
+/// A `Cmd` requests async I/O or app-level mutations that cannot happen inside the pure
+/// `update()` function. `Runtime` executes each `Cmd` and may send follow-up `Msg` values
+/// back into the event loop.
+pub enum Cmd {
+    // Trigger an agent stream with the given tokens.
+    SendMessage(Vec<InputToken>),
+
+    // Open the path attachment picker with results for the given query.
+    OpenPathPicker(String),
+
+    // Open the skill attachment picker with results for the given query.
+    OpenSkillPicker(String),
+
+    // Re-run the attachment picker search with an updated query.
+    RefineAttachmentPicker(String),
+
+    /// Creates a new session in the app and then sends `Msg::SessionCreated`.
+    NewSession,
+    InterruptStream,
+    RunCommand(KnownCommand),
+
+    // Session branching
     BranchTo(String),
     BranchToWithInput {
         branch_id: String,
         input: String,
     },
-    ReloadMessages(Vec<ChatMessage>),
-    ReloadMessagesWithInput(Vec<ChatMessage>, String),
-
-    // Sessions browser
-    OpenSessionsView(Vec<SessionInfo>, SessionId),
     ResumeSession(SessionId),
 
-    ContextWindowUpdated(ContextWindow),
-    OpenUsageView(ContextWindow, Usage),
-
-    // Providers overlay
-    OpenProvidersView(Vec<ProviderConfig>),
+    // Provider mutations
     AddProvider(ProviderConfig, Option<StoredCredential>),
     RemoveProvider(ProviderAlias),
 
-    // Model picker overlay
-    OpenModelPicker(Vec<ModelSelection>),
+    // Model selection (applied to the app, not just the model)
     SelectModel(ModelSelection),
 
-    // Side-effect signals intercepted by Runtime before update()
-    SendMessage(Vec<InputToken>),
-    /// Open the path attachment picker with results for the given query.
-    OpenPathPicker(String),
-    /// Open the skill attachment picker with results for the given query.
-    OpenSkillPicker(String),
-    /// Re-run the attachment picker search with an updated query.
-    RefineAttachmentPicker(String),
-    /// Populate the attachment picker with fresh path results (produced by Runtime).
-    SetPathPickerResults(Vec<PathSearchResult>),
-    /// Populate the attachment picker with fresh skill results (produced by Runtime).
-    SetSkillPickerResults(Vec<SkillSearchResult>),
-    InterruptStream,
-    RunCommand(KnownCommand),
     Quit,
 }

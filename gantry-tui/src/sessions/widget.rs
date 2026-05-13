@@ -5,15 +5,15 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::sessions::SessionsView;
+use crate::sessions::SessionsState;
 
-pub struct SessionsViewWidget<'a> {
-    state: &'a SessionsView,
+pub struct SessionsWidget<'a> {
+    state: &'a SessionsState,
 }
 
-impl<'a> SessionsViewWidget<'a> {
+impl<'a> SessionsWidget<'a> {
     /// Creates a widget for the sessions browser overlay.
-    pub fn new(state: &'a SessionsView) -> Self {
+    pub fn new(state: &'a SessionsState) -> Self {
         Self { state }
     }
 
@@ -26,7 +26,7 @@ impl<'a> SessionsViewWidget<'a> {
     }
 }
 
-impl Widget for SessionsViewWidget<'_> {
+impl Widget for SessionsWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let block = Block::default().borders(Borders::NONE);
         block.render(area, buf);

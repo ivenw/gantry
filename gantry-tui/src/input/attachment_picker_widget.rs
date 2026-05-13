@@ -8,7 +8,7 @@ use ratatui::{
     widgets::Widget,
 };
 
-use crate::input::{AttachmentPicker, AttachmentPickerKind};
+use crate::input::{AttachmentPickerKind, AttachmentPickerState};
 use crate::widgets::table::{TableView, highlighted_line};
 
 const STYLE_TEXT: Style = Style::new().fg(Color::White);
@@ -16,16 +16,16 @@ const STYLE_MATCH: Style = Style::new().fg(Color::LightYellow);
 const STYLE_SELECTED: Style = Style::new().fg(Color::LightYellow).bold();
 const STYLE_DESC: Style = Style::new().fg(Color::Gray);
 
-pub struct AttachmentPickerView<'a> {
-    state: &'a AttachmentPicker,
+pub struct AttachmentPickerWidget<'a> {
+    state: &'a AttachmentPickerState,
     project_root: &'a Path,
 }
 
-impl<'a> AttachmentPickerView<'a> {
+impl<'a> AttachmentPickerWidget<'a> {
     pub const MAX_VISIBLE: usize = 10;
 
-    /// Creates an `AttachmentPickerView` from picker state and the project root for path display.
-    pub fn new(state: &'a AttachmentPicker, project_root: &'a Path) -> Self {
+    /// Creates an `AttachmentPickerWidget` from picker state and the project root for path display.
+    pub fn new(state: &'a AttachmentPickerState, project_root: &'a Path) -> Self {
         Self {
             state,
             project_root,
@@ -38,7 +38,7 @@ impl<'a> AttachmentPickerView<'a> {
     }
 }
 
-impl Widget for AttachmentPickerView<'_> {
+impl Widget for AttachmentPickerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if area.width == 0 || area.height == 0 {
             return;

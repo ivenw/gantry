@@ -1,5 +1,5 @@
-pub mod model;
-pub mod view;
+pub mod state;
+pub mod widget;
 
-pub use model::SessionsView;
-pub use view::SessionsViewWidget;
+pub use state::SessionsState;
+pub use widget::SessionsWidget;

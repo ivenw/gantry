@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::command_picker::CommandPicker;
+use crate::command_picker::CommandPickerState;
 use crate::theme;
 use crate::widgets::table::{TableView, highlighted_line};
 
@@ -23,25 +23,26 @@ const STYLE_DESC: Style = Style::new().fg(Color::Gray);
 /// Overhead rows: top border + search line + blank separator + bottom border.
 const CHROME_HEIGHT: u16 = 4;
 
-pub struct CommandPickerView<'a> {
-    state: &'a CommandPicker,
+pub struct CommandPickerWidget<'a> {
+    state: &'a CommandPickerState,
 }
 
-impl<'a> CommandPickerView<'a> {
-    /// Creates a `CommandPickerView` from picker state.
-    pub fn new(state: &'a CommandPicker) -> Self {
+impl<'a> CommandPickerWidget<'a> {
+    /// Creates a `CommandPickerWidget` from picker state.
+    pub fn new(state: &'a CommandPickerState) -> Self {
         Self { state }
     }
 
     /// Returns the total height needed to render the picker.
     pub fn height(&self) -> u16 {
-        CHROME_HEIGHT + self.state.filtered.len().clamp(1, MAX_VISIBLE) as u16
+        CHROME_HEIGHT + self.state.picker.filtered.len().clamp(1, MAX_VISIBLE) as u16
     }
 }
 
-impl Widget for CommandPickerView<'_> {
+impl Widget for CommandPickerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let filtered = &self.state.filtered;
+        let picker = &self.state.picker;
+        let filtered = &picker.filtered;
 
         let block = Block::default()
             .borders(Borders::ALL)
@@ -60,7 +61,7 @@ impl Widget for CommandPickerView<'_> {
             return;
         }
 
-        let prompt = format!("> {}", self.state.filter);
+        let prompt = format!("> {}", picker.filter);
         buf.set_string(inner.x, inner.y, &prompt, STYLE_TEXT);
 
         // inner.y + 1 is the blank separator; list starts at inner.y + 2.
@@ -85,7 +86,7 @@ impl Widget for CommandPickerView<'_> {
             return;
         }
 
-        let selected = self.state.selected_idx;
+        let selected = picker.selected_idx;
         let count = filtered.len();
         let max_visible = list.height as usize;
 
@@ -101,12 +102,13 @@ impl Widget for CommandPickerView<'_> {
             .enumerate()
             .skip(start)
             .take(max_visible)
-            .map(|(i, cmd)| {
+            .map(|(i, entry)| {
                 let is_selected = i == selected;
+                let cmd = &entry.item;
                 let name_line = if is_selected {
                     Line::from(Span::styled(cmd.name.clone(), STYLE_SELECTED))
                 } else {
-                    highlighted_line(&cmd.name, &cmd.indices, STYLE_TEXT, STYLE_MATCH)
+                    highlighted_line(&cmd.name, &entry.indices, STYLE_TEXT, STYLE_MATCH)
                 };
                 let desc_line = Line::from(Span::styled(cmd.description.clone(), STYLE_DESC));
                 vec![name_line, desc_line]

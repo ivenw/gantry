@@ -1,5 +1,5 @@
-pub mod model;
-pub mod view;
+pub mod state;
+pub mod widget;
 
-pub use model::{ChatMessage, ChatModel};
-pub use view::ChatViewState;
+pub use state::{ChatMessage, ChatState};
+pub use widget::ChatWidgetState;

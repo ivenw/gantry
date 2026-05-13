@@ -8,6 +8,7 @@ mod input;
 mod message;
 mod model;
 mod model_picker;
+mod picker;
 mod providers;
 mod runtime;
 mod sessions;
@@ -16,6 +17,7 @@ pub mod theme;
 mod tree;
 mod update;
 mod usage;
+mod utils;
 mod view;
 mod widgets;
 

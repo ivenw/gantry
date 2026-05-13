@@ -1,5 +1,5 @@
-pub mod model;
-pub mod view;
+pub mod state;
+pub mod widget;
 
-pub use model::{CommandEntry, CommandPicker};
-pub use view::CommandPickerView;
+pub use state::{CommandEntry, CommandPickerState};
+pub use widget::CommandPickerWidget;

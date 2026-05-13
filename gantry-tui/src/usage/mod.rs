@@ -1,5 +1,5 @@
-pub mod model;
-pub mod view;
+pub mod state;
+pub mod widget;
 
-pub use model::UsageView;
-pub use view::UsageViewWidget;
+pub use state::UsageState;
+pub use widget::UsageWidget;

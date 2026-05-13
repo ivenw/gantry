@@ -7,14 +7,18 @@ use gantry_core::{
 use crate::command_picker::CommandEntry;
 use crate::commands::KnownCommand;
 use crate::input::prev_char_boundary;
-use crate::message::Msg;
+use crate::message::{Cmd, Msg};
 use crate::model::{InputOverlay, Mode, Model, StreamState};
 use crate::providers::{CopilotAuthKind, ProviderWizard, ProvidersSubView, WizardProviderKind};
 use crate::tree::branch_rows;
-use crate::view::ViewState;
+use crate::view::WidgetState;
 use gantry_core::SessionId;
 
-pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg> {
+/// Applies a `Msg` to the model, returning an optional `Cmd` to be executed by `Runtime`.
+///
+/// This function is pure: it only reads and mutates `Model`. All side effects are carried
+/// out by `Runtime` after inspecting the returned `Cmd`.
+pub fn update(model: &mut Model, view_state: &WidgetState, msg: Msg) -> Option<Cmd> {
     match msg {
         Msg::StreamItem(item) => handle_stream_item(model, item),
         Msg::StreamDone => {
@@ -37,7 +41,7 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             model.status_message = Some(s);
             None
         }
-        Msg::NewSession => {
+        Msg::SessionCreated => {
             model.chat.reset();
             model.status_message = None;
             model.reset_stream();
@@ -51,12 +55,10 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
             None
         }
-        Msg::OpenSessionsView(sessions, active_id) => {
+        Msg::OpenSessionsState(sessions, active_id) => {
             model.open_sessions_view(sessions, active_id);
             None
         }
-        // ResumeSession is handled in Runtime before update() is called.
-        Msg::ResumeSession(_) => None,
         Msg::OpenTreeView(nodes) => {
             model.open_tree_view(nodes);
             None
@@ -65,7 +67,7 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             model.chat.messages = messages;
             model.chat.scroll_offset = 0;
             model.chat.user_is_scrolling = false;
-            model.overlay = InputOverlay::Chat(Mode::Normal);
+            model.overlay = InputOverlay::Input(Mode::Normal);
             None
         }
         Msg::ReloadMessagesWithInput(messages, input) => {
@@ -73,32 +75,29 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             model.chat.scroll_offset = 0;
             model.chat.user_is_scrolling = false;
             model.input.set_text(input);
-            model.overlay = InputOverlay::Chat(Mode::Normal);
+            model.overlay = InputOverlay::Input(Mode::Normal);
             None
         }
         Msg::ContextWindowUpdated(cw) => {
             model.context_window = Some(cw);
             None
         }
-        Msg::OpenProvidersView(providers) => {
-            use crate::providers::{ProvidersSubView, ProvidersView};
-            model.overlay = InputOverlay::Providers(ProvidersView {
+        Msg::OpenProvidersState(providers) => {
+            use crate::providers::{ProvidersState, ProvidersSubView};
+            model.overlay = InputOverlay::Providers(ProvidersState {
                 providers,
                 sub: ProvidersSubView::List { selected_idx: 0 },
             });
             None
         }
-        // AddProvider and RemoveProvider are handled in Runtime before update() is called.
-        Msg::AddProvider(_, _) | Msg::RemoveProvider(_) => None,
         Msg::OpenModelPicker(selections) => {
+            model.cached_models = Some(selections.clone());
             model.open_model_picker(selections);
             None
         }
-        // SelectModel is handled in Runtime before update() is called.
-        Msg::SelectModel(_) => None,
-        Msg::OpenUsageView(cw, consumption) => {
-            use crate::usage::UsageView;
-            model.overlay = InputOverlay::UsageView(UsageView {
+        Msg::OpenUsageState(cw, consumption) => {
+            use crate::usage::UsageState;
+            model.overlay = InputOverlay::Usage(UsageState {
                 context_window: cw,
                 consumption,
             });
@@ -116,15 +115,6 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
             }
             None
         }
-        Msg::Quit
-        | Msg::SendMessage(_)
-        | Msg::InterruptStream
-        | Msg::RunCommand(_)
-        | Msg::BranchTo(_)
-        | Msg::BranchToWithInput { .. }
-        | Msg::OpenPathPicker(_)
-        | Msg::OpenSkillPicker(_)
-        | Msg::RefineAttachmentPicker(_) => None,
         Msg::AppEvent(AppEvent::EditDiff { path, hunks }) => {
             model.chat.attach_edit_diff(&path, hunks);
             None
@@ -135,7 +125,7 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
 fn handle_stream_item(
     model: &mut Model,
     item: Result<ChatStreamItem, StreamingError>,
-) -> Option<Msg> {
+) -> Option<Cmd> {
     match item {
         Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(r))) => {
             let text: String = r
@@ -201,38 +191,40 @@ fn handle_stream_item(
 
 fn handle_key(
     model: &mut Model,
-    view_state: &ViewState,
+    view_state: &WidgetState,
     key: crossterm::event::KeyEvent,
-) -> Option<Msg> {
+) -> Option<Cmd> {
     match &model.overlay {
         InputOverlay::ModelPicker(_) => handle_key_model_picker(model, key),
         InputOverlay::Providers(_) => handle_key_providers_view(model, key),
-        InputOverlay::SessionsView(_) => handle_key_sessions_view(model, key),
-        InputOverlay::TreeView(_) => handle_key_tree_view(model, key),
-        InputOverlay::UsageView(_) => handle_key_usage_view(model, key),
+        InputOverlay::Sessions(_) => handle_key_sessions_view(model, key),
+        InputOverlay::Tree(_) => handle_key_tree_view(model, key),
+        InputOverlay::Usage(_) => handle_key_usage_view(model, key),
         InputOverlay::CommandPicker(_) => handle_key_command_picker(model, key),
         InputOverlay::AttachmentPicker(_) => handle_key_attachment_picker(model, key),
-        InputOverlay::Chat(Mode::Normal) => handle_key_normal(model, view_state, key),
-        InputOverlay::Chat(Mode::Insert) => handle_key_insert(model, view_state, key),
+        InputOverlay::Input(Mode::Normal) => handle_key_normal(model, view_state, key),
+        InputOverlay::Input(Mode::Insert) => handle_key_insert(model, view_state, key),
     }
 }
 
-fn handle_key_usage_view(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
+fn handle_key_usage_view(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Cmd> {
     if key.code == KeyCode::Esc {
-        model.overlay = InputOverlay::Chat(Mode::Normal);
+        model.overlay = InputOverlay::Input(Mode::Normal);
     }
     None
 }
 
-fn handle_key_model_picker(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
+fn handle_key_model_picker(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Cmd> {
     match key.code {
         KeyCode::Esc => {
-            model.overlay = InputOverlay::Chat(Mode::Normal);
+            model.overlay = InputOverlay::Input(Mode::Normal);
             return None;
         }
         KeyCode::Enter => {
-            let msg = model.selected_model_in_picker().map(Msg::SelectModel);
-            model.overlay = InputOverlay::Chat(Mode::Normal);
+            let msg = model
+                .selected_model_in_picker()
+                .map(|s| Cmd::SelectModel(s));
+            model.overlay = InputOverlay::Input(Mode::Normal);
             return msg;
         }
         _ => {}
@@ -241,34 +233,16 @@ fn handle_key_model_picker(model: &mut Model, key: crossterm::event::KeyEvent) -
         return None;
     };
     match key.code {
-        KeyCode::Up => {
-            let count = mv.filtered.len();
-            if count > 0 {
-                mv.selected_idx = mv.selected_idx.checked_sub(1).unwrap_or(count - 1);
-            }
-        }
-        KeyCode::Down => {
-            let count = mv.filtered.len();
-            if count > 0 {
-                mv.selected_idx = (mv.selected_idx + 1) % count;
-            }
-        }
-        KeyCode::Backspace => {
-            mv.filter.pop();
-            mv.selected_idx = 0;
-            mv.refilter();
-        }
-        KeyCode::Char(c) => {
-            mv.filter.push(c);
-            mv.selected_idx = 0;
-            mv.refilter();
-        }
+        KeyCode::Up => mv.picker.move_up(),
+        KeyCode::Down => mv.picker.move_down(),
+        KeyCode::Backspace => mv.pop_filter(),
+        KeyCode::Char(c) => mv.push_filter(c),
         _ => {}
     }
     None
 }
 
-fn handle_key_providers_view(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
+fn handle_key_providers_view(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Cmd> {
     let sub_kind = if let InputOverlay::Providers(ref pv) = model.overlay {
         match pv.sub {
             ProvidersSubView::List { .. } => 0u8,
@@ -288,10 +262,10 @@ fn handle_key_providers_view(model: &mut Model, key: crossterm::event::KeyEvent)
     }
 }
 
-fn handle_key_providers_list(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
+fn handle_key_providers_list(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Cmd> {
     match key.code {
         KeyCode::Esc => {
-            model.overlay = InputOverlay::Chat(Mode::Normal);
+            model.overlay = InputOverlay::Input(Mode::Normal);
             return None;
         }
         KeyCode::Char('d') => {
@@ -302,7 +276,7 @@ fn handle_key_providers_list(model: &mut Model, key: crossterm::event::KeyEvent)
                 && selected_idx < pv.providers.len()
             {
                 let alias = pv.providers[selected_idx].alias().clone();
-                return Some(Msg::RemoveProvider(alias));
+                return Some(Cmd::RemoveProvider(alias));
             }
             return None;
         }
@@ -343,7 +317,7 @@ fn handle_key_providers_list(model: &mut Model, key: crossterm::event::KeyEvent)
 fn handle_key_providers_type_picker(
     model: &mut Model,
     key: crossterm::event::KeyEvent,
-) -> Option<Msg> {
+) -> Option<Cmd> {
     let InputOverlay::Providers(ref mut pv) = model.overlay else {
         return None;
     };
@@ -386,7 +360,7 @@ fn handle_key_providers_type_picker(
 fn handle_key_copilot_auth_picker(
     model: &mut Model,
     key: crossterm::event::KeyEvent,
-) -> Option<Msg> {
+) -> Option<Cmd> {
     let InputOverlay::Providers(ref mut pv) = model.overlay else {
         return None;
     };
@@ -425,7 +399,7 @@ fn handle_key_copilot_auth_picker(
     None
 }
 
-fn handle_key_wizard(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
+fn handle_key_wizard(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Cmd> {
     let InputOverlay::Providers(ref mut pv) = model.overlay else {
         return None;
     };
@@ -467,7 +441,7 @@ fn handle_key_wizard(model: &mut Model, key: crossterm::event::KeyEvent) -> Opti
                 if w.is_on_confirm() {
                     match w.build() {
                         Ok((config, credential)) => {
-                            return Some(Msg::AddProvider(config, credential));
+                            return Some(Cmd::AddProvider(config, credential));
                         }
                         Err(msg) => {
                             w.error = Some(msg);
@@ -528,20 +502,20 @@ fn handle_key_wizard(model: &mut Model, key: crossterm::event::KeyEvent) -> Opti
     None
 }
 
-fn handle_key_sessions_view(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
+fn handle_key_sessions_view(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Cmd> {
     match key.code {
         KeyCode::Esc => {
-            model.overlay = InputOverlay::Chat(Mode::Normal);
+            model.overlay = InputOverlay::Input(Mode::Normal);
             return None;
         }
         KeyCode::Enter => {
             let session_id: Option<SessionId> = model.selected_session().map(|s| s.id.clone());
-            model.overlay = InputOverlay::Chat(Mode::Normal);
-            return session_id.map(Msg::ResumeSession);
+            model.overlay = InputOverlay::Input(Mode::Normal);
+            return session_id.map(|id| Cmd::ResumeSession(id));
         }
         _ => {}
     }
-    let InputOverlay::SessionsView(ref mut sv) = model.overlay else {
+    let InputOverlay::Sessions(ref mut sv) = model.overlay else {
         return None;
     };
     match key.code {
@@ -563,16 +537,16 @@ fn handle_key_sessions_view(model: &mut Model, key: crossterm::event::KeyEvent) 
     None
 }
 
-fn handle_key_tree_view(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
+fn handle_key_tree_view(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Cmd> {
     match key.code {
         KeyCode::Esc => {
-            model.overlay = InputOverlay::Chat(Mode::Normal);
+            model.overlay = InputOverlay::Input(Mode::Normal);
             return None;
         }
         KeyCode::Enter => return handle_enter_tree_view(model),
         _ => {}
     }
-    let InputOverlay::TreeView(ref mut tv) = model.overlay else {
+    let InputOverlay::Tree(ref mut tv) = model.overlay else {
         return None;
     };
     match key.code {
@@ -590,20 +564,20 @@ fn handle_key_tree_view(model: &mut Model, key: crossterm::event::KeyEvent) -> O
     None
 }
 
-fn handle_key_command_picker(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
+fn handle_key_command_picker(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Cmd> {
     match key.code {
         KeyCode::Esc => {
-            model.overlay = InputOverlay::Chat(Mode::Normal);
+            model.overlay = InputOverlay::Input(Mode::Normal);
             return None;
         }
         KeyCode::Enter => {
             let selected = if let InputOverlay::CommandPicker(ref p) = model.overlay {
-                p.filtered.get(p.selected_idx).cloned()
+                p.picker.selected().cloned()
             } else {
                 None
             };
-            model.overlay = InputOverlay::Chat(Mode::Normal);
-            return selected.map(|cmd| Msg::RunCommand(cmd.command));
+            model.overlay = InputOverlay::Input(Mode::Normal);
+            return selected.map(|cmd| Cmd::RunCommand(cmd.command));
         }
         _ => {}
     }
@@ -611,47 +585,29 @@ fn handle_key_command_picker(model: &mut Model, key: crossterm::event::KeyEvent)
         return None;
     };
     match key.code {
-        KeyCode::Up => {
-            let count = picker.filtered.len();
-            if count > 0 {
-                picker.selected_idx = picker.selected_idx.checked_sub(1).unwrap_or(count - 1);
-            }
-        }
-        KeyCode::Down => {
-            let count = picker.filtered.len();
-            if count > 0 {
-                picker.selected_idx = (picker.selected_idx + 1) % count;
-            }
-        }
-        KeyCode::Char(c) => {
-            picker.filter.push(c);
-            picker.selected_idx = 0;
-            picker.refilter();
-        }
-        KeyCode::Backspace => {
-            picker.filter.pop();
-            picker.selected_idx = 0;
-            picker.refilter();
-        }
+        KeyCode::Up => picker.picker.move_up(),
+        KeyCode::Down => picker.picker.move_down(),
+        KeyCode::Char(c) => picker.push_filter(c),
+        KeyCode::Backspace => picker.pop_filter(),
         _ => {}
     }
     None
 }
 
-fn handle_key_attachment_picker(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Msg> {
+fn handle_key_attachment_picker(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Cmd> {
     match key.code {
         KeyCode::Esc => {
-            model.overlay = InputOverlay::Chat(Mode::Insert);
+            model.overlay = InputOverlay::Input(Mode::Insert);
             return None;
         }
         KeyCode::Backspace => {
             let had_chars = model.attachment_picker_filter_pop();
             if !had_chars {
-                model.overlay = InputOverlay::Chat(Mode::Insert);
+                model.overlay = InputOverlay::Input(Mode::Insert);
                 return None;
             }
             let query = model.attachment_picker_filter().unwrap_or("").to_string();
-            return Some(Msg::RefineAttachmentPicker(query));
+            return Some(Cmd::RefineAttachmentPicker(query));
         }
         KeyCode::Enter => {
             let token = model.selected_attachment();
@@ -659,7 +615,7 @@ fn handle_key_attachment_picker(model: &mut Model, key: crossterm::event::KeyEve
                 .attachment_picker_filter()
                 .map(|f| f.len())
                 .unwrap_or(0);
-            model.overlay = InputOverlay::Chat(Mode::Insert);
+            model.overlay = InputOverlay::Input(Mode::Insert);
             if let Some(token) = token {
                 // +1 for the sigil character that was inserted into the input on activation.
                 model
@@ -679,17 +635,17 @@ fn handle_key_attachment_picker(model: &mut Model, key: crossterm::event::KeyEve
                 .unwrap_or(true);
             if is_empty {
                 model.input.delete_before_cursor();
-                model.overlay = InputOverlay::Chat(Mode::Insert);
+                model.overlay = InputOverlay::Input(Mode::Insert);
             } else {
                 model.attachment_picker_filter_clear();
-                return Some(Msg::RefineAttachmentPicker(String::new()));
+                return Some(Cmd::RefineAttachmentPicker(String::new()));
             }
             return None;
         }
         KeyCode::Char(c) => {
             model.attachment_picker_filter_push(c);
             let query = model.attachment_picker_filter().unwrap_or("").to_string();
-            return Some(Msg::RefineAttachmentPicker(query));
+            return Some(Cmd::RefineAttachmentPicker(query));
         }
         _ => {}
     }
@@ -717,29 +673,17 @@ fn handle_key_attachment_picker(model: &mut Model, key: crossterm::event::KeyEve
 
 fn handle_key_normal(
     model: &mut Model,
-    view_state: &ViewState,
+    view_state: &WidgetState,
     key: crossterm::event::KeyEvent,
-) -> Option<Msg> {
+) -> Option<Cmd> {
     match key.code {
         KeyCode::Char('i') => {
-            model.overlay = InputOverlay::Chat(Mode::Insert);
+            model.overlay = InputOverlay::Input(Mode::Insert);
             None
         }
         KeyCode::Char(' ') => {
-            let commands = available_command_entries();
-            let cmd_col_width = commands
-                .iter()
-                .map(|c| c.name.chars().count() as u16)
-                .max()
-                .unwrap_or(0);
-            let mut picker = crate::command_picker::CommandPicker {
-                commands,
-                filter: String::new(),
-                selected_idx: 0,
-                filtered: Vec::new(),
-                cmd_col_width,
-            };
-            picker.refilter();
+            let picker =
+                crate::command_picker::CommandPickerState::new(available_command_entries());
             model.overlay = InputOverlay::CommandPicker(picker);
             None
         }
@@ -771,9 +715,9 @@ fn handle_key_normal(
 
 fn handle_key_insert(
     model: &mut Model,
-    view_state: &ViewState,
+    view_state: &WidgetState,
     key: crossterm::event::KeyEvent,
-) -> Option<Msg> {
+) -> Option<Cmd> {
     if let KeyCode::Char('c') = key.code
         && key.modifiers.contains(KeyModifiers::CONTROL)
     {
@@ -783,9 +727,9 @@ fn handle_key_insert(
 
     match key.code {
         KeyCode::Esc => {
-            model.overlay = InputOverlay::Chat(Mode::Normal);
+            model.overlay = InputOverlay::Input(Mode::Normal);
             if model.is_streaming() {
-                return Some(Msg::InterruptStream);
+                return Some(Cmd::InterruptStream);
             }
             None
         }
@@ -795,10 +739,10 @@ fn handle_key_insert(
                 model.status_message = None;
             }
             if c == '+' {
-                return Some(Msg::OpenPathPicker(String::new()));
+                return Some(Cmd::OpenPathPicker(String::new()));
             }
             if c == '/' {
-                return Some(Msg::OpenSkillPicker(String::new()));
+                return Some(Cmd::OpenSkillPicker(String::new()));
             }
             model.input.insert(c);
             None
@@ -845,8 +789,8 @@ fn handle_key_insert(
     }
 }
 
-fn handle_enter_tree_view(model: &mut Model) -> Option<Msg> {
-    let InputOverlay::TreeView(ref tv) = model.overlay else {
+fn handle_enter_tree_view(model: &mut Model) -> Option<Cmd> {
+    let InputOverlay::Tree(ref tv) = model.overlay else {
         return None;
     };
     let rows = branch_rows(&tv.tree.stem, 0);
@@ -857,17 +801,17 @@ fn handle_enter_tree_view(model: &mut Model) -> Option<Msg> {
             .iter()
             .rfind(|(n, _)| !matches!(n.node.message, gantry_core::Message::User { .. }))
             .map(|(n, _)| n.node.id.to_string())?;
-        Msg::BranchToWithInput {
+        Cmd::BranchToWithInput {
             branch_id: preceding,
             input,
         }
     } else {
-        Msg::BranchTo(node.node.id.to_string())
+        Cmd::BranchTo(node.node.id.to_string())
     };
     Some(msg)
 }
 
-fn handle_enter_insert(model: &mut Model, modifiers: KeyModifiers) -> Option<Msg> {
+fn handle_enter_insert(model: &mut Model, modifiers: KeyModifiers) -> Option<Cmd> {
     if model.status_message.is_some() {
         model.status_message = None;
         return None;
@@ -904,7 +848,7 @@ fn handle_enter_insert(model: &mut Model, modifiers: KeyModifiers) -> Option<Msg
     model.start_stream();
     model.chat.scroll_offset = 0;
     model.chat.user_is_scrolling = false;
-    Some(Msg::SendMessage(tokens))
+    Some(Cmd::SendMessage(tokens))
 }
 
 /// Builds the full list of command entries for the command picker.
@@ -915,7 +859,6 @@ pub fn available_command_entries() -> Vec<CommandEntry> {
             name: k.name().to_string(),
             description: k.description().to_string(),
             command: *k,
-            indices: vec![],
         })
         .collect()
 }

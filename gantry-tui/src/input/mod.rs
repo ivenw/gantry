@@ -1,7 +1,7 @@
-pub mod attachment_picker_view;
-pub mod model;
-pub mod view;
+pub mod attachment_picker_widget;
+pub mod state;
+pub mod widget;
 
-pub use attachment_picker_view::AttachmentPickerView;
-pub use model::{AttachmentPicker, AttachmentPickerKind, InputModel, prev_char_boundary};
-pub use view::InputView;
+pub use attachment_picker_widget::AttachmentPickerWidget;
+pub use state::{AttachmentPickerKind, AttachmentPickerState, InputState, prev_char_boundary};
+pub use widget::InputWidget;

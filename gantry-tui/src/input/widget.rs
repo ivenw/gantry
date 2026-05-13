@@ -7,14 +7,14 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::{input::InputModel, model::Mode, theme};
+use crate::{input::InputState, model::Mode, theme, utils::wrapped_line_count};
 
 const PREFIX: &str = "> ";
 const PREFIX_WIDTH: u16 = PREFIX.len() as u16;
 const BORDER_HEIGHT: u16 = 2;
 
-pub struct InputView<'a> {
-    state: &'a InputModel,
+pub struct InputWidget<'a> {
+    state: &'a InputState,
     project_root: &'a Path,
     /// Byte offset of the cursor within the raw display string.
     cursor: usize,
@@ -26,9 +26,9 @@ pub struct InputView<'a> {
     mode: Mode,
 }
 
-impl<'a> InputView<'a> {
-    /// Creates an `InputView` from the input model and the project root for path display.
-    pub fn new(state: &'a InputModel, project_root: &'a Path) -> Self {
+impl<'a> InputWidget<'a> {
+    /// Creates an `InputWidget` from the input model and the project root for path display.
+    pub fn new(state: &'a InputState, project_root: &'a Path) -> Self {
         let (raw_display, cursor) = state.display_with_cursor(project_root);
         Self {
             state,
@@ -55,8 +55,8 @@ impl<'a> InputView<'a> {
     /// Returns the widget height required to fit the content within `width` terminal columns.
     pub fn height(&self, width: u16) -> u16 {
         let text_width = width.saturating_sub(PREFIX_WIDTH).max(1) as usize;
-        let wrapped_lines = Self::wrapped_line_count(&self.raw_display, text_width);
-        (wrapped_lines as u16 + BORDER_HEIGHT).max(3)
+        let lines = wrapped_line_count(&self.raw_display, text_width);
+        (lines as u16 + BORDER_HEIGHT).max(3)
     }
 
     /// Returns `(col, row)` of the cursor within the text area.
@@ -84,28 +84,9 @@ impl<'a> InputView<'a> {
 
         (col as u16, row as u16)
     }
-
-    fn wrapped_line_count(value: &str, text_width: usize) -> usize {
-        if value.is_empty() {
-            return 1;
-        }
-
-        value
-            .split('\n')
-            .map(|line| {
-                let char_count = line.chars().count();
-                if char_count == 0 {
-                    1
-                } else {
-                    char_count.div_ceil(text_width)
-                }
-            })
-            .sum::<usize>()
-            .max(1)
-    }
 }
 
-impl Widget for InputView<'_> {
+impl Widget for InputWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         use gantry_core::InputToken;
 

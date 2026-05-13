@@ -1,7 +1,7 @@
 use gantry_core::{Branch, SessionTree};
 
 /// State for the session tree overlay.
-pub struct TreeView {
+pub struct TreeState {
     pub tree: SessionTree,
     /// Index into the DFS row order of the currently highlighted row.
     pub selected_idx: usize,

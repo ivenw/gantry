@@ -1,5 +1,5 @@
-pub mod model;
-pub mod view;
+pub mod state;
+pub mod widget;
 
-pub use model::{ModelPickerView, format_context_length};
-pub use view::ModelPickerWidget;
+pub use state::{ModelPickerState, format_context_length};
+pub use widget::ModelPickerWidget;

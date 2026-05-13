@@ -1,6 +1,6 @@
 use gantry_core::DiffHunk;
 
-use crate::chat::model::ChatMessage;
+use crate::chat::state::ChatMessage;
 use ratatui::{
     buffer::Buffer,
     layout::{Margin, Rect},
@@ -16,7 +16,7 @@ const ASSISTANT_PREFIX: &str = "< ";
 const TOOL_SUCCESS_INDICATOR: &str = "+";
 const TOOL_ERROR_INDICATOR: &str = "-";
 
-pub struct ChatView<'a> {
+pub struct ChatWidget<'a> {
     pub messages: &'a [ChatMessage],
     pub scroll_offset: u16,
     /// Current spinner character, shared with the statusline throbber.
@@ -24,12 +24,12 @@ pub struct ChatView<'a> {
 }
 
 #[derive(Default)]
-pub struct ChatViewState {
+pub struct ChatWidgetState {
     pub scrollbar: ScrollbarState,
     pub max_scroll: u16,
 }
 
-impl ChatView<'_> {
+impl ChatWidget<'_> {
     pub fn calc_msg_height(content: &str, width: u16) -> u16 {
         if width == 0 {
             return 1;
@@ -50,8 +50,8 @@ impl ChatView<'_> {
     }
 }
 
-impl StatefulWidget for ChatView<'_> {
-    type State = ChatViewState;
+impl StatefulWidget for ChatWidget<'_> {
+    type State = ChatWidgetState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let messages = self.messages;

@@ -1,7 +1,7 @@
-pub mod model;
-pub mod view;
+pub mod state;
+pub mod widget;
 
-pub use model::{
-    CopilotAuthKind, ProviderWizard, ProvidersSubView, ProvidersView, WizardProviderKind,
+pub use state::{
+    CopilotAuthKind, ProviderWizard, ProvidersState, ProvidersSubView, WizardProviderKind,
 };
-pub use view::ProvidersViewWidget;
+pub use widget::ProvidersWidget;

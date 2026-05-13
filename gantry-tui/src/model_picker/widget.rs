@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::model_picker::{ModelPickerView, format_context_length};
+use crate::model_picker::{ModelPickerState, format_context_length};
 use crate::theme;
 use crate::widgets::table::{TableView, highlighted_line};
 
@@ -22,24 +22,25 @@ const STYLE_PROVIDER: Style = Style::new().fg(Color::DarkGray);
 const CHROME_HEIGHT: u16 = 4;
 
 pub struct ModelPickerWidget<'a> {
-    state: &'a ModelPickerView,
+    state: &'a ModelPickerState,
 }
 
 impl<'a> ModelPickerWidget<'a> {
     /// Creates a `ModelPickerWidget` from picker state.
-    pub fn new(state: &'a ModelPickerView) -> Self {
+    pub fn new(state: &'a ModelPickerState) -> Self {
         Self { state }
     }
 
     /// Returns the total height needed to render the picker.
     pub fn height(&self) -> u16 {
-        CHROME_HEIGHT + self.state.filtered.len().clamp(1, MAX_VISIBLE) as u16
+        CHROME_HEIGHT + self.state.picker.filtered.len().clamp(1, MAX_VISIBLE) as u16
     }
 }
 
 impl Widget for ModelPickerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let filtered = &self.state.filtered;
+        let picker = &self.state.picker;
+        let filtered = &picker.filtered;
 
         let block = Block::default()
             .borders(Borders::ALL)
@@ -58,7 +59,7 @@ impl Widget for ModelPickerWidget<'_> {
             return;
         }
 
-        let prompt = format!("> {}", self.state.filter);
+        let prompt = format!("> {}", picker.filter);
         buf.set_string(inner.x, inner.y, &prompt, STYLE_TEXT);
 
         // inner.y + 1 is the blank separator; list starts at inner.y + 2.
@@ -83,7 +84,7 @@ impl Widget for ModelPickerWidget<'_> {
             return;
         }
 
-        let selected = self.state.selected_idx;
+        let selected = picker.selected_idx;
         let count = filtered.len();
         let max_visible = list.height as usize;
 
@@ -101,20 +102,21 @@ impl Widget for ModelPickerWidget<'_> {
             .take(max_visible)
             .map(|(i, entry)| {
                 let is_cursor = i == selected;
-                let model_str = entry.selection.model_id.as_str().to_owned();
+                let model_entry = &entry.item;
+                let model_str = model_entry.selection.model_id.as_str().to_owned();
                 let model_line = if is_cursor {
                     Line::from(Span::styled(model_str, STYLE_SELECTED))
-                } else if entry.is_active {
+                } else if model_entry.is_active {
                     Line::from(Span::styled(model_str, STYLE_ACTIVE))
                 } else {
                     highlighted_line(&model_str, &entry.indices, STYLE_TEXT, STYLE_MATCH)
                 };
                 let provider_line = Line::from(Span::styled(
-                    entry.selection.provider_alias.as_str().to_owned(),
+                    model_entry.selection.provider_alias.as_str().to_owned(),
                     STYLE_PROVIDER,
                 ));
                 let context_line = Line::from(Span::styled(
-                    entry
+                    model_entry
                         .selection
                         .context_length
                         .map(format_context_length)

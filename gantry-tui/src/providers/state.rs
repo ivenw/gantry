@@ -1,7 +1,7 @@
 use gantry_core::{ProviderAlias, ProviderConfig, StoredCredential};
 
 /// Top-level state for the providers overlay.
-pub struct ProvidersView {
+pub struct ProvidersState {
     pub providers: Vec<ProviderConfig>,
     pub sub: ProvidersSubView,
 }

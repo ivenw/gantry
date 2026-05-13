@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Widget},
 };
 
-use crate::usage::UsageView;
+use crate::usage::UsageState;
 
 /// Colors for each usage bar segment, in render order: system prompt, messages, other, remaining.
 const COLOR_SYSTEM: Color = Color::Cyan;
@@ -14,13 +14,13 @@ const COLOR_MESSAGES: Color = Color::Blue;
 const COLOR_OTHER: Color = Color::Gray;
 const COLOR_REMAINING: Color = Color::DarkGray;
 
-pub struct UsageViewWidget<'a> {
-    state: &'a UsageView,
+pub struct UsageWidget<'a> {
+    state: &'a UsageState,
 }
 
-impl<'a> UsageViewWidget<'a> {
+impl<'a> UsageWidget<'a> {
     /// Creates a new widget bound to the given usage view state.
-    pub fn new(state: &'a UsageView) -> Self {
+    pub fn new(state: &'a UsageState) -> Self {
         Self { state }
     }
 
@@ -33,7 +33,7 @@ impl<'a> UsageViewWidget<'a> {
     }
 }
 
-impl Widget for UsageViewWidget<'_> {
+impl Widget for UsageWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let block = Block::default()
             .title(" Context Window Usage ")

@@ -5,15 +5,15 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::tree::{TreeView, branch_rows};
+use crate::tree::{TreeState, branch_rows};
 
-pub struct TreeViewWidget<'a> {
-    state: &'a TreeView,
+pub struct TreeWidget<'a> {
+    state: &'a TreeState,
 }
 
-impl<'a> TreeViewWidget<'a> {
+impl<'a> TreeWidget<'a> {
     /// Creates a widget for the session tree overlay.
-    pub fn new(state: &'a TreeView) -> Self {
+    pub fn new(state: &'a TreeState) -> Self {
         Self { state }
     }
 
@@ -26,7 +26,7 @@ impl<'a> TreeViewWidget<'a> {
     }
 }
 
-impl Widget for TreeViewWidget<'_> {
+impl Widget for TreeWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let block = Block::default().borders(Borders::NONE);
         block.render(area, buf);
