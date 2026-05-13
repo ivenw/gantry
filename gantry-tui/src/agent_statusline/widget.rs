@@ -1,22 +1,20 @@
 use std::time::Duration;
 
 use crate::effects::throbber::{Throbber, ThrobberStyle};
-use crate::model::{Mode, StreamState};
-use crate::theme;
-use gantry_core::ContextWindow;
+use crate::model::StreamState;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
     prelude::Widget,
     style::{Color, Style},
-    widgets::{Block, Padding, Paragraph, StatefulWidget},
+    widgets::{Paragraph, StatefulWidget},
 };
 
-pub struct AgentStatuslineState {
+pub struct AgentStatuslineWidgetState {
     throbber: Throbber,
 }
 
-impl Default for AgentStatuslineState {
+impl Default for AgentStatuslineWidgetState {
     fn default() -> Self {
         Self {
             throbber: Throbber::new(ThrobberStyle::Ascii),
@@ -24,7 +22,7 @@ impl Default for AgentStatuslineState {
     }
 }
 
-impl AgentStatuslineState {
+impl AgentStatuslineWidgetState {
     /// Advances the spinner to the next frame.
     pub fn tick(&mut self) {
         self.throbber.next();
@@ -36,12 +34,12 @@ impl AgentStatuslineState {
     }
 }
 
-pub struct AgentStatusline<'a> {
+pub struct AgentStatuslineWidget<'a> {
     stream: &'a StreamState,
     status_message: Option<&'a str>,
 }
 
-impl<'a> AgentStatusline<'a> {
+impl<'a> AgentStatuslineWidget<'a> {
     /// Creates a new agent statusline widget from the current stream state.
     pub fn new(stream: &'a StreamState, status_message: Option<&'a str>) -> Self {
         Self {
@@ -71,8 +69,8 @@ fn format_duration(d: Duration) -> String {
     }
 }
 
-impl StatefulWidget for AgentStatusline<'_> {
-    type State = AgentStatuslineState;
+impl StatefulWidget for AgentStatuslineWidget<'_> {
+    type State = AgentStatuslineWidgetState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let (text, color) = match self.stream {
@@ -100,40 +98,6 @@ impl StatefulWidget for AgentStatusline<'_> {
 
         Paragraph::new(text)
             .style(Style::default().fg(color))
-            .render(area, buf);
-    }
-}
-
-pub struct AppStatusline {
-    mode: Mode,
-    context_window: Option<ContextWindow>,
-}
-
-impl AppStatusline {
-    /// Creates a new app statusline view.
-    pub fn new(mode: Mode, context_window: Option<ContextWindow>) -> Self {
-        Self {
-            mode,
-            context_window,
-        }
-    }
-}
-
-impl Widget for AppStatusline {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        let mode_text = match self.mode {
-            Mode::Normal => "NORMAL",
-            Mode::Insert => "INSERT",
-        };
-
-        let text = match self.context_window {
-            Some(cw) => format!("{mode_text}  {}/{} ctx", cw.total_tokens, cw.max_tokens),
-            None => mode_text.to_string(),
-        };
-
-        Paragraph::new(text)
-            .style(Style::default().fg(theme::mode_color(self.mode)))
-            .block(Block::new().padding(Padding::horizontal(2)))
             .render(area, buf);
     }
 }

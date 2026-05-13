@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+mod agent_statusline;
+mod app_statusline;
 mod attachment_picker;
 mod chat;
 mod command_picker;
@@ -13,7 +15,6 @@ mod picker;
 mod providers;
 mod runtime;
 mod sessions;
-mod statusline;
 pub mod theme;
 mod tree;
 mod update;

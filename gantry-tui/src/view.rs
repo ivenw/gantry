@@ -3,23 +3,24 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
 };
 
+use crate::agent_statusline::{AgentStatuslineWidget, AgentStatuslineWidgetState};
+use crate::app_statusline::AppStatuslineWidget;
+use crate::attachment_picker::AttachmentPickerWidget;
 use crate::chat::ChatWidgetState;
 use crate::chat::widget::ChatWidget;
 use crate::command_picker::CommandPickerWidget;
-use crate::attachment_picker::AttachmentPickerWidget;
 use crate::input::InputWidget;
 use crate::model::{InputOverlay, Mode, Model};
 use crate::model_picker::ModelPickerWidget;
 use crate::providers::ProvidersWidget;
 use crate::sessions::SessionsWidget;
-use crate::statusline::{AgentStatusline, AgentStatuslineState, AppStatusline};
 use crate::tree::TreeWidget;
 use crate::usage::UsageWidget;
 
 #[derive(Default)]
 pub struct WidgetState {
     pub chat: ChatWidgetState,
-    pub agent_statusline: AgentStatuslineState,
+    pub agent_statusline: AgentStatuslineWidgetState,
 }
 
 /// Renders the full application UI for the current frame.
@@ -45,7 +46,8 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
         _ => 1,
     };
 
-    let agent_statusline = AgentStatusline::new(&model.stream, model.status_message.as_deref());
+    let agent_statusline =
+        AgentStatuslineWidget::new(&model.stream, model.status_message.as_deref());
     let agent_statusline_height = agent_statusline.height();
 
     let agent_statusline_bottom_pad = if agent_statusline_height > 0 { 1 } else { 0 };
@@ -132,7 +134,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
                 _ => Mode::Normal,
             };
             frame.render_widget(
-                AppStatusline::new(mode, model.context_window.clone()),
+                AppStatuslineWidget::new(mode, model.context_window.clone()),
                 app_statusline_area,
             );
         }

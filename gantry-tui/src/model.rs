@@ -18,8 +18,8 @@ pub enum StreamState {
     Done { duration: Duration },
 }
 
-use crate::chat::ChatState;
 use crate::attachment_picker::{AttachmentPickerKind, AttachmentPickerState};
+use crate::chat::ChatState;
 use crate::input::InputState;
 use crate::model_picker::ModelPickerState;
 use crate::sessions::SessionsState;
