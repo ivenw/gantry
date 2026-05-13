@@ -10,7 +10,7 @@ use ratatui::{
 /// Column widths are provided for the first N-1 columns; the last column fills the remaining
 /// render area. A uniform gap is inserted between every column. Rows are passed pre-sliced
 /// to the visible window — no internal scroll offset.
-pub struct TableView<'a> {
+pub struct TableWidget<'a> {
     /// Widths for all columns except the last, which fills remaining space.
     col_widths: Vec<u16>,
     /// Uniform gap in characters between every adjacent pair of columns.
@@ -18,7 +18,7 @@ pub struct TableView<'a> {
     rows: Vec<Vec<Line<'a>>>,
 }
 
-impl<'a> TableView<'a> {
+impl<'a> TableWidget<'a> {
     /// Creates a `TableView`.
     ///
     /// `col_widths` must contain exactly N-1 entries for an N-column table. Passing more widths
@@ -33,7 +33,7 @@ impl<'a> TableView<'a> {
     }
 }
 
-impl Widget for TableView<'_> {
+impl Widget for TableWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if area.width == 0 || area.height == 0 {
             return;

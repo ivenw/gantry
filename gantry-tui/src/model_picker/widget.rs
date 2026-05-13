@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::model_picker::{ModelPickerState, format_context_length};
 use crate::theme;
-use crate::widgets::table::{TableView, highlighted_line};
+use crate::widgets::table::{TableWidget, highlighted_line};
 
 pub const MAX_VISIBLE: usize = 10;
 
@@ -127,7 +127,7 @@ impl Widget for ModelPickerWidget<'_> {
             })
             .collect();
 
-        TableView::new(
+        TableWidget::new(
             vec![self.state.model_col_width, self.state.provider_col_width],
             12,
             rows,

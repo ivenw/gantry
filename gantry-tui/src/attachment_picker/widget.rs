@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::attachment_picker::{AttachmentPickerKind, AttachmentPickerState};
-use crate::widgets::table::{TableView, highlighted_line};
+use crate::widgets::table::{TableWidget, highlighted_line};
 
 const STYLE_TEXT: Style = Style::new().fg(Color::White);
 const STYLE_MATCH: Style = Style::new().fg(Color::LightYellow);
@@ -87,7 +87,7 @@ impl Widget for AttachmentPickerWidget<'_> {
                         vec![name_line]
                     })
                     .collect();
-                TableView::new(vec![], 0, rows).render(area, buf);
+                TableWidget::new(vec![], 0, rows).render(area, buf);
             }
             AttachmentPickerKind::Skill(results) => {
                 let rows: Vec<Vec<Line>> = results
@@ -107,7 +107,7 @@ impl Widget for AttachmentPickerWidget<'_> {
                         vec![name_line, desc_line]
                     })
                     .collect();
-                TableView::new(vec![self.state.name_col_width], 12, rows).render(area, buf);
+                TableWidget::new(vec![self.state.name_col_width], 12, rows).render(area, buf);
             }
         }
     }

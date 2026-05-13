@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::command_picker::CommandPickerState;
 use crate::theme;
-use crate::widgets::table::{TableView, highlighted_line};
+use crate::widgets::table::{TableWidget, highlighted_line};
 
 /// Minimum spaces between the end of a command name and the start of its description.
 const CMD_DESC_GAP: u16 = 12;
@@ -115,6 +115,6 @@ impl Widget for CommandPickerWidget<'_> {
             })
             .collect();
 
-        TableView::new(vec![self.state.cmd_col_width], CMD_DESC_GAP, rows).render(list, buf);
+        TableWidget::new(vec![self.state.cmd_col_width], CMD_DESC_GAP, rows).render(list, buf);
     }
 }
