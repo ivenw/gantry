@@ -45,6 +45,8 @@ pub struct Model {
     stream_duration: Option<Duration>,
     /// Context window snapshot from the most recently completed stream.
     pub context_window: Option<ContextWindow>,
+    /// Whether the most recently ended stream was interrupted by the user.
+    pub stream_interrupted: bool,
     /// Cached model list fetched on first open of the model picker.
     pub cached_models: Option<Vec<ModelSelection>>,
 }
@@ -70,6 +72,7 @@ impl Model {
             stream_started_at: None,
             stream_duration: None,
             context_window: None,
+            stream_interrupted: false,
             cached_models: None,
         }
     }
@@ -92,12 +95,14 @@ impl Model {
     pub fn reset_stream(&mut self) {
         self.stream_started_at = None;
         self.stream_duration = None;
+        self.stream_interrupted = false;
     }
 
     /// Begins a new stream, resetting the elapsed timer.
     pub fn start_stream(&mut self) {
         self.stream_started_at = Some(Instant::now());
         self.stream_duration = None;
+        self.stream_interrupted = false;
         self.chat.start_streaming_message();
     }
 
@@ -105,15 +110,17 @@ impl Model {
     pub fn finish_stream(&mut self) {
         self.stream_duration = self.stream_started_at.map(|t| t.elapsed());
         self.stream_started_at = None;
+        self.stream_interrupted = false;
         self.chat.finish_streaming();
     }
 
-    /// Cancels an in-progress stream, capturing the elapsed duration.
+    /// Cancels an in-progress stream, marking it as interrupted and capturing the elapsed duration.
     ///
     /// Returns the streaming text that was in progress, if any, so the caller can restore it.
     pub fn cancel_stream(&mut self) -> Option<String> {
         self.stream_duration = self.stream_started_at.map(|t| t.elapsed());
         self.stream_started_at = None;
+        self.stream_interrupted = true;
         self.chat.cancel_streaming()
     }
 

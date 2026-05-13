@@ -51,6 +51,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
 
     let agent_statusline = AgentStatusline::new(
         model.is_streaming(),
+        model.stream_interrupted,
         model.stream_started_at(),
         model.stream_duration(),
         model.status_message.as_deref(),

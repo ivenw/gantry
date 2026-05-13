@@ -109,10 +109,7 @@ impl Widget for InputView<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         use gantry_core::InputToken;
 
-        let mode_color = match self.mode {
-            InputMode::Normal => Color::DarkGray,
-            InputMode::Insert => Color::LightGreen,
-        };
+        let mode_color = theme::mode_color(self.mode);
         Block::default()
             .borders(Borders::TOP | Borders::BOTTOM)
             .border_set(theme::border_set())

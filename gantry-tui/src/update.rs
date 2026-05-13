@@ -18,9 +18,11 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
     match msg {
         Msg::StreamItem(item) => handle_stream_item(model, item),
         Msg::StreamDone => {
-            model.finish_stream();
-            if !model.chat.user_is_scrolling {
-                model.chat.scroll_offset = 0;
+            if !model.stream_interrupted {
+                model.finish_stream();
+                if !model.chat.user_is_scrolling {
+                    model.chat.scroll_offset = 0;
+                }
             }
             None
         }

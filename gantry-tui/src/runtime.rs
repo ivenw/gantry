@@ -159,7 +159,7 @@ impl Runtime {
             }
             Msg::InterruptStream => {
                 self.interrupt_stream();
-                self.model.finish_stream();
+                self.model.cancel_stream();
                 return None;
             }
             Msg::BranchTo(ref entry_id) => {

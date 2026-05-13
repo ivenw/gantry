@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 use crate::effects::throbber::{Throbber, ThrobberStyle};
 use crate::model::InputMode;
+use crate::theme;
 use gantry_core::ContextWindow;
 use ratatui::{
     buffer::Buffer,
@@ -37,6 +38,7 @@ impl AgentStatuslineState {
 
 pub struct AgentStatusline<'a> {
     is_streaming: bool,
+    is_interrupted: bool,
     stream_started_at: Option<Instant>,
     stream_duration: Option<Duration>,
     status_message: Option<&'a str>,
@@ -46,12 +48,14 @@ impl<'a> AgentStatusline<'a> {
     /// Creates a new agent statusline view.
     pub fn new(
         is_streaming: bool,
+        is_interrupted: bool,
         stream_started_at: Option<Instant>,
         stream_duration: Option<Duration>,
         status_message: Option<&'a str>,
     ) -> Self {
         Self {
             is_streaming,
+            is_interrupted,
             stream_started_at,
             stream_duration,
             status_message,
@@ -60,7 +64,11 @@ impl<'a> AgentStatusline<'a> {
 
     /// Returns the height this widget requires: 1 if there is content to display, 0 otherwise.
     pub fn height(&self) -> u16 {
-        if self.is_streaming || self.stream_duration.is_some() || self.status_message.is_some() {
+        if self.is_streaming
+            || self.is_interrupted
+            || self.stream_duration.is_some()
+            || self.status_message.is_some()
+        {
             1
         } else {
             0
@@ -82,22 +90,27 @@ impl StatefulWidget for AgentStatusline<'_> {
     type State = AgentStatuslineState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let text = if self.is_streaming {
+        let (text, color) = if self.is_streaming {
             let elapsed = self
                 .stream_started_at
                 .map(|t| format_duration(t.elapsed()))
                 .unwrap_or_default();
-            format!("{} EVALUATING ({})", state.throbber.current(), elapsed)
+            (
+                format!("{} EVALUATING ({})", state.throbber.current(), elapsed),
+                Color::Gray,
+            )
+        } else if self.is_interrupted {
+            ("INTERRUPTED".to_string(), Color::LightRed)
         } else if let Some(d) = self.stream_duration {
-            format!("* DONE ({})", format_duration(d))
+            (format!("* DONE ({})", format_duration(d)), Color::Gray)
         } else if let Some(msg) = self.status_message {
-            msg.to_string()
+            (msg.to_string(), Color::Gray)
         } else {
             return;
         };
 
         Paragraph::new(text)
-            .style(Style::default().fg(Color::Gray))
+            .style(Style::default().fg(color))
             .render(area, buf);
     }
 }
@@ -130,7 +143,7 @@ impl Widget for AppStatusline {
         };
 
         Paragraph::new(text)
-            .style(Style::default().fg(Color::Gray))
+            .style(Style::default().fg(theme::mode_color(self.mode)))
             .block(Block::new().padding(Padding::horizontal(2)))
             .render(area, buf);
     }
