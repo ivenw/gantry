@@ -16,7 +16,8 @@ pub mod theme;
 mod tree;
 mod update;
 mod usage;
-mod views;
+mod view;
+mod widgets;
 
 use anyhow::{Context, Result};
 use crossterm::{

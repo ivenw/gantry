@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::input::{AttachmentPicker, AttachmentPickerKind};
-use crate::views::table::{TableView, highlighted_line};
+use crate::widgets::table::{TableView, highlighted_line};
 
 const STYLE_TEXT: Style = Style::new().fg(Color::White);
 const STYLE_MATCH: Style = Style::new().fg(Color::LightYellow);

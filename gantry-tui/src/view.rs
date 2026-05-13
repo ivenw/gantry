@@ -1,3 +1,10 @@
+
+use ratatui::{
+    Frame,
+    layout::{Constraint, Direction, Layout},
+};
+
+use crate::chat::ChatViewState;
 use crate::chat::view::ChatView;
 use crate::command_picker::CommandPickerView;
 use crate::input::{AttachmentPickerView, InputView};
@@ -5,16 +12,17 @@ use crate::model::Model;
 use crate::model_picker::ModelPickerWidget;
 use crate::providers::ProvidersViewWidget;
 use crate::sessions::SessionsViewWidget;
-use crate::statusline::{AgentStatusline, AppStatusline};
+use crate::statusline::{AgentStatusline, AgentStatuslineState, AppStatusline};
 use crate::tree::TreeViewWidget;
 use crate::usage::UsageViewWidget;
-use crate::views::ViewState;
 
-use ratatui::{
-    Frame,
-    layout::{Constraint, Direction, Layout},
-};
+#[derive(Default)]
+pub struct ViewState {
+    pub chat: ChatViewState,
+    pub agent_statusline: AgentStatuslineState,
+}
 
+/// Renders the full application UI for the current frame.
 pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) {
     let area = frame.area();
 

@@ -16,7 +16,7 @@ use crate::message::Msg;
 use crate::model::Model;
 use crate::providers::ProvidersSubView;
 use crate::update::update;
-use crate::views::{self, ViewState};
+use crate::view::{self, ViewState};
 
 pub struct Runtime {
     model: Model,
@@ -85,7 +85,7 @@ impl Runtime {
     }
 
     pub fn run(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
-        terminal.draw(|f| views::render(f, &mut self.model, &mut self.view_state))?;
+        terminal.draw(|f| view::render(f, &mut self.model, &mut self.view_state))?;
 
         let tick_interval = Duration::from_millis(100);
         let mut last_tick = Instant::now();
@@ -127,7 +127,7 @@ impl Runtime {
             }
 
             if needs_redraw {
-                terminal.draw(|f| views::render(f, &mut self.model, &mut self.view_state))?;
+                terminal.draw(|f| view::render(f, &mut self.model, &mut self.view_state))?;
             }
         }
     }

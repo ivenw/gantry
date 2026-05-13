@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::command_picker::CommandPicker;
 use crate::theme;
-use crate::views::table::{TableView, highlighted_line};
+use crate::widgets::table::{TableView, highlighted_line};
 
 /// Minimum spaces between the end of a command name and the start of its description.
 const CMD_DESC_GAP: u16 = 12;

@@ -11,7 +11,7 @@ use crate::message::Msg;
 use crate::model::{InputMode, Model};
 use crate::providers::{CopilotAuthKind, ProviderWizard, ProvidersSubView, WizardProviderKind};
 use crate::tree::branch_rows;
-use crate::views::ViewState;
+use crate::view::ViewState;
 use gantry_core::SessionId;
 
 pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg> {

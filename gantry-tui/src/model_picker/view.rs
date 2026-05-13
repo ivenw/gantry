@@ -8,7 +8,7 @@ use ratatui::{
 
 use crate::model_picker::{ModelPickerView, format_context_length};
 use crate::theme;
-use crate::views::table::{TableView, highlighted_line};
+use crate::widgets::table::{TableView, highlighted_line};
 
 pub const MAX_VISIBLE: usize = 10;
 
