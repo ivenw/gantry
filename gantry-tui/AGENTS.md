@@ -40,12 +40,14 @@ callers can write `use crate::chat::{ChatState, ChatWidget}`.
 
 ## Message flow
 
-```
-Event → Msg → update(&mut Model, Msg) → Option<Cmd>
-                                              ↓
-                                        Runtime::handle_cmd(Cmd) → Option<Msg>
-                                              ↓ (loops back)
-render(&Model, &mut WidgetState) → Frame
+```mermaid
+flowchart TD
+    A[External source\nkeyboard / mouse / async result] -->|Msg| B[update\n&mut Model, Msg]
+    B -->|mutates Model| C{Option&lt;Cmd&gt;}
+    C -->|None| D[render\n&Model, &mut WidgetState]
+    C -->|Some\(Cmd\)| E[Runtime::handle_cmd\nI/O, async tasks]
+    E -->|Option&lt;Msg&gt;| B
+    D --> F[Frame]
 ```
 
 `Msg` — pure model-update messages. Every input event, stream event, or async result
