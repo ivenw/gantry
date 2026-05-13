@@ -14,7 +14,7 @@ use tokio::task::JoinHandle;
 use crate::chat::ChatMessage;
 use crate::message::{Cmd, Msg};
 use crate::model::Model;
-use crate::providers::{ProvidersState, ProvidersSubView};
+use crate::provider_config::{ProvidersConfigState, ProvidersSubView};
 use crate::update::update;
 use crate::view::{self, WidgetState};
 
@@ -363,14 +363,15 @@ impl Runtime {
                 let providers = self
                     .rt
                     .block_on(async { self.app.lock().await.list_providers().to_vec() });
-                self.model.overlay = crate::model::InputOverlay::Providers(ProvidersState {
-                    providers,
-                    sub: ProvidersSubView::List { selected_idx: 0 },
-                });
+                self.model.overlay =
+                    crate::model::InputOverlay::ProviderConfig(ProvidersConfigState {
+                        providers,
+                        sub: ProvidersSubView::List { selected_idx: 0 },
+                    });
             }
             Err(e) => {
                 // Surface the error inside the wizard.
-                if let crate::model::InputOverlay::Providers(ref mut pv) = self.model.overlay
+                if let crate::model::InputOverlay::ProviderConfig(ref mut pv) = self.model.overlay
                     && let ProvidersSubView::Wizard(ref mut w) = pv.sub
                 {
                     w.error = Some(e.to_string());
@@ -392,7 +393,7 @@ impl Runtime {
                     .rt
                     .block_on(async { self.app.lock().await.list_providers().to_vec() });
                 // Refresh the list view, clamping selection if it is now out of bounds.
-                if let crate::model::InputOverlay::Providers(ref mut pv) = self.model.overlay
+                if let crate::model::InputOverlay::ProviderConfig(ref mut pv) = self.model.overlay
                     && let ProvidersSubView::List {
                         ref mut selected_idx,
                     } = pv.sub

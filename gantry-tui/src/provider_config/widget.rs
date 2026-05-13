@@ -5,17 +5,17 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Widget},
 };
 
-use crate::providers::{
-    CopilotAuthKind, ProviderWizard, ProvidersState, ProvidersSubView, WizardProviderKind,
+use crate::provider_config::{
+    CopilotAuthKind, ProviderWizard, ProvidersConfigState, ProvidersSubView, WizardProviderKind,
 };
 
-pub struct ProvidersWidget<'a> {
-    state: &'a ProvidersState,
+pub struct ProviderConfigWidget<'a> {
+    state: &'a ProvidersConfigState,
 }
 
-impl<'a> ProvidersWidget<'a> {
+impl<'a> ProviderConfigWidget<'a> {
     /// Creates a new widget bound to the given providers view state.
-    pub fn new(state: &'a ProvidersState) -> Self {
+    pub fn new(state: &'a ProvidersConfigState) -> Self {
         Self { state }
     }
 
@@ -33,7 +33,7 @@ impl<'a> ProvidersWidget<'a> {
     }
 }
 
-impl Widget for ProvidersWidget<'_> {
+impl Widget for ProviderConfigWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         match &self.state.sub {
             ProvidersSubView::List { selected_idx } => {

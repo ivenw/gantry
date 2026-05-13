@@ -12,7 +12,7 @@ use crate::command_picker::CommandPickerWidget;
 use crate::input::InputWidget;
 use crate::model::{InputOverlay, Mode, Model};
 use crate::model_picker::ModelPickerWidget;
-use crate::providers::ProvidersWidget;
+use crate::provider_config::ProviderConfigWidget;
 use crate::sessions::SessionsWidget;
 use crate::tree::TreeWidget;
 use crate::usage::UsageWidget;
@@ -33,7 +33,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
         InputOverlay::ModelPicker(mv) => ModelPickerWidget::new(mv).height(),
         InputOverlay::Sessions(sv) => SessionsWidget::new(sv).height(),
         InputOverlay::Tree(tv) => TreeWidget::new(tv).height(),
-        InputOverlay::Providers(pv) => ProvidersWidget::new(pv).height(),
+        InputOverlay::ProviderConfig(pv) => ProviderConfigWidget::new(pv).height(),
         InputOverlay::AttachmentPicker(_) | InputOverlay::Input(_) => {
             InputWidget::new(&model.input, &model.cwd).height(area.width)
         }
@@ -98,8 +98,8 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
         InputOverlay::Tree(tv) => {
             frame.render_widget(TreeWidget::new(tv), input_area);
         }
-        InputOverlay::Providers(pv) => {
-            frame.render_widget(ProvidersWidget::new(pv), input_area);
+        InputOverlay::ProviderConfig(pv) => {
+            frame.render_widget(ProviderConfigWidget::new(pv), input_area);
         }
         InputOverlay::AttachmentPicker(_) | InputOverlay::Input(_) => {
             let picker_filter_len =

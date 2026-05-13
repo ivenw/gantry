@@ -12,7 +12,7 @@ mod message;
 mod model;
 mod model_picker;
 mod picker;
-mod providers;
+mod provider_config;
 mod runtime;
 mod sessions;
 pub mod theme;

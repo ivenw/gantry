@@ -44,7 +44,7 @@ pub enum InputOverlay {
     Usage(crate::usage::UsageState),
     Sessions(crate::sessions::SessionsState),
     Tree(crate::tree::TreeState),
-    Providers(crate::providers::ProvidersState),
+    ProviderConfig(crate::provider_config::ProvidersConfigState),
 }
 
 pub struct Model {

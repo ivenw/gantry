@@ -9,7 +9,9 @@ use crate::commands::KnownCommand;
 use crate::input::prev_char_boundary;
 use crate::message::{Cmd, Msg};
 use crate::model::{InputOverlay, Mode, Model, StreamState};
-use crate::providers::{CopilotAuthKind, ProviderWizard, ProvidersSubView, WizardProviderKind};
+use crate::provider_config::{
+    CopilotAuthKind, ProviderWizard, ProvidersSubView, WizardProviderKind,
+};
 use crate::tree::branch_rows;
 use crate::view::WidgetState;
 use gantry_core::SessionId;
@@ -83,8 +85,8 @@ pub fn update(model: &mut Model, view_state: &WidgetState, msg: Msg) -> Option<C
             None
         }
         Msg::OpenProvidersState(providers) => {
-            use crate::providers::{ProvidersState, ProvidersSubView};
-            model.overlay = InputOverlay::Providers(ProvidersState {
+            use crate::provider_config::{ProvidersConfigState, ProvidersSubView};
+            model.overlay = InputOverlay::ProviderConfig(ProvidersConfigState {
                 providers,
                 sub: ProvidersSubView::List { selected_idx: 0 },
             });
@@ -196,8 +198,8 @@ fn handle_key(
 ) -> Option<Cmd> {
     match &model.overlay {
         InputOverlay::ModelPicker(_) => handle_key_model_picker(model, key),
-        InputOverlay::Providers(_) => handle_key_providers_view(model, key),
-        InputOverlay::Sessions(_) => handle_key_sessions_view(model, key),
+        InputOverlay::ProviderConfig(_) => handle_key_providers_view(model, key),
+        InputOverlay::SessionPicker(_) => handle_key_sessions_view(model, key),
         InputOverlay::Tree(_) => handle_key_tree_view(model, key),
         InputOverlay::Usage(_) => handle_key_usage_view(model, key),
         InputOverlay::CommandPicker(_) => handle_key_command_picker(model, key),
@@ -243,7 +245,7 @@ fn handle_key_model_picker(model: &mut Model, key: crossterm::event::KeyEvent) -
 }
 
 fn handle_key_providers_view(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Cmd> {
-    let sub_kind = if let InputOverlay::Providers(ref pv) = model.overlay {
+    let sub_kind = if let InputOverlay::ProviderConfig(ref pv) = model.overlay {
         match pv.sub {
             ProvidersSubView::List { .. } => 0u8,
             ProvidersSubView::TypePicker { .. } => 1,
@@ -269,7 +271,7 @@ fn handle_key_providers_list(model: &mut Model, key: crossterm::event::KeyEvent)
             return None;
         }
         KeyCode::Char('d') => {
-            let InputOverlay::Providers(ref pv) = model.overlay else {
+            let InputOverlay::ProviderConfig(ref pv) = model.overlay else {
                 return None;
             };
             if let ProvidersSubView::List { selected_idx } = pv.sub
@@ -282,7 +284,7 @@ fn handle_key_providers_list(model: &mut Model, key: crossterm::event::KeyEvent)
         }
         _ => {}
     }
-    let InputOverlay::Providers(ref mut pv) = model.overlay else {
+    let InputOverlay::ProviderConfig(ref mut pv) = model.overlay else {
         return None;
     };
     match key.code {
@@ -318,7 +320,7 @@ fn handle_key_providers_type_picker(
     model: &mut Model,
     key: crossterm::event::KeyEvent,
 ) -> Option<Cmd> {
-    let InputOverlay::Providers(ref mut pv) = model.overlay else {
+    let InputOverlay::ProviderConfig(ref mut pv) = model.overlay else {
         return None;
     };
     match key.code {
@@ -361,7 +363,7 @@ fn handle_key_copilot_auth_picker(
     model: &mut Model,
     key: crossterm::event::KeyEvent,
 ) -> Option<Cmd> {
-    let InputOverlay::Providers(ref mut pv) = model.overlay else {
+    let InputOverlay::ProviderConfig(ref mut pv) = model.overlay else {
         return None;
     };
     match key.code {
@@ -400,7 +402,7 @@ fn handle_key_copilot_auth_picker(
 }
 
 fn handle_key_wizard(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Cmd> {
-    let InputOverlay::Providers(ref mut pv) = model.overlay else {
+    let InputOverlay::ProviderConfig(ref mut pv) = model.overlay else {
         return None;
     };
     match key.code {
