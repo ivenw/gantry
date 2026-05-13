@@ -18,14 +18,14 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
     match msg {
         Msg::StreamItem(item) => handle_stream_item(model, item),
         Msg::StreamDone => {
-            model.chat.finish_streaming();
+            model.finish_stream();
             if !model.chat.user_is_scrolling {
                 model.chat.scroll_offset = 0;
             }
             None
         }
         Msg::StreamError(e) => {
-            if let Some(text) = model.chat.cancel_streaming() {
+            if let Some(text) = model.cancel_stream() {
                 model.input.set_text(text);
             }
             model.status_message = Some(e);
@@ -38,6 +38,7 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
         Msg::NewSession => {
             model.chat.reset();
             model.status_message = None;
+            model.reset_stream();
             None
         }
         Msg::Key(key) => handle_key(model, view_state, key),
@@ -835,7 +836,7 @@ fn handle_enter_insert(model: &mut Model, modifiers: KeyModifiers) -> Option<Msg
     let tokens = model.input.tokens.clone();
     model.input.clear();
     model.chat.add_user_message(display);
-    model.chat.start_streaming_message();
+    model.start_stream();
     model.chat.scroll_offset = 0;
     model.chat.user_is_scrolling = false;
     Some(Msg::SendMessage(tokens))

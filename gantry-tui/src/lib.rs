@@ -9,12 +9,13 @@ mod message;
 mod model;
 mod model_picker;
 mod providers;
-mod usage;
 mod runtime;
 mod sessions;
+mod statusline;
 pub mod theme;
 mod tree;
 mod update;
+mod usage;
 mod views;
 
 use anyhow::{Context, Result};

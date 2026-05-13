@@ -122,7 +122,7 @@ impl Runtime {
 
             if last_tick.elapsed() >= tick_interval {
                 last_tick = Instant::now();
-                self.view_state.statusline.tick();
+                self.view_state.agent_statusline.tick();
                 needs_redraw = true;
             }
 
@@ -159,7 +159,7 @@ impl Runtime {
             }
             Msg::InterruptStream => {
                 self.interrupt_stream();
-                self.model.chat.finish_streaming();
+                self.model.finish_stream();
                 return None;
             }
             Msg::BranchTo(ref entry_id) => {
@@ -412,6 +412,8 @@ impl Runtime {
                 self.model.chat.scroll_offset = 0;
                 self.model.chat.user_is_scrolling = false;
                 self.model.session_id = Some(session_id);
+                self.model.reset_stream();
+                self.model.status_message = None;
             }
         }
     }
@@ -494,7 +496,7 @@ impl Runtime {
                 });
             }
             KnownCommand::Debug => {
-                self.model.chat.start_streaming_message();
+                self.model.start_stream();
                 self.spawn_mock_chat();
             }
             KnownCommand::Usage => {

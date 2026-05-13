@@ -118,12 +118,32 @@ fn render_breakdown(buf: &mut Buffer, x: u16, y: u16, width: u16, cw: &ContextWi
 
     let sys_tokens = cw.system_prompt_tokens();
     let sys_pct = cw.system_prompt_fraction() * 100.0;
-    render_row(buf, x, row, width, "System prompt", sys_tokens, sys_pct, COLOR_SYSTEM, 0);
+    render_row(
+        buf,
+        x,
+        row,
+        width,
+        "System prompt",
+        sys_tokens,
+        sys_pct,
+        COLOR_SYSTEM,
+        0,
+    );
     row += 1;
 
     let bp_tokens = cw.base_prompt_tokens;
     let bp_pct = cw.base_prompt_fraction() * 100.0;
-    render_row(buf, x, row, width, "Base prompt", bp_tokens, bp_pct, COLOR_SYSTEM, 2);
+    render_row(
+        buf,
+        x,
+        row,
+        width,
+        "Base prompt",
+        bp_tokens,
+        bp_pct,
+        COLOR_SYSTEM,
+        2,
+    );
     row += 1;
 
     for (path, pct) in cw.agent_files_fraction() {
@@ -137,18 +157,48 @@ fn render_breakdown(buf: &mut Buffer, x: u16, y: u16, width: u16, cw: &ContextWi
             .find(|(p, _)| p == &path)
             .map(|(_, t)| *t)
             .unwrap_or(0);
-        render_row(buf, x, row, width, name, tokens, pct * 100.0, COLOR_SYSTEM, 2);
+        render_row(
+            buf,
+            x,
+            row,
+            width,
+            name,
+            tokens,
+            pct * 100.0,
+            COLOR_SYSTEM,
+            2,
+        );
         row += 1;
     }
 
     let msg_tokens = cw.messages_tokens;
     let msg_pct = cw.messages_fraction() * 100.0;
-    render_row(buf, x, row, width, "Messages", msg_tokens, msg_pct, COLOR_MESSAGES, 0);
+    render_row(
+        buf,
+        x,
+        row,
+        width,
+        "Messages",
+        msg_tokens,
+        msg_pct,
+        COLOR_MESSAGES,
+        0,
+    );
     row += 1;
 
     let other_tokens = cw.other_tokens;
     let other_pct = cw.other_fraction() * 100.0;
-    render_row(buf, x, row, width, "Other", other_tokens, other_pct, COLOR_OTHER, 0);
+    render_row(
+        buf,
+        x,
+        row,
+        width,
+        "Other",
+        other_tokens,
+        other_pct,
+        COLOR_OTHER,
+        0,
+    );
 
     render_row(
         buf,

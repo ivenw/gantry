@@ -5,11 +5,10 @@ use crate::model::Model;
 use crate::model_picker::ModelPickerWidget;
 use crate::providers::ProvidersViewWidget;
 use crate::sessions::SessionsViewWidget;
+use crate::statusline::{AgentStatusline, AppStatusline};
 use crate::tree::TreeViewWidget;
-use crate::views::ViewState;
-use crate::views::status_message::StatusMessageView;
-use crate::views::statusline::StatuslineView;
 use crate::usage::UsageViewWidget;
+use crate::views::ViewState;
 
 use ratatui::{
     Frame,
@@ -44,32 +43,51 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
         InputView::new(&model.input, &model.cwd).height(area.width)
     };
 
-    let statusline_height = if let Some(ref picker) = model.attachment_picker {
+    let app_statusline_height = if let Some(ref picker) = model.attachment_picker {
         AttachmentPickerView::new(picker, &model.cwd).height()
     } else {
         1
     };
+
+    let agent_statusline = AgentStatusline::new(
+        model.is_streaming(),
+        model.stream_started_at(),
+        model.stream_duration(),
+        model.status_message.as_deref(),
+    );
+    let agent_statusline_height = agent_statusline.height();
+
+    let agent_statusline_bottom_pad = if agent_statusline_height > 0 { 1 } else { 0 };
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(1),
             Constraint::Length(1),
+            Constraint::Length(agent_statusline_height),
+            Constraint::Length(agent_statusline_bottom_pad),
             Constraint::Length(input_height),
-            Constraint::Length(statusline_height),
+            Constraint::Length(app_statusline_height),
         ])
         .split(area);
 
     let chat_area = chunks[0];
-    let input_area = chunks[2];
-    let statusline_area = chunks[3];
+    let agent_statusline_area = chunks[2];
+    let input_area = chunks[4];
+    let app_statusline_area = chunks[5];
 
     let chat = ChatView {
         messages: &model.chat.messages,
         scroll_offset: model.chat.scroll_offset,
-        spinner: view_state.statusline.spinner(),
+        spinner: view_state.agent_statusline.spinner(),
     };
     frame.render_stateful_widget(chat, chat_area, &mut view_state.chat);
+
+    frame.render_stateful_widget(
+        agent_statusline,
+        agent_statusline_area,
+        &mut view_state.agent_statusline,
+    );
 
     if let Some(ref uv) = model.usage_view {
         frame.render_widget(UsageViewWidget::new(uv), input_area);
@@ -95,19 +113,12 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut ViewState) 
     if let Some(ref picker) = model.attachment_picker {
         frame.render_widget(
             AttachmentPickerView::new(picker, &model.cwd),
-            statusline_area,
+            app_statusline_area,
         );
-    } else if let Some(ref msg) = model.status_message {
-        frame.render_widget(StatusMessageView::new(msg), statusline_area);
     } else {
-        frame.render_stateful_widget(
-            StatuslineView::new(
-                model.mode,
-                model.is_streaming(),
-                model.context_window.clone(),
-            ),
-            statusline_area,
-            &mut view_state.statusline,
+        frame.render_widget(
+            AppStatusline::new(model.mode, model.context_window.clone()),
+            app_statusline_area,
         );
     }
 }

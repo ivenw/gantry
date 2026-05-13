@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use gantry_core::{
     Branch, ContextWindow, InputToken, ModelSelection, PathSearchResult, ProviderConfig, SessionId,
     SessionInfo, SessionTree, SkillSearchResult, Usage,
@@ -37,6 +39,10 @@ pub struct Model {
     pub model_picker_view: Option<ModelPickerView>,
     pub usage_view: Option<UsageView>,
     pub status_message: Option<String>,
+    /// Wall-clock time when the current or most recent stream started.
+    stream_started_at: Option<Instant>,
+    /// Elapsed duration of the most recently completed stream.
+    stream_duration: Option<Duration>,
     /// Context window snapshot from the most recently completed stream.
     pub context_window: Option<ContextWindow>,
     /// Cached model list fetched on first open of the model picker.
@@ -61,6 +67,8 @@ impl Model {
             model_picker_view: None,
             usage_view: None,
             status_message: None,
+            stream_started_at: None,
+            stream_duration: None,
             context_window: None,
             cached_models: None,
         }
@@ -68,6 +76,45 @@ impl Model {
 
     pub fn is_streaming(&self) -> bool {
         self.chat.streaming_content.is_some()
+    }
+
+    /// Returns the wall-clock time when the current stream started, if one is in progress.
+    pub fn stream_started_at(&self) -> Option<Instant> {
+        self.stream_started_at
+    }
+
+    /// Returns the elapsed duration of the most recently completed stream, if any.
+    pub fn stream_duration(&self) -> Option<Duration> {
+        self.stream_duration
+    }
+
+    /// Clears all stream state, collapsing the agent statusline.
+    pub fn reset_stream(&mut self) {
+        self.stream_started_at = None;
+        self.stream_duration = None;
+    }
+
+    /// Begins a new stream, resetting the elapsed timer.
+    pub fn start_stream(&mut self) {
+        self.stream_started_at = Some(Instant::now());
+        self.stream_duration = None;
+        self.chat.start_streaming_message();
+    }
+
+    /// Finalises a completed stream, capturing the elapsed duration.
+    pub fn finish_stream(&mut self) {
+        self.stream_duration = self.stream_started_at.map(|t| t.elapsed());
+        self.stream_started_at = None;
+        self.chat.finish_streaming();
+    }
+
+    /// Cancels an in-progress stream, capturing the elapsed duration.
+    ///
+    /// Returns the streaming text that was in progress, if any, so the caller can restore it.
+    pub fn cancel_stream(&mut self) -> Option<String> {
+        self.stream_duration = self.stream_started_at.map(|t| t.elapsed());
+        self.stream_started_at = None;
+        self.chat.cancel_streaming()
     }
 
     pub fn is_command_picker_active(&self) -> bool {

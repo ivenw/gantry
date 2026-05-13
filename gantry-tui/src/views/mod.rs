@@ -1,15 +1,13 @@
 pub mod app;
-pub mod status_message;
-pub mod statusline;
 pub mod table;
 
 pub use app::render;
 
 use crate::chat::ChatViewState;
-use statusline::StatuslineViewState;
+use crate::statusline::AgentStatuslineState;
 
 #[derive(Default)]
 pub struct ViewState {
     pub chat: ChatViewState,
-    pub statusline: StatuslineViewState,
+    pub agent_statusline: AgentStatuslineState,
 }
