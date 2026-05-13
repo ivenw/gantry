@@ -7,6 +7,8 @@ mod message;
 mod model;
 mod providers;
 mod runtime;
+mod sessions;
+mod tree;
 pub mod theme;
 mod update;
 mod views;

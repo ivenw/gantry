@@ -5,7 +5,7 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::model::SessionsView;
+use crate::sessions::SessionsView;
 
 pub struct SessionsViewWidget<'a> {
     state: &'a SessionsView,

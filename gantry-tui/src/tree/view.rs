@@ -5,13 +5,14 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::model::{TreeView, branch_rows};
+use crate::tree::{TreeView, branch_rows};
 
 pub struct TreeViewWidget<'a> {
     state: &'a TreeView,
 }
 
 impl<'a> TreeViewWidget<'a> {
+    /// Creates a widget for the session tree overlay.
     pub fn new(state: &'a TreeView) -> Self {
         Self { state }
     }
@@ -30,8 +31,6 @@ impl Widget for TreeViewWidget<'_> {
             area.height.saturating_sub(2),
         );
 
-        // TODO: Add a comment what this early return is for or remove it if it serves no practical
-        // purpose.
         if inner.width == 0 || inner.height == 0 {
             return;
         }

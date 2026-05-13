@@ -12,6 +12,8 @@ use gantry_core::{
 
 use crate::chat::ChatModel;
 use crate::providers::{ProvidersSubView, ProvidersView};
+use crate::sessions::SessionsView;
+use crate::tree::{TreeView, branch_rows};
 
 /// The top-level editing mode, analogous to Vim's modal editing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,23 +51,6 @@ pub struct UsageView {
     pub context_window: ContextWindow,
     /// Accumulated token consumption across all nodes in the session.
     pub consumption: Usage,
-}
-
-/// State for the sessions browser overlay.
-pub struct SessionsView {
-    pub sessions: Vec<SessionInfo>,
-    /// Index of the highlighted row.
-    pub selected_idx: usize,
-    /// The session that was active when the browser was opened.
-    pub active_session_id: SessionId,
-}
-
-pub struct TreeView {
-    pub tree: SessionTree,
-    /// Index into the DFS row order of the currently highlighted row.
-    pub selected_idx: usize,
-    /// First visible row index (scroll offset).
-    pub scroll_offset: usize,
 }
 
 /// State for the model picker overlay.
@@ -656,14 +641,6 @@ pub fn prev_char_boundary(s: &str, cursor: usize) -> usize {
     0
 }
 
-/// Flattens a `Branch` tree into a DFS-ordered list of `(branch, depth)` pairs for row-indexed access.
-pub fn branch_rows(branch: &Branch, depth: usize) -> Vec<(&Branch, usize)> {
-    let mut rows = vec![(branch, depth)];
-    for sub in &branch.branches {
-        rows.extend(branch_rows(sub, depth + 1));
-    }
-    rows
-}
 
 impl InputModel {
     pub fn new() -> Self {

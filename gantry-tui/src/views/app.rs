@@ -6,10 +6,10 @@ use crate::views::command_picker::CommandPickerView;
 use crate::views::input::InputView;
 use crate::views::model_picker::ModelPickerWidget;
 use crate::providers::ProvidersViewWidget;
-use crate::views::sessions::SessionsViewWidget;
+use crate::sessions::SessionsViewWidget;
 use crate::views::status_message::StatusMessageView;
 use crate::views::statusline::StatuslineView;
-use crate::views::tree::TreeViewWidget;
+use crate::tree::TreeViewWidget;
 use crate::views::usage::UsageViewWidget;
 
 use ratatui::{
