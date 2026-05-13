@@ -193,7 +193,7 @@ impl Runtime {
             Msg::RefineAttachmentPicker(ref query) => {
                 let is_skill = matches!(
                     self.model.attachment_picker.as_ref().map(|p| &p.kind),
-                    Some(crate::model::AttachmentPickerKind::Skill(_))
+                    Some(crate::input::AttachmentPickerKind::Skill(_))
                 );
                 if is_skill {
                     let skills = self

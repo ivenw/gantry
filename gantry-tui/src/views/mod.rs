@@ -1,12 +1,7 @@
 pub mod app;
-pub mod attachment_picker;
-pub mod command_picker;
-pub mod input;
-pub mod model_picker;
 pub mod status_message;
 pub mod statusline;
 pub mod table;
-pub mod usage;
 
 pub use app::render;
 

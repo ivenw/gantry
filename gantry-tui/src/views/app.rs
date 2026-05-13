@@ -1,16 +1,15 @@
 use crate::chat::view::ChatView;
+use crate::command_picker::CommandPickerView;
+use crate::input::{AttachmentPickerView, InputView};
 use crate::model::Model;
-use crate::views::ViewState;
-use crate::views::attachment_picker::AttachmentPickerView;
-use crate::views::command_picker::CommandPickerView;
-use crate::views::input::InputView;
-use crate::views::model_picker::ModelPickerWidget;
+use crate::model_picker::ModelPickerWidget;
 use crate::providers::ProvidersViewWidget;
 use crate::sessions::SessionsViewWidget;
+use crate::tree::TreeViewWidget;
+use crate::views::ViewState;
 use crate::views::status_message::StatusMessageView;
 use crate::views::statusline::StatuslineView;
-use crate::tree::TreeViewWidget;
-use crate::views::usage::UsageViewWidget;
+use crate::usage::UsageViewWidget;
 
 use ratatui::{
     Frame,

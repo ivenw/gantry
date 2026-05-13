@@ -6,10 +6,9 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::model::{ModelPickerView, format_context_length};
+use crate::model_picker::{ModelPickerView, format_context_length};
 use crate::theme;
-
-use super::table::{TableView, highlighted_line};
+use crate::views::table::{TableView, highlighted_line};
 
 pub const MAX_VISIBLE: usize = 10;
 

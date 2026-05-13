@@ -4,11 +4,13 @@ use gantry_core::{
     StreamedUserContent, StreamingError, ToolResultContent,
 };
 
+use crate::command_picker::CommandEntry;
 use crate::commands::KnownCommand;
+use crate::input::prev_char_boundary;
 use crate::message::Msg;
-use crate::model::{CommandEntry, InputMode, Model, prev_char_boundary};
-use crate::tree::branch_rows;
+use crate::model::{InputMode, Model};
 use crate::providers::{CopilotAuthKind, ProviderWizard, ProvidersSubView, WizardProviderKind};
+use crate::tree::branch_rows;
 use crate::views::ViewState;
 use gantry_core::SessionId;
 

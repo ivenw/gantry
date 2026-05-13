@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Widget},
 };
 
-use crate::model::UsageView;
+use crate::usage::UsageView;
 
 /// Colors for each usage bar segment, in render order: system prompt, messages, other, remaining.
 const COLOR_SYSTEM: Color = Color::Cyan;
@@ -19,6 +19,7 @@ pub struct UsageViewWidget<'a> {
 }
 
 impl<'a> UsageViewWidget<'a> {
+    /// Creates a new widget bound to the given usage view state.
     pub fn new(state: &'a UsageView) -> Self {
         Self { state }
     }
@@ -115,39 +116,16 @@ fn render_breakdown(buf: &mut Buffer, x: u16, y: u16, width: u16, cw: &ContextWi
     buf.set_string(x, row, &header, Style::default().fg(Color::White));
     row += 1;
 
-    // System prompt section.
     let sys_tokens = cw.system_prompt_tokens();
     let sys_pct = cw.system_prompt_fraction() * 100.0;
-    render_row(
-        buf,
-        x,
-        row,
-        width,
-        "System prompt",
-        sys_tokens,
-        sys_pct,
-        COLOR_SYSTEM,
-        0,
-    );
+    render_row(buf, x, row, width, "System prompt", sys_tokens, sys_pct, COLOR_SYSTEM, 0);
     row += 1;
 
-    // Base prompt sub-row (indented).
     let bp_tokens = cw.base_prompt_tokens;
     let bp_pct = cw.base_prompt_fraction() * 100.0;
-    render_row(
-        buf,
-        x,
-        row,
-        width,
-        "Base prompt",
-        bp_tokens,
-        bp_pct,
-        COLOR_SYSTEM,
-        2,
-    );
+    render_row(buf, x, row, width, "Base prompt", bp_tokens, bp_pct, COLOR_SYSTEM, 2);
     row += 1;
 
-    // Agent file sub-rows (indented).
     for (path, pct) in cw.agent_files_fraction() {
         let name = path
             .file_name()
@@ -159,50 +137,18 @@ fn render_breakdown(buf: &mut Buffer, x: u16, y: u16, width: u16, cw: &ContextWi
             .find(|(p, _)| p == &path)
             .map(|(_, t)| *t)
             .unwrap_or(0);
-        render_row(
-            buf,
-            x,
-            row,
-            width,
-            name,
-            tokens,
-            pct * 100.0,
-            COLOR_SYSTEM,
-            2,
-        );
+        render_row(buf, x, row, width, name, tokens, pct * 100.0, COLOR_SYSTEM, 2);
         row += 1;
     }
 
-    // Messages row.
     let msg_tokens = cw.messages_tokens;
     let msg_pct = cw.messages_fraction() * 100.0;
-    render_row(
-        buf,
-        x,
-        row,
-        width,
-        "Messages",
-        msg_tokens,
-        msg_pct,
-        COLOR_MESSAGES,
-        0,
-    );
+    render_row(buf, x, row, width, "Messages", msg_tokens, msg_pct, COLOR_MESSAGES, 0);
     row += 1;
 
-    // Other row.
     let other_tokens = cw.other_tokens;
     let other_pct = cw.other_fraction() * 100.0;
-    render_row(
-        buf,
-        x,
-        row,
-        width,
-        "Other",
-        other_tokens,
-        other_pct,
-        COLOR_OTHER,
-        0,
-    );
+    render_row(buf, x, row, width, "Other", other_tokens, other_pct, COLOR_OTHER, 0);
 
     render_row(
         buf,
@@ -242,7 +188,6 @@ fn render_row(
 fn fmt_tokens(n: u32) -> String {
     if n >= 1000 {
         let k = n as f64 / 1000.0;
-        // One significant digit in the fractional part.
         format!("{:.1}k", k)
     } else {
         n.to_string()

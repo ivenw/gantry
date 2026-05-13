@@ -5,7 +5,9 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Widget},
 };
 
-use crate::providers::{CopilotAuthKind, ProviderWizard, ProvidersSubView, ProvidersView, WizardProviderKind};
+use crate::providers::{
+    CopilotAuthKind, ProviderWizard, ProvidersSubView, ProvidersView, WizardProviderKind,
+};
 
 pub struct ProvidersViewWidget<'a> {
     state: &'a ProvidersView,

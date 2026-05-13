@@ -6,10 +6,9 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::model::CommandPicker;
+use crate::command_picker::CommandPicker;
 use crate::theme;
-
-use super::table::{TableView, highlighted_line};
+use crate::views::table::{TableView, highlighted_line};
 
 /// Minimum spaces between the end of a command name and the start of its description.
 const CMD_DESC_GAP: u16 = 12;
@@ -34,7 +33,6 @@ impl<'a> CommandPickerView<'a> {
         Self { state }
     }
 
-    /// Returns the total height needed to render the picker.
     /// Returns the total height needed to render the picker.
     pub fn height(&self) -> u16 {
         CHROME_HEIGHT + self.state.filtered.len().clamp(1, MAX_VISIBLE) as u16

@@ -1,15 +1,19 @@
 #![allow(dead_code)]
 
 mod chat;
+mod command_picker;
 mod commands;
 pub mod effects;
+mod input;
 mod message;
 mod model;
+mod model_picker;
 mod providers;
+mod usage;
 mod runtime;
 mod sessions;
-mod tree;
 pub mod theme;
+mod tree;
 mod update;
 mod views;
 
