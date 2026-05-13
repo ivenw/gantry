@@ -6,10 +6,8 @@ use gantry_core::{
 
 use crate::commands::KnownCommand;
 use crate::message::Msg;
-use crate::model::{
-    CommandEntry, CopilotAuthKind, InputMode, Model, ProviderWizard, ProvidersSubView,
-    WizardProviderKind, branch_rows, prev_char_boundary,
-};
+use crate::model::{CommandEntry, InputMode, Model, branch_rows, prev_char_boundary};
+use crate::providers::{CopilotAuthKind, ProviderWizard, ProvidersSubView, WizardProviderKind};
 use crate::views::ViewState;
 use gantry_core::SessionId;
 

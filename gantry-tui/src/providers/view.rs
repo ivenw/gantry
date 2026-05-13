@@ -5,15 +5,14 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Widget},
 };
 
-use crate::model::{
-    CopilotAuthKind, ProviderWizard, ProvidersSubView, ProvidersView, WizardProviderKind,
-};
+use crate::providers::{CopilotAuthKind, ProviderWizard, ProvidersSubView, ProvidersView, WizardProviderKind};
 
 pub struct ProvidersViewWidget<'a> {
     state: &'a ProvidersView,
 }
 
 impl<'a> ProvidersViewWidget<'a> {
+    /// Creates a new widget bound to the given providers view state.
     pub fn new(state: &'a ProvidersView) -> Self {
         Self { state }
     }

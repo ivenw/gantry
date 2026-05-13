@@ -5,6 +5,7 @@ mod commands;
 pub mod effects;
 mod message;
 mod model;
+mod providers;
 mod runtime;
 pub mod theme;
 mod update;

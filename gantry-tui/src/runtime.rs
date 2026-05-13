@@ -14,6 +14,7 @@ use tokio::task::JoinHandle;
 use crate::chat::ChatMessage;
 use crate::message::Msg;
 use crate::model::Model;
+use crate::providers::ProvidersSubView;
 use crate::update::update;
 use crate::views::{self, ViewState};
 
@@ -355,7 +356,7 @@ impl Runtime {
             Err(e) => {
                 // Surface the error inside the wizard.
                 if let Some(ref mut pv) = self.model.providers_view
-                    && let crate::model::ProvidersSubView::Wizard(ref mut w) = pv.sub
+                    && let ProvidersSubView::Wizard(ref mut w) = pv.sub
                 {
                     w.error = Some(e.to_string());
                 } else {
@@ -377,7 +378,7 @@ impl Runtime {
                     .block_on(async { self.app.lock().await.list_providers().to_vec() });
                 // Refresh the list view, clamping selection if it is now out of bounds.
                 if let Some(ref mut pv) = self.model.providers_view
-                    && let crate::model::ProvidersSubView::List {
+                    && let ProvidersSubView::List {
                         ref mut selected_idx,
                     } = pv.sub
                 {

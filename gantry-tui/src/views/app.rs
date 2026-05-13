@@ -5,7 +5,7 @@ use crate::views::attachment_picker::AttachmentPickerView;
 use crate::views::command_picker::CommandPickerView;
 use crate::views::input::InputView;
 use crate::views::model_picker::ModelPickerWidget;
-use crate::views::providers::ProvidersViewWidget;
+use crate::providers::ProvidersViewWidget;
 use crate::views::sessions::SessionsViewWidget;
 use crate::views::status_message::StatusMessageView;
 use crate::views::statusline::StatuslineView;
