@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use crate::effects::throbber::{Throbber, ThrobberStyle};
 use crate::model::StreamState;
 use ratatui::{
     buffer::Buffer,
@@ -10,41 +9,22 @@ use ratatui::{
     widgets::{Paragraph, StatefulWidget},
 };
 
-pub struct AgentStatuslineWidgetState {
-    throbber: Throbber,
-}
-
-impl Default for AgentStatuslineWidgetState {
-    fn default() -> Self {
-        Self {
-            throbber: Throbber::new(ThrobberStyle::Ascii),
-        }
-    }
-}
-
-impl AgentStatuslineWidgetState {
-    /// Advances the spinner to the next frame.
-    pub fn tick(&mut self) {
-        self.throbber.next();
-    }
-
-    /// Returns the current spinner frame character.
-    pub fn spinner(&self) -> char {
-        self.throbber.current()
-    }
-}
+#[derive(Default)]
+pub struct AgentStatuslineWidgetState;
 
 pub struct AgentStatuslineWidget<'a> {
     stream: &'a StreamState,
     status_message: Option<&'a str>,
+    spinner: char,
 }
 
 impl<'a> AgentStatuslineWidget<'a> {
     /// Creates a new agent statusline widget from the current stream state.
-    pub fn new(stream: &'a StreamState, status_message: Option<&'a str>) -> Self {
+    pub fn new(stream: &'a StreamState, status_message: Option<&'a str>, spinner: char) -> Self {
         Self {
             stream,
             status_message,
+            spinner,
         }
     }
 
@@ -72,12 +52,12 @@ fn format_duration(d: Duration) -> String {
 impl StatefulWidget for AgentStatuslineWidget<'_> {
     type State = AgentStatuslineWidgetState;
 
-    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+    fn render(self, area: Rect, buf: &mut Buffer, _state: &mut Self::State) {
         let (text, color) = match self.stream {
             StreamState::Active { started_at } => (
                 format!(
                     "{} EVALUATING ({})",
-                    state.throbber.current(),
+                    self.spinner,
                     format_duration(started_at.elapsed())
                 ),
                 Color::Gray,

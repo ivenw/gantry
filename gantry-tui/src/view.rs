@@ -9,6 +9,7 @@ use crate::attachment_picker::AttachmentPickerWidget;
 use crate::chat::ChatWidgetState;
 use crate::chat::widget::ChatWidget;
 use crate::command_picker::CommandPickerWidget;
+use crate::effects::throbber::{Throbber, ThrobberStyle};
 use crate::input::InputWidget;
 use crate::model::{InputOverlay, Mode, Model};
 use crate::model_picker::ModelPickerWidget;
@@ -17,15 +18,26 @@ use crate::session_picker::SessionPickerWidget;
 use crate::tree::TreeWidget;
 use crate::usage::UsageWidget;
 
-#[derive(Default)]
 pub struct WidgetState {
     pub chat: ChatWidgetState,
     pub agent_statusline: AgentStatuslineWidgetState,
+    pub throbber: Throbber,
+}
+
+impl Default for WidgetState {
+    fn default() -> Self {
+        Self {
+            chat: ChatWidgetState::default(),
+            agent_statusline: AgentStatuslineWidgetState::default(),
+            throbber: Throbber::new(ThrobberStyle::Ascii),
+        }
+    }
 }
 
 /// Renders the full application UI for the current frame.
 pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState) {
     let area = frame.area();
+    let spinner = view_state.throbber.current();
 
     let input_height = match &model.overlay {
         InputOverlay::Usage(uv) => UsageWidget::new(uv).height(),
@@ -47,7 +59,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
     };
 
     let agent_statusline =
-        AgentStatuslineWidget::new(&model.stream, model.status_message.as_deref());
+        AgentStatuslineWidget::new(&model.stream, model.status_message.as_deref(), spinner);
     let agent_statusline_height = agent_statusline.height();
 
     let agent_statusline_bottom_pad = if agent_statusline_height > 0 { 1 } else { 0 };
@@ -69,11 +81,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
     let input_area = chunks[4];
     let app_statusline_area = chunks[5];
 
-    let chat = ChatWidget {
-        messages: &model.chat.messages,
-        scroll_offset: model.chat.scroll_offset,
-        spinner: view_state.agent_statusline.spinner(),
-    };
+    let chat = ChatWidget::new(&model.chat, spinner);
     frame.render_stateful_widget(chat, chat_area, &mut view_state.chat);
 
     frame.render_stateful_widget(

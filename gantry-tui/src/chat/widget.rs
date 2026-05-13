@@ -1,6 +1,6 @@
 use gantry_core::DiffHunk;
 
-use crate::chat::state::ChatMessage;
+use crate::chat::{ChatState, state::ChatMessage};
 use ratatui::{
     buffer::Buffer,
     layout::{Margin, Rect},
@@ -17,20 +17,22 @@ const TOOL_SUCCESS_INDICATOR: &str = "+";
 const TOOL_ERROR_INDICATOR: &str = "-";
 
 pub struct ChatWidget<'a> {
-    pub messages: &'a [ChatMessage],
-    pub scroll_offset: u16,
-    /// Current spinner character, shared with the statusline throbber.
-    pub spinner: char,
+    messages: &'a [ChatMessage],
+    scroll_offset: u16,
+    spinner: char,
 }
 
-#[derive(Default)]
-pub struct ChatWidgetState {
-    pub scrollbar: ScrollbarState,
-    pub max_scroll: u16,
-}
+impl<'a> ChatWidget<'a> {
+    /// Creates a new chat widget for the given messages, scroll position, and spinner frame.
+    pub fn new(state: &'a ChatState, spinner: char) -> Self {
+        Self {
+            messages: &state.messages,
+            scroll_offset: state.scroll_offset,
+            spinner,
+        }
+    }
 
-impl ChatWidget<'_> {
-    pub fn calc_msg_height(content: &str, width: u16) -> u16 {
+    fn calc_msg_height(content: &str, width: u16) -> u16 {
         if width == 0 {
             return 1;
         }
@@ -48,6 +50,12 @@ impl ChatWidget<'_> {
 
         line_count.max(1) as u16
     }
+}
+
+#[derive(Default)]
+pub struct ChatWidgetState {
+    pub scrollbar: ScrollbarState,
+    pub max_scroll: u16,
 }
 
 impl StatefulWidget for ChatWidget<'_> {
