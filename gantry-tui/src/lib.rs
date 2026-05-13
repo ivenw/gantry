@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+mod attachment_picker;
 mod chat;
 mod command_picker;
 mod commands;

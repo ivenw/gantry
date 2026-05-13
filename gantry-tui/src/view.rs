@@ -6,7 +6,8 @@ use ratatui::{
 use crate::chat::ChatWidgetState;
 use crate::chat::widget::ChatWidget;
 use crate::command_picker::CommandPickerWidget;
-use crate::input::{AttachmentPickerWidget, InputWidget};
+use crate::attachment_picker::AttachmentPickerWidget;
+use crate::input::InputWidget;
 use crate::model::{InputOverlay, Mode, Model};
 use crate::model_picker::ModelPickerWidget;
 use crate::providers::ProvidersWidget;

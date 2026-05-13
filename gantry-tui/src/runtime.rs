@@ -18,24 +18,6 @@ use crate::providers::{ProvidersState, ProvidersSubView};
 use crate::update::update;
 use crate::view::{self, WidgetState};
 
-/// Internal channel carrier: either a model-update message or a side-effect command.
-enum Event {
-    Msg(Msg),
-    Cmd(Cmd),
-}
-
-impl From<Msg> for Event {
-    fn from(m: Msg) -> Self {
-        Event::Msg(m)
-    }
-}
-
-impl From<Cmd> for Event {
-    fn from(c: Cmd) -> Self {
-        Event::Cmd(c)
-    }
-}
-
 pub struct Runtime {
     model: Model,
     rt: tokio::runtime::Runtime,
@@ -224,7 +206,7 @@ impl Runtime {
                 let is_skill = matches!(
                     &self.model.overlay,
                     crate::model::InputOverlay::AttachmentPicker(p)
-                        if matches!(p.kind, crate::input::AttachmentPickerKind::Skill(_))
+                        if matches!(p.kind, crate::attachment_picker::AttachmentPickerKind::Skill(_))
                 );
                 if is_skill {
                     let skills = self
@@ -565,5 +547,23 @@ impl Runtime {
                 });
             }
         }
+    }
+}
+
+/// Internal channel carrier: either a model-update message or a side-effect command.
+enum Event {
+    Msg(Msg),
+    Cmd(Cmd),
+}
+
+impl From<Msg> for Event {
+    fn from(m: Msg) -> Self {
+        Event::Msg(m)
+    }
+}
+
+impl From<Cmd> for Event {
+    fn from(c: Cmd) -> Self {
+        Event::Cmd(c)
     }
 }

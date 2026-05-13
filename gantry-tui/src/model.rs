@@ -19,7 +19,8 @@ pub enum StreamState {
 }
 
 use crate::chat::ChatState;
-use crate::input::{AttachmentPickerKind, AttachmentPickerState, InputState};
+use crate::attachment_picker::{AttachmentPickerKind, AttachmentPickerState};
+use crate::input::InputState;
 use crate::model_picker::ModelPickerState;
 use crate::sessions::SessionsState;
 use crate::tree::{TreeState, branch_rows};
@@ -39,7 +40,7 @@ pub enum InputOverlay {
     Input(Mode),
     CommandPicker(crate::command_picker::CommandPickerState),
     ModelPicker(crate::model_picker::ModelPickerState),
-    AttachmentPicker(crate::input::AttachmentPickerState),
+    AttachmentPicker(crate::attachment_picker::AttachmentPickerState),
     Usage(crate::usage::UsageState),
     Sessions(crate::sessions::SessionsState),
     Tree(crate::tree::TreeState),

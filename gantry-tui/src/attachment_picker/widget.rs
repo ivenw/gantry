@@ -8,7 +8,7 @@ use ratatui::{
     widgets::Widget,
 };
 
-use crate::input::{AttachmentPickerKind, AttachmentPickerState};
+use crate::attachment_picker::{AttachmentPickerKind, AttachmentPickerState};
 use crate::widgets::table::{TableView, highlighted_line};
 
 const STYLE_TEXT: Style = Style::new().fg(Color::White);
