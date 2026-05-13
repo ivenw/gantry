@@ -47,7 +47,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
         InputOverlay::Tree(tv) => TreeWidget::new(tv).height(),
         InputOverlay::ProviderConfig(pv) => ProviderConfigWidget::new(pv).height(),
         InputOverlay::AttachmentPicker(_) | InputOverlay::Input(_) => {
-            InputWidget::new(&model.input, &model.cwd).height(area.width)
+            InputWidget::new(&model.input, &model.cwd, Mode::Normal, 0).height(area.width)
         }
     };
 
@@ -121,9 +121,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
                 _ => Mode::Insert,
             };
             frame.render_widget(
-                InputWidget::new(&model.input, &model.cwd)
-                    .with_mode(mode)
-                    .with_picker_filter_len(picker_filter_len),
+                InputWidget::new(&model.input, &model.cwd, mode, picker_filter_len),
                 input_area,
             );
         }

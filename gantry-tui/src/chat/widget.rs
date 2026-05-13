@@ -17,19 +17,14 @@ const TOOL_SUCCESS_INDICATOR: &str = "+";
 const TOOL_ERROR_INDICATOR: &str = "-";
 
 pub struct ChatWidget<'a> {
-    messages: &'a [ChatMessage],
-    scroll_offset: u16,
+    state: &'a ChatState,
     spinner: char,
 }
 
 impl<'a> ChatWidget<'a> {
-    /// Creates a new chat widget for the given messages, scroll position, and spinner frame.
+    /// Creates a new chat widget for the given chat state and spinner frame.
     pub fn new(state: &'a ChatState, spinner: char) -> Self {
-        Self {
-            messages: &state.messages,
-            scroll_offset: state.scroll_offset,
-            spinner,
-        }
+        Self { state, spinner }
     }
 
     fn calc_msg_height(content: &str, width: u16) -> u16 {
@@ -62,7 +57,7 @@ impl StatefulWidget for ChatWidget<'_> {
     type State = ChatWidgetState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let messages = self.messages;
+        let messages = &self.state.messages;
 
         if messages.is_empty() {
             let text = "Type a message and press Enter to start...";
@@ -127,7 +122,7 @@ impl StatefulWidget for ChatWidget<'_> {
             heights.iter().sum::<u16>() + (messages.len() as u16).saturating_sub(1) * gap;
 
         let max_scroll = total_content.saturating_sub(area.height);
-        let clamped_offset = self.scroll_offset.min(max_scroll);
+        let clamped_offset = self.state.scroll_offset.min(max_scroll);
         let scroll = max_scroll - clamped_offset;
 
         let virtual_start: u16 = area.height.saturating_sub(total_content);

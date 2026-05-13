@@ -16,10 +16,6 @@ const BORDER_HEIGHT: u16 = 2;
 pub struct InputWidget<'a> {
     state: &'a InputState,
     project_root: &'a Path,
-    /// Byte offset of the cursor within the raw display string.
-    cursor: usize,
-    /// Raw display string (sigils inlined, paths stripped to relative).
-    raw_display: String,
     /// Number of trailing bytes in the raw display string that belong to an active picker filter.
     /// These characters are rendered in LightYellow to indicate the pending picker state.
     picker_filter_len: usize,
@@ -27,45 +23,37 @@ pub struct InputWidget<'a> {
 }
 
 impl<'a> InputWidget<'a> {
-    /// Creates an `InputWidget` from the input model and the project root for path display.
-    pub fn new(state: &'a InputState, project_root: &'a Path) -> Self {
-        let (raw_display, cursor) = state.display_with_cursor(project_root);
+    /// Creates an `InputWidget` from the input model, the project root for path display, the
+    /// current mode for border coloring, and the active picker filter byte length for highlighting.
+    pub fn new(
+        state: &'a InputState,
+        project_root: &'a Path,
+        mode: Mode,
+        picker_filter_len: usize,
+    ) -> Self {
         Self {
             state,
             project_root,
-            cursor,
-            raw_display,
-            picker_filter_len: 0,
-            mode: Mode::Normal,
+            picker_filter_len,
+            mode,
         }
-    }
-
-    /// Sets the input mode, used to color the border.
-    pub fn with_mode(mut self, mode: Mode) -> Self {
-        self.mode = mode;
-        self
-    }
-
-    /// Sets the number of trailing bytes that represent an active picker filter, for highlight rendering.
-    pub fn with_picker_filter_len(mut self, len: usize) -> Self {
-        self.picker_filter_len = len;
-        self
     }
 
     /// Returns the widget height required to fit the content within `width` terminal columns.
     pub fn height(&self, width: u16) -> u16 {
+        let raw_display = self.state.raw_display(self.project_root);
         let text_width = width.saturating_sub(PREFIX_WIDTH).max(1) as usize;
-        let lines = wrapped_line_count(&self.raw_display, text_width);
+        let lines = wrapped_line_count(&raw_display, text_width);
         (lines as u16 + BORDER_HEIGHT).max(3)
     }
 
     /// Returns `(col, row)` of the cursor within the text area.
-    fn calc_cursor_pos(&self, text_width: usize) -> (u16, u16) {
+    fn calc_cursor_pos(raw_display: &str, cursor: usize, text_width: usize) -> (u16, u16) {
         let mut col = 0usize;
         let mut row = 0usize;
 
-        for (i, c) in self.raw_display.char_indices() {
-            if i == self.cursor {
+        for (i, c) in raw_display.char_indices() {
+            if i == cursor {
                 break;
             }
             if c == '\n' {
@@ -123,12 +111,11 @@ impl Widget for InputWidget<'_> {
 
         let text_width = text_area.width as usize;
 
+        let (raw_display, cursor) = self.state.display_with_cursor(self.project_root);
+
         // Render tokens one span at a time, tracking col/row to handle wrapping.
         // Trailing picker_filter_len bytes of the raw display string are highlighted as pending filter input.
-        let filter_start_byte = self
-            .raw_display
-            .len()
-            .saturating_sub(self.picker_filter_len);
+        let filter_start_byte = raw_display.len().saturating_sub(self.picker_filter_len);
         let mut raw_byte = 0usize;
         let mut col = 0usize;
         let mut row = 0usize;
@@ -179,7 +166,7 @@ impl Widget for InputWidget<'_> {
             }
         }
 
-        let (cur_col, cur_row) = self.calc_cursor_pos(text_width);
+        let (cur_col, cur_row) = Self::calc_cursor_pos(&raw_display, cursor, text_width);
         let cursor_x = text_area.x + cur_col;
         let cursor_y = text_area.y + cur_row;
 
