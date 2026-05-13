@@ -102,16 +102,48 @@ impl FromStr for LineRef {
 /// All line references are validated against their hashes before any edits are applied.
 /// If any reference is stale, the entire batch is rejected. Overlapping ranges are also rejected.
 /// Operations are applied bottom-up so earlier line numbers remain valid throughout.
-pub fn edit_file(path: &Path, ops: Vec<EditOp>) -> Result<(), EditError> {
+/// Returns the diff hunks describing what changed.
+pub fn edit_file(path: &Path, ops: Vec<EditOp>) -> Result<Vec<DiffHunk>, EditError> {
     let content = std::fs::read_to_string(path)?;
     let lines: Vec<&str> = content.lines().collect();
-    let result = apply_edits(&lines, &ops)?;
+    let (result, hunks) = apply_edits(&lines, &ops)?;
     std::fs::write(path, result.join("\n"))?;
-    Ok(())
+    Ok(hunks)
 }
 
-/// Validates and applies edit operations to a slice of lines, returning the modified lines.
-fn apply_edits(lines: &[&str], ops: &[EditOp]) -> Result<Vec<String>, EditError> {
+// TODO: This we will probably have to change. The current structure allows us to ONLY show diffs
+// and we loose all information surrounding the diff which is useful to have in a display context.
+// The right shape is to have `old_lines` and `new_lines` be just `String`, so the content of the
+// whole file pre and post edit. The hunk compute is then handled by a dedicated diff crate.
+/// A single contiguous region that was changed by one edit operation.
+///
+/// Line numbers are 1-indexed on both sides, matching the unified diff convention.
+/// For insert-after ops `old_lines` is empty and `old_start` is the line after which
+/// content was inserted. For deletions `new_lines` is empty.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiffHunk {
+    /// 1-indexed start line in the original file.
+    pub old_start: usize,
+    /// 1-indexed start line in the new file.
+    pub new_start: usize,
+    pub old_lines: Vec<String>,
+    pub new_lines: Vec<String>,
+}
+
+impl DiffHunk {
+    pub fn old_count(&self) -> usize {
+        self.old_lines.len()
+    }
+
+    pub fn new_count(&self) -> usize {
+        self.new_lines.len()
+    }
+}
+
+/// Validates and applies edit operations to a slice of lines.
+///
+/// Returns the modified lines and the diff hunks describing what changed.
+fn apply_edits(lines: &[&str], ops: &[EditOp]) -> Result<(Vec<String>, Vec<DiffHunk>), EditError> {
     validate_hashes(lines, ops)?;
 
     let mut sorted_ops = ops.to_vec();
@@ -120,6 +152,9 @@ fn apply_edits(lines: &[&str], ops: &[EditOp]) -> Result<Vec<String>, EditError>
     check_overlaps(&sorted_ops)?;
 
     let mut result: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+
+    // Collected in bottom-up order; new_start is filled in a second pass.
+    let mut hunks: Vec<DiffHunk> = Vec::with_capacity(sorted_ops.len());
 
     for op in &sorted_ops {
         let start_idx = op.start.line - 1;
@@ -134,8 +169,23 @@ fn apply_edits(lines: &[&str], ops: &[EditOp]) -> Result<Vec<String>, EditError>
             _ => vec![],
         };
 
+        let old_lines: Vec<String> = if op.end.is_some() {
+            lines[start_idx..=end_idx]
+                .iter()
+                .map(|l| l.to_string())
+                .collect()
+        } else {
+            vec![]
+        };
+
+        hunks.push(DiffHunk {
+            old_start: op.start.line,
+            new_start: 0, // filled below
+            old_lines,
+            new_lines: new_lines.clone(),
+        });
+
         if op.end.is_none() {
-            // insert after start_idx
             let insert_at = start_idx + 1;
             for (i, line) in new_lines.into_iter().enumerate() {
                 result.insert(insert_at + i, line);
@@ -145,7 +195,16 @@ fn apply_edits(lines: &[&str], ops: &[EditOp]) -> Result<Vec<String>, EditError>
         }
     }
 
-    Ok(result)
+    // Ops were processed bottom-up; reverse to top-down order to compute new_start.
+    hunks.reverse();
+    let mut offset: isize = 0;
+    for hunk in &mut hunks {
+        hunk.new_start = (hunk.old_start as isize + offset) as usize;
+        let delta = hunk.new_lines.len() as isize - hunk.old_lines.len() as isize;
+        offset += delta;
+    }
+
+    Ok((result, hunks))
 }
 
 /// Checks that every line reference in `ops` matches the actual content hash at that line.
@@ -234,7 +293,7 @@ mod tests {
             end: Some(ref_of(3, "c")),
             content: Some("X\nY".into()),
         }];
-        let result = apply_edits(&src, &ops).unwrap();
+        let (result, _) = apply_edits(&src, &ops).unwrap();
         assert_eq!(result, vec!["a", "X", "Y", "d"]);
     }
 
@@ -246,7 +305,7 @@ mod tests {
             end: Some(ref_of(2, "b")),
             content: Some("Z".into()),
         }];
-        let result = apply_edits(&src, &ops).unwrap();
+        let (result, _) = apply_edits(&src, &ops).unwrap();
         assert_eq!(result, vec!["a", "Z", "c"]);
     }
 
@@ -258,7 +317,7 @@ mod tests {
             end: None,
             content: Some("X\nY".into()),
         }];
-        let result = apply_edits(&src, &ops).unwrap();
+        let (result, _) = apply_edits(&src, &ops).unwrap();
         assert_eq!(result, vec!["a", "b", "X", "Y", "c"]);
     }
 
@@ -270,7 +329,7 @@ mod tests {
             end: Some(ref_of(3, "c")),
             content: None,
         }];
-        let result = apply_edits(&src, &ops).unwrap();
+        let (result, _) = apply_edits(&src, &ops).unwrap();
         assert_eq!(result, vec!["a", "d"]);
     }
 
@@ -289,7 +348,7 @@ mod tests {
                 content: Some("D".into()),
             },
         ];
-        let result = apply_edits(&src, &ops).unwrap();
+        let (result, _) = apply_edits(&src, &ops).unwrap();
         assert_eq!(result, vec!["a", "B", "c", "D", "e"]);
     }
 

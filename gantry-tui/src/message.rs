@@ -1,7 +1,7 @@
 use gantry_core::{
-    ChatStreamItem, ContextWindow, InputToken, ModelSelection, PathSearchResult, ProviderAlias,
-    ProviderConfig, SessionId, SessionInfo, SessionTree, SkillSearchResult, StoredCredential,
-    StreamingError, Usage,
+    AppEvent, ChatStreamItem, ContextWindow, InputToken, ModelSelection, PathSearchResult,
+    ProviderAlias, ProviderConfig, SessionId, SessionInfo, SessionTree, SkillSearchResult,
+    StoredCredential, StreamingError, Usage,
 };
 
 use crate::commands::KnownCommand;
@@ -14,6 +14,9 @@ pub enum Msg {
     // Stream events from the agent
     StreamItem(Result<ChatStreamItem, StreamingError>),
     StreamDone,
+
+    // Out-of-band tool events
+    AppEvent(AppEvent),
 
     // Streaming error (stream task failed; StreamDone is not sent in this case)
     StreamError(String),

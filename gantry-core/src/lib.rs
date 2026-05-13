@@ -2,6 +2,7 @@ pub mod agentsmd;
 pub mod app;
 pub mod config;
 pub mod dirs;
+pub mod events;
 pub mod fs;
 pub mod input;
 pub mod message;
@@ -22,6 +23,8 @@ pub use config::{
     ProviderConfigRepository, StoredCredential,
 };
 pub use dirs::{GlobalGantryDir, ProjectRootDir};
+pub use events::AppEvent;
+pub use gantry_tools::DiffHunk;
 pub use input::InputToken;
 pub use message::{Message, UserId};
 pub use metrics::{CharCounts, ContextWindow, Usage};

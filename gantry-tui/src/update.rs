@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use gantry_core::{
-    ChatStreamItem, MultiTurnStreamItem, ReasoningContent, StreamedAssistantContent,
+    AppEvent, ChatStreamItem, MultiTurnStreamItem, ReasoningContent, StreamedAssistantContent,
     StreamedUserContent, StreamingError, ToolResultContent,
 };
 
@@ -113,6 +113,10 @@ pub fn update(model: &mut Model, view_state: &ViewState, msg: Msg) -> Option<Msg
         | Msg::OpenPathPicker(_)
         | Msg::OpenSkillPicker(_)
         | Msg::RefineAttachmentPicker(_) => None,
+        Msg::AppEvent(AppEvent::EditDiff { path, hunks }) => {
+            model.chat.attach_edit_diff(&path, hunks);
+            None
+        }
     }
 }
 

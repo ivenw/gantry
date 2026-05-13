@@ -7,11 +7,14 @@ use rig::completion::ToolDefinition;
 use rig::tool::Tool;
 use schemars::{JsonSchema, schema_for};
 use serde::Deserialize;
+use tokio::sync::broadcast;
 
 use super::resolve_path;
+use crate::events::AppEvent;
 
 pub struct EditTool {
     pub cwd: PathBuf,
+    pub event_tx: broadcast::Sender<AppEvent>,
 }
 
 /// A single edit operation. Line references are passed as strings in `N#XX` format
@@ -138,12 +141,17 @@ impl Tool for EditTool {
             .collect();
         let ops = ops.map_err(EditToolError::from)?;
         let op_count = ops.len();
+        let raw_path = args.path.clone();
         let path = resolve_path(&self.cwd, args.path);
         let display_path = path.display().to_string();
-        tokio::task::spawn_blocking(move || gantry_tools::edit_file(&path, ops))
+        let hunks = tokio::task::spawn_blocking(move || gantry_tools::edit_file(&path, ops))
             .await
             .expect("edit_file task panicked")
             .map_err(EditToolError::from)?;
+        let _ = self.event_tx.send(AppEvent::EditDiff {
+            path: raw_path,
+            hunks,
+        });
         Ok(format!("applied {op_count} edit(s) to {display_path}"))
     }
 }

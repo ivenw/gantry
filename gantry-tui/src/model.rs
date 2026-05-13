@@ -6,7 +6,7 @@ use nucleo_matcher::{
 };
 
 use gantry_core::{
-    Branch, ContextWindow, InputToken, ModelSelection, PathSearchResult, ProviderAlias,
+    Branch, ContextWindow, DiffHunk, InputToken, ModelSelection, PathSearchResult, ProviderAlias,
     ProviderConfig, SessionId, SessionInfo, SessionTree, SkillSearchResult, StoredCredential,
     Usage, UserId,
 };
@@ -404,6 +404,7 @@ pub enum ChatMessage {
         arguments: serde_json::Value,
         done: bool,
         is_error: bool,
+        hunks: Vec<DiffHunk>,
     },
 }
 
@@ -1048,7 +1049,32 @@ impl ChatModel {
             arguments,
             done: false,
             is_error: false,
+            hunks: vec![],
         });
+    }
+
+    /// Attaches diff hunks to the most recent edit tool call whose path argument matches.
+    pub fn attach_edit_diff(&mut self, path: &std::path::Path, hunks: Vec<DiffHunk>) {
+        for msg in self.messages.iter_mut().rev() {
+            if let ChatMessage::ToolCall {
+                name,
+                arguments,
+                hunks: msg_hunks,
+                ..
+            } = msg
+                && name == "edit_file"
+                && arguments
+                    .get("path")
+                    .and_then(|v| v.as_str())
+                    .map(std::path::Path::new)
+                    .as_deref()
+                    == Some(path)
+                && msg_hunks.is_empty()
+            {
+                *msg_hunks = hunks;
+                break;
+            }
+        }
     }
 
     /// Marks the tool call with `id` as done, recording whether it produced an error.

@@ -42,7 +42,9 @@ impl StreamingResponse {
 /// Emits a scripted sequence of reasoning tokens, text, two tool calls with their
 /// results, and a final text turn, with realistic per-item delays to simulate token
 /// streaming and tool execution latency.
-pub fn mock_stream_message() -> StreamingResponse {
+pub fn mock_stream_message(
+    event_tx: tokio::sync::broadcast::Sender<crate::AppEvent>,
+) -> StreamingResponse {
     let read_id = uuid::Uuid::new_v4().to_string();
     let edit_error_id = uuid::Uuid::new_v4().to_string();
     let edit_id = uuid::Uuid::new_v4().to_string();
@@ -144,7 +146,7 @@ pub fn mock_stream_message() -> StreamingResponse {
                 tool_call: ToolCall::new(
                     read_id.clone(),
                     ToolFunction::new(
-                        "read".to_string(),
+                        "read_file".to_string(),
                         serde_json::json!({ "path": "src/main.rs", "offset": 50, "limit": 100 }),
                     ),
                 ),
@@ -187,11 +189,10 @@ pub fn mock_stream_message() -> StreamingResponse {
                 tool_call: ToolCall::new(
                     edit_error_id.clone(),
                     ToolFunction::new(
-                        "edit".to_string(),
+                        "edit_file".to_string(),
                         serde_json::json!({
                             "path": "src/main.rs",
-                            "old_string": "this string does not exist",
-                            "new_string": "irrelevant"
+                            "ops": [{ "start": "1#xx", "end": "1#xx", "content": "irrelevant" }]
                         }),
                     ),
                 ),
@@ -215,16 +216,18 @@ pub fn mock_stream_message() -> StreamingResponse {
 
         sleep(Duration::from_millis(400)).await;
 
+        let edit_path = "src/main.rs";
         yield Ok(MultiTurnStreamItem::StreamAssistantItem(
             StreamedAssistantContent::ToolCall {
                 tool_call: ToolCall::new(
                     edit_id.clone(),
                     ToolFunction::new(
-                        "edit".to_string(),
+                        "edit_file".to_string(),
                         serde_json::json!({
-                            "path": "src/main.rs",
-                            "old_string": "fn main() { println!(\"hello\"); }",
-                            "new_string": "fn main() {\n    println!(\"gantry: hello from main\");\n}"
+                            "path": edit_path,
+                            "ops": [
+                                { "start": "1#ab", "end": "1#ab", "content": "fn main() {\n    println!(\"gantry: hello from main\");\n}" }
+                            ]
                         }),
                     ),
                 ),
@@ -234,13 +237,28 @@ pub fn mock_stream_message() -> StreamingResponse {
 
         // edit: medium tool, ~800ms
         sleep(Duration::from_millis(800)).await;
+        let _ = event_tx.send(crate::AppEvent::EditDiff {
+            path: std::path::PathBuf::from(edit_path),
+            hunks: vec![
+                gantry_tools::DiffHunk {
+                    old_start: 1,
+                    new_start: 1,
+                    old_lines: vec!["fn main() { println!(\"hello\"); }".to_string()],
+                    new_lines: vec![
+                        "fn main() {".to_string(),
+                        "    println!(\"gantry: hello from main\");".to_string(),
+                        "}".to_string(),
+                    ],
+                },
+            ],
+        });
         yield Ok(MultiTurnStreamItem::StreamUserItem(
             StreamedUserContent::tool_result(
                 rig::message::ToolResult {
                     id: edit_id.clone(),
                     call_id: None,
                     content: rig::OneOrMany::one(rig::message::ToolResultContent::text(
-                        "Edit applied successfully.",
+                        "applied 1 edit(s) to src/main.rs",
                     )),
                 },
                 edit_id,
@@ -301,7 +319,7 @@ pub fn mock_stream_message() -> StreamingResponse {
                 tool_call: ToolCall::new(
                     write_id.clone(),
                     ToolFunction::new(
-                        "write".to_string(),
+                        "write_file".to_string(),
                         serde_json::json!({
                             "path": "config/settings.toml",
                             "content": "[server]\nhost = \"localhost\"\nport = 8080\n\n[database]\nurl = \"postgres://localhost/app\"\nmax_connections = 10\npool_timeout = 30\n"

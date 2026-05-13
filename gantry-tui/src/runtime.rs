@@ -26,6 +26,7 @@ pub struct Runtime {
     stream_task: Option<JoinHandle<()>>,
     is_streaming: Arc<AtomicBool>,
     cancel_stream: Arc<AtomicBool>,
+    _event_task: JoinHandle<()>,
 }
 
 impl Runtime {
@@ -36,13 +37,14 @@ impl Runtime {
 
         let mut model = Model::new();
 
-        let (session_id, existing_messages, selection, project_path) = {
+        let (session_id, existing_messages, selection, project_path, mut event_rx) = {
             let app = rt.block_on(app.lock());
             (
                 app.session_id().clone(),
                 ChatMessage::messages_from(app.history()),
                 app.selection().cloned(),
                 app.project_path.clone(),
+                app.subscribe_events(),
             )
         };
         model.session_id = Some(session_id);
@@ -50,6 +52,21 @@ impl Runtime {
         model.selection = selection;
         model.project_path = project_path;
         model.cwd = cwd;
+
+        let event_tx = msg_tx.clone();
+        let event_task = rt.spawn(async move {
+            loop {
+                match event_rx.recv().await {
+                    Ok(event) => {
+                        if event_tx.send(Msg::AppEvent(event)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                }
+            }
+        });
 
         Ok(Self {
             model,
@@ -61,6 +78,7 @@ impl Runtime {
             stream_task: None,
             is_streaming: Arc::new(AtomicBool::new(false)),
             cancel_stream: Arc::new(AtomicBool::new(false)),
+            _event_task: event_task,
         })
     }
 
@@ -263,8 +281,11 @@ impl Runtime {
         let cancel = self.cancel_stream.clone();
         cancel.store(false, Ordering::SeqCst);
 
+        let event_tx = self
+            .rt
+            .block_on(async { self.app.lock().await.event_sender() });
         let task = self.rt.spawn(async move {
-            let mut response = gantry_core::mock_stream_message();
+            let mut response = gantry_core::mock_stream_message(event_tx);
             is_streaming.store(true, Ordering::SeqCst);
             while let Some(item) = response.stream.next().await {
                 if cancel.load(Ordering::SeqCst) || tx.send(Msg::StreamItem(item)).await.is_err() {

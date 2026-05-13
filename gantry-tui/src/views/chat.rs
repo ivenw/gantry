@@ -1,3 +1,5 @@
+use gantry_core::DiffHunk;
+
 use crate::model::ChatMessage;
 use ratatui::{
     buffer::Buffer,
@@ -68,7 +70,10 @@ impl StatefulWidget for ChatView<'_> {
             .iter()
             .map(|m| match m {
                 ChatMessage::ToolCall {
-                    name, arguments, ..
+                    name,
+                    arguments,
+                    hunks,
+                    ..
                 } => {
                     let raw_arg = tool_display_arg(name, arguments);
                     let display_name = if name == "bash" { "$" } else { name.as_str() };
@@ -79,11 +84,18 @@ impl StatefulWidget for ChatView<'_> {
                             a
                         }
                     });
-                    // Count newlines in the full rendered line to get the true height.
-                    let line = match &formatted {
+                    let mut line = match &formatted {
                         Some(a) => format!("x {} {}", display_name, a),
                         None => format!("x {}", display_name),
                     };
+                    if !hunks.is_empty() {
+                        line.push(' ');
+                        line.push_str(&format_diff_summary(hunks));
+                    }
+                    for hunk in hunks {
+                        line.push('\n');
+                        line.push_str(&format_hunk_header(hunk));
+                    }
                     Self::calc_msg_height(&line, area.width)
                 }
                 _ => {
@@ -201,6 +213,7 @@ impl StatefulWidget for ChatView<'_> {
                     arguments,
                     done,
                     is_error,
+                    hunks,
                     ..
                 } => {
                     let indicator = match (done, is_error) {
@@ -217,10 +230,18 @@ impl StatefulWidget for ChatView<'_> {
                             a
                         }
                     });
-                    let line = match &formatted_arg {
+                    let mut line = match &formatted_arg {
                         Some(a) => format!("{} {} {}", indicator, display_name, a),
                         None => format!("{} {}", indicator, display_name),
                     };
+                    if !hunks.is_empty() {
+                        line.push(' ');
+                        line.push_str(&format_diff_summary(hunks));
+                    }
+                    for hunk in hunks.iter() {
+                        line.push('\n');
+                        line.push_str(&format_hunk_header(hunk));
+                    }
                     let color = match (done, is_error) {
                         (false, _) => ratatui::style::Color::Cyan,
                         (true, false) => ratatui::style::Color::DarkGray,
@@ -282,12 +303,12 @@ impl StatefulWidget for ChatView<'_> {
 fn tool_display_arg(name: &str, args: &serde_json::Value) -> Option<String> {
     let key = match name {
         "bash" => "command",
-        "read" | "write" | "edit" => "path",
+        "read_file" | "write_file" | "edit_file" => "path",
         _ => return None,
     };
     let path = args.get(key)?.as_str()?;
     match name {
-        "read" => {
+        "read_file" => {
             let mut s = path.to_string();
             if let Some(offset) = args.get("offset").and_then(|v| v.as_u64()) {
                 s.push_str(&format!(" @{}", offset));
@@ -297,12 +318,16 @@ fn tool_display_arg(name: &str, args: &serde_json::Value) -> Option<String> {
             }
             Some(s)
         }
-        "write" => {
+        "write_file" => {
             let mut s = path.to_string();
             if let Some(content) = args.get("content").and_then(|v| v.as_str()) {
                 let line_count = content.lines().count().max(1);
                 s.push_str(&format!(" {}L", line_count));
             }
+            Some(s)
+        }
+        "edit_file" => {
+            let s = path.to_string();
             Some(s)
         }
         _ => Some(path.to_string()),
@@ -371,6 +396,24 @@ fn split_on_unescaped_and(cmd: &str) -> Vec<&str> {
 
     parts.push(&cmd[segment_start..]);
     parts
+}
+
+/// Summarises a diff as `+N -N` for the total lines added and removed across all hunks.
+fn format_diff_summary(hunks: &[DiffHunk]) -> String {
+    let added: usize = hunks.iter().map(|h| h.new_count()).sum();
+    let removed: usize = hunks.iter().map(|h| h.old_count()).sum();
+    format!("+{}/-{}", added, removed)
+}
+
+/// Formats a diff hunk as a unified-diff header line: `@@ -old_start,old_count +new_start,new_count @@`.
+fn format_hunk_header(hunk: &DiffHunk) -> String {
+    format!(
+        "  @@ -{},{} +{},{} @@",
+        hunk.old_start,
+        hunk.old_count(),
+        hunk.new_start,
+        hunk.new_count(),
+    )
 }
 
 fn msg_content(message: &ChatMessage) -> &str {

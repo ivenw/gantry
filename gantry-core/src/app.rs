@@ -10,6 +10,7 @@ use anyhow::Result;
 
 use crate::config::{ProjectConfig, ProviderConfig};
 use crate::dirs::{GlobalGantryDir, ProjectRootDir};
+use crate::events::AppEvent;
 use crate::fs::FsSessionRegistry;
 use crate::message::Message;
 use crate::metrics::{CharCounts, ContextWindow, Usage};
@@ -22,6 +23,7 @@ use crate::system_prompt::SystemPrompt;
 use crate::tools::{BashTool, EditTool, GrepTool, ReadTool, TreeTool, WriteTool};
 use rig::completion::Usage as RigUsage;
 use rig::tool::ToolDyn;
+use tokio::sync::broadcast;
 
 type FsSession = Session<crate::fs::session_registry::FsSessionHistory>;
 
@@ -43,6 +45,7 @@ pub struct App {
     pub(crate) last_char_counts: Option<CharCounts>,
     /// Accumulated token consumption across all nodes in the active session.
     total_consumption: Usage,
+    event_tx: broadcast::Sender<AppEvent>,
 }
 
 impl App {
@@ -70,6 +73,7 @@ impl App {
         };
         let total_consumption = session.total_consumption();
         let system_prompt = SystemPrompt::new(&cwd);
+        let (event_tx, _) = broadcast::channel(64);
 
         Ok(Self {
             project_path,
@@ -82,7 +86,18 @@ impl App {
             last_usage: None,
             last_char_counts: None,
             total_consumption,
+            event_tx,
         })
+    }
+
+    /// Returns a new receiver for out-of-band app events emitted by tools.
+    pub fn subscribe_events(&self) -> broadcast::Receiver<AppEvent> {
+        self.event_tx.subscribe()
+    }
+
+    /// Returns a clone of the event sender for injecting mock events (e.g. in tests or debug mode).
+    pub fn event_sender(&self) -> broadcast::Sender<AppEvent> {
+        self.event_tx.clone()
     }
 
     /// Lists all sessions for this project, sorted by creation time (oldest first).
@@ -308,7 +323,10 @@ impl App {
         vec![
             Box::new(ReadTool { cwd: cwd.clone() }),
             Box::new(WriteTool { cwd: cwd.clone() }),
-            Box::new(EditTool { cwd: cwd.clone() }),
+            Box::new(EditTool {
+                cwd: cwd.clone(),
+                event_tx: self.event_tx.clone(),
+            }),
             // Box::new(GrepTool { cwd: cwd.clone() }),
             // Box::new(TreeTool { cwd: cwd.clone() }),
             Box::new(BashTool { cwd }),
