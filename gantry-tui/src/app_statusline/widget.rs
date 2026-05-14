@@ -5,9 +5,12 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     prelude::Widget,
-    style::Style,
+    style::{Color, Style},
+    text::{Line, Span},
     widgets::{Block, Padding, Paragraph},
 };
+
+const SEPARATOR: &str = "    ";
 
 pub struct AppStatuslineWidget {
     mode: Mode,
@@ -26,19 +29,40 @@ impl AppStatuslineWidget {
 
 impl Widget for AppStatuslineWidget {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let mode_text = match self.mode {
-            Mode::Normal => "NORMAL",
-            Mode::Insert => "INSERT",
+        let mode = {
+            let text = match self.mode {
+                Mode::Normal => "NORMAL",
+                Mode::Insert => "INSERT",
+            };
+
+            Some(Span::styled(
+                format!("[{}]", text),
+                Style::default().fg(theme::mode_color(self.mode)),
+            ))
         };
 
-        let text = match self.context_window {
-            Some(cw) => format!("{mode_text}  {}/{} ctx", cw.total_tokens, cw.max_tokens),
-            None => mode_text.to_string(),
-        };
+        let context = self.context_window.map(|cw| {
+            Span::styled(
+                format!("{}/{} ctx", cw.total_tokens, cw.max_tokens),
+                Style::default().fg(Color::Gray),
+            )
+        });
 
-        Paragraph::new(text)
-            .style(Style::default().fg(theme::mode_color(self.mode)))
-            .block(Block::new().padding(Padding::horizontal(2)))
+        let segments: Vec<Span> = [mode, context].into_iter().flatten().collect();
+        let spans: Vec<Span> = segments
+            .into_iter()
+            .enumerate()
+            .flat_map(|(i, span)| {
+                if i == 0 {
+                    vec![span]
+                } else {
+                    vec![Span::raw(SEPARATOR), span]
+                }
+            })
+            .collect();
+
+        Paragraph::new(Line::from(spans))
+            .block(Block::new().padding(Padding::horizontal(0)))
             .render(area, buf);
     }
 }

@@ -6,8 +6,11 @@ use ratatui::{
     layout::Rect,
     prelude::Widget,
     style::{Color, Style},
+    text::{Line, Span},
     widgets::{Paragraph, StatefulWidget},
 };
+
+const SEPARATOR: &str = "    ";
 
 #[derive(Default)]
 pub struct AgentStatuslineWidgetState;
@@ -53,31 +56,48 @@ impl StatefulWidget for AgentStatuslineWidget<'_> {
     type State = AgentStatuslineWidgetState;
 
     fn render(self, area: Rect, buf: &mut Buffer, _state: &mut Self::State) {
-        let (text, color) = match self.stream {
-            StreamState::Active { started_at } => (
+        let stream_span = match self.stream {
+            StreamState::Active { started_at } => Some(Span::styled(
                 format!(
                     "{} EVALUATING ({})",
                     self.spinner,
                     format_duration(started_at.elapsed())
                 ),
-                Color::Gray,
-            ),
-            StreamState::Interrupted { .. } => ("INTERRUPTED".to_string(), Color::LightRed),
-            StreamState::Done { duration } => (
+                Style::default().fg(Color::Gray),
+            )),
+            StreamState::Interrupted { .. } => Some(Span::styled(
+                "INTERRUPTED",
+                Style::default().fg(Color::LightRed),
+            )),
+            StreamState::Done { duration } => Some(Span::styled(
                 format!("* DONE ({})", format_duration(*duration)),
-                Color::Gray,
-            ),
-            StreamState::Idle => {
-                if let Some(msg) = self.status_message {
-                    (msg.to_string(), Color::Gray)
-                } else {
-                    return;
-                }
-            }
+                Style::default().fg(Color::Gray),
+            )),
+            StreamState::Idle => None,
         };
 
-        Paragraph::new(text)
-            .style(Style::default().fg(color))
-            .render(area, buf);
+        let status_span = self
+            .status_message
+            .map(|msg| Span::styled(msg, Style::default().fg(Color::Gray)));
+
+        let segments: Vec<Span> = [stream_span, status_span].into_iter().flatten().collect();
+
+        if segments.is_empty() {
+            return;
+        }
+
+        let spans: Vec<Span> = segments
+            .into_iter()
+            .enumerate()
+            .flat_map(|(i, span)| {
+                if i == 0 {
+                    vec![span]
+                } else {
+                    vec![Span::raw(SEPARATOR), span]
+                }
+            })
+            .collect();
+
+        Paragraph::new(Line::from(spans)).render(area, buf);
     }
 }
