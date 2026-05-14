@@ -1,9 +1,6 @@
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    text::{Line, Span},
-    widgets::Widget,
-};
+use unicode_width::UnicodeWidthChar;
+
+use ratatui::{buffer::Buffer, layout::Rect, text::Line, widgets::Widget};
 
 /// A fixed-layout multi-column table widget with per-cell span styling.
 ///
@@ -104,14 +101,21 @@ fn render_cell(buf: &mut Buffer, x: u16, y: u16, max_width: u16, cell: Option<&L
 
     let mut written = 0usize;
     let mut ellipsis_style = ratatui::style::Style::default();
+    let mut char_buf = [0u8; 4];
     'outer: for span in line.spans.iter() {
         for ch in span.content.chars() {
-            if written >= content_limit {
+            let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+            if written + ch_width > content_limit {
                 ellipsis_style = span.style;
                 break 'outer;
             }
-            buf.set_string(x + written as u16, y, ch.to_string(), span.style);
-            written += 1;
+            buf.set_string(
+                x + written as u16,
+                y,
+                ch.encode_utf8(&mut char_buf),
+                span.style,
+            );
+            written += ch_width;
         }
     }
 
@@ -125,49 +129,11 @@ fn render_cell(buf: &mut Buffer, x: u16, y: u16, max_width: u16, cell: Option<&L
     written
 }
 
-/// Returns the total character width of a `Line` by summing span content lengths.
+/// Returns the total display-column width of a `Line`, accounting for wide Unicode characters.
 fn line_width(line: &Line<'_>) -> usize {
-    line.spans.iter().map(|s| s.content.chars().count()).sum()
-}
-
-/// Builds a `Line` from text and match indices, styling matched chars with `match_style`
-/// and unmatched chars with `base_style`.
-pub fn highlighted_line<'a>(
-    text: &str,
-    indices: &[u32],
-    base_style: ratatui::style::Style,
-    match_style: ratatui::style::Style,
-) -> Line<'a> {
-    let mut spans: Vec<Span<'a>> = Vec::new();
-    let mut current_text = String::new();
-    let mut current_is_match = false;
-
-    for (char_idx, ch) in text.chars().enumerate() {
-        let is_match = indices.contains(&(char_idx as u32));
-        if char_idx == 0 {
-            current_is_match = is_match;
-        }
-        if is_match != current_is_match {
-            let style = if current_is_match {
-                match_style
-            } else {
-                base_style
-            };
-            spans.push(Span::styled(current_text.clone(), style));
-            current_text.clear();
-            current_is_match = is_match;
-        }
-        current_text.push(ch);
-    }
-
-    if !current_text.is_empty() {
-        let style = if current_is_match {
-            match_style
-        } else {
-            base_style
-        };
-        spans.push(Span::styled(current_text, style));
-    }
-
-    Line::from(spans)
+    line.spans
+        .iter()
+        .flat_map(|s| s.content.chars())
+        .map(|ch| UnicodeWidthChar::width(ch).unwrap_or(0))
+        .sum()
 }

@@ -1,1 +1,1 @@
-gantry-tui/AGENTS.md
+AGENTS.md

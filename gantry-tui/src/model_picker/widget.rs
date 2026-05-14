@@ -7,8 +7,9 @@ use ratatui::{
 };
 
 use crate::model_picker::{ModelPickerState, format_context_length};
+use crate::picker::highlight_matched_chars;
 use crate::theme;
-use crate::widgets::table::{TableWidget, highlighted_line};
+use crate::widgets::table::TableWidget;
 
 pub const MAX_VISIBLE: usize = 10;
 
@@ -102,14 +103,14 @@ impl Widget for ModelPickerWidget<'_> {
             .take(max_visible)
             .map(|(i, entry)| {
                 let is_cursor = i == selected;
-                let model_entry = &entry.item;
+                let model_entry = &picker.items[entry.idx];
                 let model_str = model_entry.selection.model_id.as_str().to_owned();
                 let model_line = if is_cursor {
                     Line::from(Span::styled(model_str, STYLE_SELECTED))
                 } else if model_entry.is_active {
                     Line::from(Span::styled(model_str, STYLE_ACTIVE))
                 } else {
-                    highlighted_line(&model_str, &entry.indices, STYLE_TEXT, STYLE_MATCH)
+                    highlight_matched_chars(&model_str, &entry.indices, STYLE_TEXT, STYLE_MATCH)
                 };
                 let provider_line = Line::from(Span::styled(
                     model_entry.selection.provider_alias.as_str().to_owned(),

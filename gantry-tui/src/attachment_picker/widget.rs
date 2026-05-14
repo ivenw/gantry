@@ -9,7 +9,8 @@ use ratatui::{
 };
 
 use crate::attachment_picker::{AttachmentPickerKind, AttachmentPickerState};
-use crate::widgets::table::{TableWidget, highlighted_line};
+use crate::picker::highlight_matched_chars;
+use crate::widgets::table::TableWidget;
 
 const STYLE_TEXT: Style = Style::new().fg(Color::White);
 const STYLE_MATCH: Style = Style::new().fg(Color::LightYellow);
@@ -82,7 +83,7 @@ impl Widget for AttachmentPickerWidget<'_> {
                         let name_line = if i == selected {
                             Line::from(Span::styled(label, STYLE_SELECTED))
                         } else {
-                            highlighted_line(&label, &r.indices, STYLE_TEXT, STYLE_MATCH)
+                            highlight_matched_chars(&label, &r.indices, STYLE_TEXT, STYLE_MATCH)
                         };
                         vec![name_line]
                     })
@@ -101,7 +102,7 @@ impl Widget for AttachmentPickerWidget<'_> {
                         let name_line = if i == selected {
                             Line::from(Span::styled(name.clone(), STYLE_SELECTED))
                         } else {
-                            highlighted_line(name, &r.indices, STYLE_TEXT, STYLE_MATCH)
+                            highlight_matched_chars(name, &r.indices, STYLE_TEXT, STYLE_MATCH)
                         };
                         let desc_line = Line::from(Span::styled(desc.clone(), STYLE_DESC));
                         vec![name_line, desc_line]

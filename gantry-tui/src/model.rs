@@ -215,7 +215,7 @@ impl Model {
                 .picker
                 .filtered
                 .iter()
-                .position(|e| e.item.selection == active)
+                .position(|e| picker.picker.items[e.idx].selection == active)
             {
                 picker.picker.selected_idx = idx;
             }

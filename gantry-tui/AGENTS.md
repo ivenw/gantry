@@ -61,3 +61,34 @@ async tasks, app mutations) and may produce a follow-up `Msg` that re-enters the
 External sources (keyboard, mouse, app events) send `Msg` values. Commands that need
 to be re-dispatched (e.g. `Quit`, `NewSession` from within `run_command`) are sent as
 `Cmd` values directly into the channel.
+
+## Widget rendering patterns
+
+**Use `Layout` to decompose space, not manual coordinate arithmetic.**
+Split a widget's inner area into named sub-rects with `Layout::areas()` and render each
+child into its own `Rect`. Do not compute positions by offsetting `inner.x`/`inner.y`
+manually — that couples layout to magic constants and makes structural intent invisible.
+
+```rust
+// Good
+let [prompt_area, _, list_area, counter_area] = Layout::default()
+    .direction(Direction::Vertical)
+    .constraints([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(list_height),
+        Constraint::Length(1),
+    ])
+    .areas(inner);
+
+some_widget.render(list_area, buf);
+
+// Bad
+let list = Rect::new(inner.x, inner.y + LIST_Y_OFFSET, inner.width, …);
+some_widget.render(list, buf);
+```
+
+**Render into a `Rect`, never write directly to `buf`.**
+Prefer `widget.render(area, buf)` over `buf.set_string(x, y, …)`. Even plain text should
+be wrapped in a `Line` or `Span` and rendered into its layout area so all content goes
+through the same path.
