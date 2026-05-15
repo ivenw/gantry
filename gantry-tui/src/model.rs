@@ -108,16 +108,15 @@ impl Model {
         self.chat.finish_streaming();
     }
 
-    /// Transitions stream state to `Interrupted`, capturing elapsed duration.
-    ///
-    /// Returns the streaming text that was in progress, if any, so the caller can restore it.
-    pub fn cancel_stream(&mut self) -> Option<String> {
+    /// Transitions stream state to `Interrupted`, capturing elapsed duration, and flushes
+    /// any buffered content to the visible message so the partial response remains readable.
+    pub fn cancel_stream(&mut self) {
         let duration = match self.stream {
             StreamState::Active { started_at } => started_at.elapsed(),
             _ => Duration::ZERO,
         };
         self.stream = StreamState::Interrupted { duration };
-        self.chat.cancel_streaming()
+        self.chat.interrupt_streaming();
     }
 
     /// Opens the path attachment picker, inserting `+` into the input to seed the filter display.

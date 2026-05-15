@@ -247,6 +247,21 @@ impl ChatState {
         }
     }
 
+    /// Interrupts an in-progress stream, flushing any buffered content to the visible
+    /// message so it remains readable. Unlike `cancel_streaming`, no messages are removed.
+    pub fn interrupt_streaming(&mut self) {
+        self.flush_reasoning_rendered();
+        self.streaming_reasoning_content = None;
+        self.streaming_reasoning_message_idx = None;
+        self.streaming_reasoning_pushed = false;
+        self.streaming_reasoning_rendered_len = 0;
+        self.flush_rendered();
+        self.streaming_content = None;
+        self.streaming_message_idx = None;
+        self.streaming_message_pushed = false;
+        self.streaming_rendered_len = 0;
+    }
+
     /// Cancels an in-progress stream, rolling back the optimistic user message and any
     /// partial assistant content. Returns the rolled-back user message text so the caller
     /// can restore it to the input.

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crossterm::event::{KeyCode, KeyModifiers};
 use gantry_core::{
     AppEvent, ChatStreamItem, MultiTurnStreamItem, ReasoningContent, StreamedAssistantContent,
@@ -33,9 +35,12 @@ pub fn update(model: &mut Model, view_state: &WidgetState, msg: Msg) -> Option<C
             None
         }
         Msg::StreamError(e) => {
-            if let Some(text) = model.cancel_stream() {
+            if let Some(text) = model.chat.cancel_streaming() {
                 model.input.set_text(text);
             }
+            model.stream = StreamState::Interrupted {
+                duration: Duration::ZERO,
+            };
             model.status_message = Some(e);
             None
         }
