@@ -6,8 +6,10 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::message::Message;
+use crate::metrics::Usage;
 use crate::session::registry::{SessionInfo, SessionRegistry};
-use crate::session::{Node, Session, SessionHistory, SessionId};
+use crate::session::{ChildNode, NodeId, RootNode, Session, SessionHistory, SessionId, StoredNode};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SessionHeader {
@@ -23,6 +25,69 @@ impl SessionHeader {
             kind: "header".to_string(),
             session_id: id.clone(),
             created_at: Timestamp::now(),
+        }
+    }
+}
+
+/// A JSONL-serializable mirror of [`StoredNode`] with a `type` tag for format discrimination.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+enum FsStoredNode {
+    Root(FsRootNode),
+    Child(FsChildNode),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FsRootNode {
+    id: NodeId,
+    timestamp: Timestamp,
+    message: Message,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FsChildNode {
+    id: NodeId,
+    parent_id: NodeId,
+    timestamp: Timestamp,
+    message: Message,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    usage: Option<Usage>,
+}
+
+impl From<FsStoredNode> for StoredNode {
+    fn from(fs: FsStoredNode) -> Self {
+        match fs {
+            FsStoredNode::Root(r) => StoredNode::Root(RootNode {
+                id: r.id,
+                timestamp: r.timestamp,
+                message: r.message,
+            }),
+            FsStoredNode::Child(c) => StoredNode::Child(ChildNode {
+                id: c.id,
+                parent_id: c.parent_id,
+                timestamp: c.timestamp,
+                message: c.message,
+                usage: c.usage,
+            }),
+        }
+    }
+}
+
+impl From<&StoredNode> for FsStoredNode {
+    fn from(node: &StoredNode) -> Self {
+        match node {
+            StoredNode::Root(r) => FsStoredNode::Root(FsRootNode {
+                id: r.id.clone(),
+                timestamp: r.timestamp,
+                message: r.message.clone(),
+            }),
+            StoredNode::Child(c) => FsStoredNode::Child(FsChildNode {
+                id: c.id.clone(),
+                parent_id: c.parent_id.clone(),
+                timestamp: c.timestamp,
+                message: c.message.clone(),
+                usage: c.usage.clone(),
+            }),
         }
     }
 }
@@ -82,9 +147,10 @@ impl FsSessionHistory {
 }
 
 impl SessionHistory for FsSessionHistory {
-    /// Appends a new node as a JSON line to the session file.
-    fn append(&self, node: &Node) -> Result<()> {
-        let line = serde_json::to_string(node).context("failed to serialize node")?;
+    /// Appends a stored node as a JSON line to the session file.
+    fn append(&self, node: &StoredNode) -> Result<()> {
+        let line =
+            serde_json::to_string(&FsStoredNode::from(node)).context("failed to serialize node")?;
         let mut file = std::fs::OpenOptions::new()
             .append(true)
             .open(&self.path)
@@ -94,8 +160,8 @@ impl SessionHistory for FsSessionHistory {
         Ok(())
     }
 
-    /// Reads all nodes from the session file, skipping the header line.
-    fn nodes(&self) -> Result<Vec<Node>> {
+    /// Reads all stored nodes from the session file, skipping the header line.
+    fn nodes(&self) -> Result<Vec<StoredNode>> {
         let contents = std::fs::read_to_string(&self.path)
             .with_context(|| format!("failed to read session file {}", self.path.display()))?;
         let mut nodes = vec![];
@@ -103,9 +169,9 @@ impl SessionHistory for FsSessionHistory {
             if line.trim().is_empty() {
                 continue;
             }
-            let node: Node = serde_json::from_str(line)
+            let node: FsStoredNode = serde_json::from_str(line)
                 .with_context(|| format!("invalid JSON line in {}", self.path.display()))?;
-            nodes.push(node);
+            nodes.push(node.into());
         }
         Ok(nodes)
     }
@@ -134,11 +200,13 @@ impl FsSessionRegistry {
 impl SessionRegistry for FsSessionRegistry {
     type History = FsSessionHistory;
 
-    /// Creates a new empty session, assigning it a fresh ID and persisting its log file.
-    fn create_session(&self) -> Result<Session<FsSessionHistory>> {
+    /// Creates a new session with `first_message` as its root node.
+    fn create_session(&self, first_message: Message) -> Result<Session<FsSessionHistory>> {
         let session_id = SessionId::new();
         let history = FsSessionHistory::create(&self.sessions_dir, &session_id)?;
-        Ok(Session::new(session_id, history))
+        let root = RootNode::new(first_message);
+        history.append(&StoredNode::Root(root.clone()))?;
+        Ok(Session::new(session_id, root, history))
     }
 
     /// Loads an existing session from disk by ID, restoring its nodes.
@@ -148,7 +216,7 @@ impl SessionRegistry for FsSessionRegistry {
         Session::restore(id, history)
     }
 
-    /// Lists all sessions, sorted by creation time (oldest first).
+    /// Lists all sessions that have at least one node, sorted by creation time (oldest first).
     fn list(&self) -> Result<Vec<SessionInfo>> {
         let mut sessions = vec![];
         for entry in std::fs::read_dir(&self.sessions_dir).with_context(|| {
@@ -177,7 +245,26 @@ impl SessionRegistry for FsSessionRegistry {
             let Ok(id) = id_str.parse::<SessionId>() else {
                 continue;
             };
-            sessions.push(SessionInfo { id, timestamp });
+            // Read only the first node line (line index 1, after the header).
+            let contents = std::fs::read_to_string(&path)
+                .with_context(|| format!("failed to read session file {}", path.display()))?;
+            let first_node_line = contents
+                .lines()
+                .nth(1)
+                .with_context(|| format!("session file has no root node: {}", path.display()))?;
+            let FsStoredNode::Root(root) = serde_json::from_str::<FsStoredNode>(first_node_line)
+                .with_context(|| format!("invalid root node in session file {}", path.display()))?
+            else {
+                anyhow::bail!(
+                    "expected root node as first entry in session file {}",
+                    path.display()
+                )
+            };
+            sessions.push(SessionInfo {
+                id,
+                timestamp,
+                first_message: root.message.text(),
+            });
         }
         sessions.sort_by_key(|s| s.timestamp);
         Ok(sessions)
@@ -197,7 +284,7 @@ fn session_filename(session_id: &SessionId) -> Result<String> {
 mod tests {
     use super::*;
     use crate::message::Message;
-    use crate::session::NodeId;
+    use crate::session::{ChildNode, NodeId, RootNode, StoredNode};
     use tempfile::TempDir;
 
     fn registry() -> (TempDir, FsSessionRegistry) {
@@ -223,17 +310,18 @@ mod tests {
     #[test]
     fn create_session_is_listed() {
         let (_tmp, r) = registry();
-        let id = r.create_session().unwrap().session_id;
+        let id = r.create_session(Message::user("hello")).unwrap().session_id;
 
         let sessions = r.list().unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].id, id);
+        assert_eq!(sessions[0].first_message, "hello");
     }
 
     #[test]
     fn load_session_does_not_duplicate_listing() {
         let (_tmp, r) = registry();
-        let id = r.create_session().unwrap().session_id;
+        let id = r.create_session(Message::user("hello")).unwrap().session_id;
         r.load_session(&id).unwrap();
 
         assert_eq!(r.list().unwrap().len(), 1);
@@ -242,9 +330,9 @@ mod tests {
     #[test]
     fn list_sorts_by_creation_time() {
         let (_tmp, r) = registry();
-        let id1 = r.create_session().unwrap().session_id;
+        let id1 = r.create_session(Message::user("a")).unwrap().session_id;
         std::thread::sleep(std::time::Duration::from_millis(2));
-        let id2 = r.create_session().unwrap().session_id;
+        let id2 = r.create_session(Message::user("b")).unwrap().session_id;
 
         let sessions = r.list().unwrap();
         assert_eq!(sessions[0].id, id1);
@@ -263,18 +351,19 @@ mod tests {
         let id = SessionId::new();
         let history = FsSessionHistory::create(&dir_path, &id).unwrap();
 
-        let n1 = Node::new(Message::user("hello"), None, None);
-        let n2 = Node::new(Message::assistant("hi there"), Some(n1.id.clone()), None);
+        let root = RootNode::new(Message::user("hello"));
+        let root_id = root.id.clone();
+        let child = ChildNode::new(Message::assistant("hi there"), root_id.clone(), None);
 
-        history.append(&n1).unwrap();
-        history.append(&n2).unwrap();
+        history.append(&StoredNode::Root(root)).unwrap();
+        history.append(&StoredNode::Child(child)).unwrap();
 
         let loaded = history.nodes().unwrap();
         assert_eq!(loaded.len(), 2);
-        assert_eq!(loaded[0].message, Message::user("hello"));
-        assert_eq!(loaded[1].message, Message::assistant("hi there"));
-        assert!(loaded[0].parent_id.is_none());
-        assert_eq!(loaded[1].parent_id.as_ref(), Some(&loaded[0].id));
+        assert!(matches!(&loaded[0], StoredNode::Root(r) if r.message == Message::user("hello")));
+        assert!(
+            matches!(&loaded[1], StoredNode::Child(c) if c.message == Message::assistant("hi there") && c.parent_id == root_id)
+        );
     }
 
     #[test]
@@ -302,14 +391,17 @@ mod tests {
         let id = SessionId::new();
         let history = FsSessionHistory::create(&dir_path, &id).unwrap();
 
-        let node = Node::new(Message::tool_result("call-abc", "output"), None, None);
-        history.append(&node).unwrap();
+        let root = RootNode::new(Message::user("start"));
+        let root_id = root.id.clone();
+        let child = ChildNode::new(Message::tool_result("call-abc", "output"), root_id, None);
+
+        history.append(&StoredNode::Root(root)).unwrap();
+        history.append(&StoredNode::Child(child)).unwrap();
 
         let loaded = history.nodes().unwrap();
-        assert_eq!(loaded.len(), 1);
-        assert_eq!(
-            loaded[0].message,
-            Message::tool_result("call-abc", "output")
+        assert_eq!(loaded.len(), 2);
+        assert!(
+            matches!(&loaded[1], StoredNode::Child(c) if c.message == Message::tool_result("call-abc", "output"))
         );
     }
 

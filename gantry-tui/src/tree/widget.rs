@@ -84,12 +84,12 @@ impl Widget for TreeWidget<'_> {
                 *depth,
             );
 
-            let leaf_marker = if node.node.id == self.state.tree.current_leaf_id {
+            let leaf_marker = if node.id == self.state.tree.current_leaf_id {
                 CURRENT_LEAF_MARKER
             } else {
                 " "
             };
-            let role_label = match node.node.message {
+            let role_label = match node.message {
                 gantry_core::Message::User { .. } => "USER",
                 gantry_core::Message::Assistant { .. } => "GNTR",
             };
@@ -99,7 +99,6 @@ impl Widget for TreeWidget<'_> {
             let max_width = list_area.width as usize;
             let content_budget = max_width.saturating_sub(body_width);
             let single_line: String = node
-                .node
                 .message
                 .text()
                 .chars()

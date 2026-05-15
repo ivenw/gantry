@@ -258,7 +258,7 @@ impl Model {
     pub fn open_tree_view(&mut self, tree: SessionTree) {
         let selected_idx = branch_rows(&tree.stem, 0)
             .iter()
-            .position(|(b, _)| b.node.id == tree.current_leaf_id)
+            .position(|(b, _)| b.id == tree.current_leaf_id)
             .unwrap_or(0);
         self.overlay = InputOverlay::Tree(TreeState {
             tree,

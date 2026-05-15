@@ -73,64 +73,165 @@ impl<T> FromStr for Id<T> {
     }
 }
 
+/// A tagged union of [`RootNode`] and [`ChildNode`] used for persistence.
+///
+/// The `type` tag distinguishes the two variants when serialized.
+#[derive(Debug, Clone)]
+pub enum StoredNode {
+    Root(RootNode),
+    Child(ChildNode),
+}
+
+/// The single root node of a session, carrying its first message.
+///
+/// A session always has exactly one `RootNode`. Having no `parent_id` field makes it
+/// structurally impossible to create a second root.
+#[derive(Debug, Clone)]
+pub struct RootNode {
+    pub id: NodeId,
+    pub timestamp: Timestamp,
+    pub message: Message,
+}
+
+impl RootNode {
+    /// Creates a new root node with a fresh ID and the current timestamp.
+    pub fn new(message: Message) -> Self {
+        Self {
+            id: NodeId::new(),
+            timestamp: Timestamp::now(),
+            message,
+        }
+    }
+}
+
+/// A non-root node in the session tree, always linked to a parent.
+///
+/// The mandatory `parent_id` field makes it structurally impossible for a `ChildNode`
+/// to be a root.
+#[derive(Debug, Clone)]
+pub struct ChildNode {
+    pub id: NodeId,
+    pub parent_id: NodeId,
+    pub timestamp: Timestamp,
+    pub message: Message,
+    /// Token usage for the request that produced this node, set on assistant nodes only.
+    pub usage: Option<Usage>,
+}
+
+impl ChildNode {
+    /// Creates a new child node with a fresh ID and the current timestamp.
+    pub fn new(message: Message, parent_id: NodeId, usage: Option<Usage>) -> Self {
+        Self {
+            id: NodeId::new(),
+            parent_id,
+            timestamp: Timestamp::now(),
+            message,
+            usage,
+        }
+    }
+}
+
 /// An in-memory representation of a single conversation session.
 pub struct Session<H: SessionHistory> {
     pub session_id: SessionId,
-    pub current_leaf_id: Option<NodeId>,
-    nodes: HashMap<NodeId, Node>,
+    pub current_leaf_id: NodeId,
+    pub root: RootNode,
+    children: HashMap<NodeId, ChildNode>,
     history: H,
 }
 
 /// Abstracts the persistence of session nodes.
 pub trait SessionHistory {
-    /// Appends a new node to the history.
-    fn append(&self, node: &Node) -> Result<()>;
+    /// Appends a stored node to the history.
+    fn append(&self, node: &StoredNode) -> Result<()>;
 
-    /// Returns all nodes in the order they were appended.
-    fn nodes(&self) -> Result<Vec<Node>>;
+    /// Returns all stored nodes in the order they were appended.
+    fn nodes(&self) -> Result<Vec<StoredNode>>;
 }
 
 impl<H: SessionHistory> Session<H> {
-    /// Creates a new empty session backed by the given history.
-    pub(super) fn new(session_id: SessionId, history: H) -> Self {
+    /// Creates a new session with the given root message.
+    pub(super) fn new(session_id: SessionId, root: RootNode, history: H) -> Self {
+        let current_leaf_id = root.id.clone();
         Self {
             session_id,
-            current_leaf_id: None,
-            nodes: HashMap::new(),
+            current_leaf_id,
+            root,
+            children: HashMap::new(),
             history,
         }
     }
 
     /// Restores a session from its persisted history, setting the active leaf to the most
     /// recently created tip node.
+    ///
+    /// Panics if the history has no root node or more than one root node.
     pub(super) fn restore(session_id: SessionId, history: H) -> Result<Self> {
-        let nodes_vec = history
+        let stored = history
             .nodes()
             .with_context(|| format!("failed to load session {}", session_id))?;
 
-        let nodes: HashMap<NodeId, Node> =
-            nodes_vec.into_iter().map(|n| (n.id.clone(), n)).collect();
+        let mut root: Option<RootNode> = None;
+        let mut children: HashMap<NodeId, ChildNode> = HashMap::new();
 
-        let parent_ids: std::collections::HashSet<&NodeId> = nodes
-            .values()
-            .filter_map(|n| n.parent_id.as_ref())
-            .collect();
+        for node in stored {
+            match node {
+                StoredNode::Root(r) => {
+                    assert!(
+                        root.is_none(),
+                        "session {} has multiple root nodes; a session must have exactly one root",
+                        session_id
+                    );
+                    root = Some(r);
+                }
+                StoredNode::Child(c) => {
+                    children.insert(c.id.clone(), c);
+                }
+            }
+        }
 
-        let current_leaf_id = nodes
-            .values()
-            .filter(|n| !parent_ids.contains(&n.id))
-            .max_by_key(|n| n.timestamp)
-            .map(|n| n.id.clone());
+        let root = root.unwrap_or_else(|| {
+            panic!(
+                "session {} has no root node; a session must have exactly one root",
+                session_id
+            )
+        });
+
+        let child_parent_ids: std::collections::HashSet<&NodeId> =
+            children.values().map(|c| &c.parent_id).collect();
+
+        // The current leaf is the tip with the latest timestamp that is not a parent of
+        // any other child.
+        let current_leaf_id = {
+            let root_is_tip = !child_parent_ids.contains(&root.id);
+            let child_tips = children
+                .values()
+                .filter(|c| !child_parent_ids.contains(&c.id));
+
+            if root_is_tip {
+                std::iter::once((root.timestamp, root.id.clone()))
+                    .chain(child_tips.map(|c| (c.timestamp, c.id.clone())))
+                    .max_by_key(|(ts, _)| *ts)
+                    .map(|(_, id)| id)
+                    .unwrap()
+            } else {
+                child_tips
+                    .max_by_key(|c| c.timestamp)
+                    .map(|c| c.id.clone())
+                    .unwrap_or_else(|| root.id.clone())
+            }
+        };
 
         Ok(Self {
             session_id,
             current_leaf_id,
-            nodes,
+            root,
+            children,
             history,
         })
     }
 
-    /// Appends a [`Message`] to the session as a new node, persisting it to history.
+    /// Appends a [`Message`] to the session as a new child node, persisting it to history.
     pub fn append_message(&mut self, message: Message) -> Result<()> {
         self.append_message_with_usage(message, None)
     }
@@ -143,109 +244,97 @@ impl<H: SessionHistory> Session<H> {
         message: Message,
         usage: Option<Usage>,
     ) -> Result<()> {
-        let node = Node::new(message, self.current_leaf_id.clone(), usage);
+        let child = ChildNode::new(message, self.current_leaf_id.clone(), usage);
         self.history
-            .append(&node)
+            .append(&StoredNode::Child(child.clone()))
             .with_context(|| format!("failed to persist node to session {}", self.session_id))?;
-        let id = node.id.clone();
-        self.current_leaf_id = Some(id.clone());
-        self.nodes.insert(id, node);
+        self.current_leaf_id = child.id.clone();
+        self.children.insert(child.id.clone(), child);
         Ok(())
     }
 
     /// Switches the active leaf to `from_node_id`, allowing messages to be appended on a new
     /// branch from that point.
     pub fn branch(&mut self, from_node_id: &NodeId) -> Result<()> {
-        if !self.nodes.contains_key(from_node_id) {
+        if *from_node_id != self.root.id && !self.children.contains_key(from_node_id) {
             return Err(anyhow::anyhow!(
                 "node {} not found in session {}",
                 from_node_id,
                 self.session_id
             ));
         }
-        self.current_leaf_id = Some(from_node_id.clone());
+        self.current_leaf_id = from_node_id.clone();
         Ok(())
     }
 
     /// Returns the ordered [`Message`]s on the active branch from root to the current leaf.
     pub fn history(&self) -> Vec<Message> {
-        let Some(leaf_id) = &self.current_leaf_id else {
-            return vec![];
-        };
-
-        let mut chain: Vec<&Node> = vec![];
-        let mut current_id = leaf_id;
+        let mut chain: Vec<&Message> = vec![];
+        let mut current_id = &self.current_leaf_id;
         loop {
-            let Some(node) = self.nodes.get(current_id) else {
+            if *current_id == self.root.id {
+                chain.push(&self.root.message);
+                break;
+            }
+            let Some(child) = self.children.get(current_id) else {
                 break;
             };
-            chain.push(node);
-            match node.parent_id.as_ref() {
-                Some(parent_id) => current_id = parent_id,
-                None => break,
-            }
+            chain.push(&child.message);
+            current_id = &child.parent_id;
         }
-
         chain.reverse();
-        chain.into_iter().map(|n| n.message.clone()).collect()
+        chain.into_iter().cloned().collect()
     }
 
-    /// Returns an iterator over all nodes in the session, in arbitrary order.
-    pub fn all_nodes(&self) -> impl Iterator<Item = &Node> {
-        self.nodes.values()
+    /// Returns an iterator over all nodes as a unified flat view, root first.
+    pub fn all_nodes(&self) -> impl Iterator<Item = FlatNode<'_>> {
+        let root = FlatNode {
+            id: &self.root.id,
+            parent_id: None,
+            timestamp: self.root.timestamp,
+            message: &self.root.message,
+            usage: None,
+        };
+        let children = self.children.values().map(|c| FlatNode {
+            id: &c.id,
+            parent_id: Some(&c.parent_id),
+            timestamp: c.timestamp,
+            message: &c.message,
+            usage: c.usage.as_ref(),
+        });
+        std::iter::once(root).chain(children)
     }
 
-    /// Sums token consumption across all nodes in the session, regardless of branch.
+    /// Sums token consumption across all child nodes in the session, regardless of branch.
     pub fn total_consumption(&self) -> Usage {
-        self.nodes
-            .values()
-            .filter_map(|n| n.usage.clone())
-            .fold(Usage::default(), |mut acc, c| {
-                acc += c;
+        self.children.values().filter_map(|c| c.usage.clone()).fold(
+            Usage::default(),
+            |mut acc, u| {
+                acc += u;
                 acc
-            })
+            },
+        )
     }
 
     /// Builds and returns the session tree for UI rendering.
-    ///
-    /// Returns `None` if the session has no nodes.
-    pub fn as_tree(&self) -> Option<SessionTree> {
-        let current_leaf_id = self.current_leaf_id.clone()?;
-        let nodes: HashMap<NodeId, Node> = self
-            .all_nodes()
-            .map(|n| (n.id.clone(), n.clone()))
-            .collect();
-        let stem = build_branch(&nodes)?;
-        Some(SessionTree {
-            current_leaf_id,
+    pub fn as_tree(&self) -> SessionTree {
+        let stem = build_branch(self);
+        SessionTree {
+            current_leaf_id: self.current_leaf_id.clone(),
             stem,
-        })
-    }
-}
-
-/// A tree node in the session history, wrapping a [`Message`] with parent linkage.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Node {
-    pub id: NodeId,
-    pub parent_id: Option<NodeId>,
-    pub timestamp: Timestamp,
-    pub message: Message,
-    /// Token usage for the request that produced this node, set on assistant nodes only.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage: Option<Usage>,
-}
-
-impl Node {
-    /// Creates a new node with a fresh ID, the current timestamp, and the given message.
-    pub fn new(message: Message, parent_id: Option<NodeId>, usage: Option<Usage>) -> Self {
-        Self {
-            id: NodeId::new(),
-            parent_id,
-            timestamp: Timestamp::now(),
-            message,
-            usage,
         }
     }
+}
+
+/// A unified read-only view of either a [`RootNode`] or a [`ChildNode`].
+///
+/// Used for tree-building and iteration without allocating a unified node type.
+pub struct FlatNode<'a> {
+    pub id: &'a NodeId,
+    pub parent_id: Option<&'a NodeId>,
+    pub timestamp: Timestamp,
+    pub message: &'a Message,
+    pub usage: Option<&'a Usage>,
 }
 
 #[cfg(test)]
@@ -263,20 +352,18 @@ mod tests {
     }
 
     #[test]
-    fn create_returns_empty_session() {
+    fn create_seeds_first_message() {
         let (_tmp, r) = registry();
-        let session = r.create_session().unwrap();
-        assert!(session.current_leaf_id.is_none());
-        assert_eq!(session.history().len(), 0);
+        let session = r.create_session(Message::user("hello")).unwrap();
+        assert_eq!(session.current_leaf_id, session.root.id);
+        assert_eq!(session.history().len(), 1);
+        assert_eq!(session.history()[0], Message::user("hello"));
     }
 
     #[test]
     fn append_advances_leaf_and_persists() {
         let (_tmp, r) = registry();
-        let mut session = r.create_session().unwrap();
-
-        session.append_message(Message::user("hello")).unwrap();
-        assert!(session.current_leaf_id.is_some());
+        let mut session = r.create_session(Message::user("hello")).unwrap();
 
         session.append_message(Message::assistant("hi")).unwrap();
 
@@ -289,23 +376,21 @@ mod tests {
     #[test]
     fn append_sets_parent_id() {
         let (_tmp, r) = registry();
-        let mut session = r.create_session().unwrap();
+        let mut session = r.create_session(Message::user("root")).unwrap();
 
-        session.append_message(Message::user("root")).unwrap();
-        let first_id = session.current_leaf_id.clone().unwrap();
+        let first_id = session.current_leaf_id.clone();
         session.append_message(Message::assistant("reply")).unwrap();
 
-        let leaf_id = session.current_leaf_id.clone().unwrap();
-        assert_eq!(session.nodes[&leaf_id].parent_id.as_ref(), Some(&first_id));
+        let leaf_id = &session.current_leaf_id;
+        assert_eq!(session.children[leaf_id].parent_id, first_id);
     }
 
     #[test]
     fn branch_switches_active_leaf() {
         let (_tmp, r) = registry();
-        let mut session = r.create_session().unwrap();
+        let mut session = r.create_session(Message::user("root")).unwrap();
 
-        session.append_message(Message::user("root")).unwrap();
-        let root_id = session.current_leaf_id.clone().unwrap();
+        let root_id = session.current_leaf_id.clone();
         session
             .append_message(Message::assistant("branch A"))
             .unwrap();
@@ -322,7 +407,7 @@ mod tests {
     #[test]
     fn branch_errors_on_unknown_id() {
         let (_tmp, r) = registry();
-        let mut session = r.create_session().unwrap();
+        let mut session = r.create_session(Message::user("root")).unwrap();
         let fake_id: NodeId = "00000000-0000-0000-0000-000000000000".parse().unwrap();
         assert!(session.branch(&fake_id).is_err());
     }
@@ -331,8 +416,7 @@ mod tests {
     fn load_restores_session_and_picks_latest_leaf() {
         let (_tmp, r) = registry();
         let session_id = {
-            let mut session = r.create_session().unwrap();
-            session.append_message(Message::user("first")).unwrap();
+            let mut session = r.create_session(Message::user("first")).unwrap();
             session
                 .append_message(Message::assistant("second"))
                 .unwrap();
@@ -349,7 +433,7 @@ mod tests {
     #[test]
     fn list_returns_created_sessions() {
         let (_tmp, r) = registry();
-        let id = r.create_session().unwrap().session_id;
+        let id = r.create_session(Message::user("hello")).unwrap().session_id;
         let sessions = r.list().unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].id, id);
@@ -359,8 +443,7 @@ mod tests {
     fn tool_result_reconstructed_as_pair() {
         let (_tmp, r) = registry();
         let session_id = {
-            let mut session = r.create_session().unwrap();
-            session.append_message(Message::user("run it")).unwrap();
+            let mut session = r.create_session(Message::user("run it")).unwrap();
             session
                 .append_message(Message::tool_result("call-1", "done"))
                 .unwrap();

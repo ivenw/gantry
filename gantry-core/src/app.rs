@@ -35,7 +35,8 @@ pub struct App {
     pub project_path: PathBuf,
     pub(crate) cwd: PathBuf,
     sessions_dir: PathBuf,
-    session: FsSession,
+    /// `None` when a new session is pending — created lazily on the first `append_message` call.
+    session: Option<FsSession>,
     pub selection: Option<ModelSelection>,
     pub(crate) registry: ProviderClientRegistry,
     pub(crate) system_prompt: SystemPrompt,
@@ -49,8 +50,8 @@ pub struct App {
 }
 
 impl App {
-    /// Creates an `App` for the given project root, resuming the most recent session or creating a
-    /// new one if none exist. The initial model selection is loaded from `~/.gantry/config.toml`.
+    /// Creates an `App` for the given project root, resuming the most recent session or leaving
+    /// the session pending (created on first message) if none exist.
     ///
     /// Sessions are stored under `global_config_dir/sessions/<project_name>/`.
     pub fn new(
@@ -66,12 +67,14 @@ impl App {
         let session_registry = FsSessionRegistry::new(&sessions_dir)?;
         let sessions = session_registry.list()?;
 
-        let session = if let Some(last) = sessions.last() {
-            session_registry.load_session(&last.id)?
-        } else {
-            session_registry.create_session()?
-        };
-        let total_consumption = session.total_consumption();
+        let session = sessions
+            .last()
+            .map(|last| session_registry.load_session(&last.id))
+            .transpose()?;
+        let total_consumption = session
+            .as_ref()
+            .map(|s| s.total_consumption())
+            .unwrap_or_default();
         let system_prompt = SystemPrompt::new(&cwd);
         let (event_tx, _) = broadcast::channel(64);
 
@@ -108,36 +111,47 @@ impl App {
     /// Switches the active session to the one identified by `session_id`.
     pub fn resume_session(&mut self, session_id: &SessionId) -> Result<()> {
         let session_registry = FsSessionRegistry::new(&self.sessions_dir)?;
-        self.session = session_registry.load_session(session_id)?;
-        self.total_consumption = self.session.total_consumption();
+        let session = session_registry.load_session(session_id)?;
+        self.total_consumption = session.total_consumption();
+        self.session = Some(session);
         self.last_usage = None;
         self.last_char_counts = None;
         Ok(())
     }
 
-    /// Returns the ID of the active session.
-    pub fn session_id(&self) -> &SessionId {
-        &self.session.session_id
+    /// Returns the ID of the active session, or `None` if no session has been started yet.
+    pub fn session_id(&self) -> Option<&SessionId> {
+        self.session.as_ref().map(|s| &s.session_id)
     }
 
-    /// Creates a new session and makes it active.
+    /// Marks the app as ready for a new session, created lazily on the next `append_message`.
     pub fn new_session(&mut self) -> Result<()> {
-        let session_registry = FsSessionRegistry::new(&self.sessions_dir)?;
-        self.session = session_registry.create_session()?;
+        self.session = None;
         self.total_consumption = Usage::default();
         self.last_usage = None;
         self.last_char_counts = None;
         Ok(())
     }
 
-    /// Appends a message to the active session, persisting it to disk.
+    /// Appends a message, creating a new session first if none is active.
     pub fn append_message(&mut self, msg: Message) -> Result<()> {
-        self.session.append_message(msg)
+        if self.session.is_none() {
+            let session_registry = FsSessionRegistry::new(&self.sessions_dir)?;
+            self.session = Some(session_registry.create_session(msg)?);
+            return Ok(());
+        }
+        self.session.as_mut().unwrap().append_message(msg)
     }
 
     /// Appends a message with token usage to the active session, persisting it to disk.
+    ///
+    /// Panics if called before any message has been appended (i.e. while session is pending),
+    /// since usage-bearing messages are always assistant replies that follow a user message.
     pub fn append_message_with_usage(&mut self, msg: Message, usage: Option<Usage>) -> Result<()> {
-        self.session.append_message_with_usage(msg, usage)
+        self.session
+            .as_mut()
+            .expect("append_message_with_usage called before session was created")
+            .append_message_with_usage(msg, usage)
     }
 
     /// Returns the accumulated token consumption across all nodes in the active session.
@@ -145,20 +159,28 @@ impl App {
         &self.total_consumption
     }
 
-    /// Returns the ordered messages on the active branch.
+    /// Returns the ordered messages on the active branch, or an empty vec if no session is active.
     pub fn history(&self) -> Vec<Message> {
-        self.session.history()
+        self.session
+            .as_ref()
+            .map(|s| s.history())
+            .unwrap_or_default()
     }
 
-    /// Builds and returns the session tree, or `None` if the session has no nodes.
+    /// Builds and returns the session tree, or `None` if no session is active.
     pub fn get_tree(&self) -> Option<SessionTree> {
-        self.session.as_tree()
+        self.session.as_ref().map(|s| s.as_tree())
     }
 
     /// Switches the active leaf to the node identified by `node_id_str`.
+    ///
+    /// Panics if no session is active.
     pub fn branch(&mut self, node_id_str: &str) -> Result<()> {
         let node_id: NodeId = node_id_str.parse()?;
-        self.session.branch(&node_id)
+        self.session
+            .as_mut()
+            .expect("branch called before session was created")
+            .branch(&node_id)
     }
 
     /// Returns the active model selection, if one has been set.

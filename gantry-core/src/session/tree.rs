@@ -1,4 +1,7 @@
-use crate::session::{Node, NodeId};
+use crate::message::Message;
+use crate::metrics::Usage;
+use crate::session::{NodeId, Session, SessionHistory};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -17,44 +20,60 @@ pub struct SessionTree {
 /// `Branch` is the single stem; forks appear as multiple entries in `branches`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Branch {
-    pub node: Node,
+    pub id: NodeId,
+    pub parent_id: Option<NodeId>,
+    pub timestamp: Timestamp,
+    pub message: Message,
+    pub usage: Option<Usage>,
     pub branches: Vec<Branch>,
 }
 
-/// Builds a `Branch` tree from `nodes`, rooted at the single node with no parent.
-///
-/// Returns `None` if `nodes` is empty. When a node has multiple children, each child
-/// becomes a separate entry in `branches` and traversal of that path stops — the caller
-/// recurses into sub-branches via `branches`.
-pub fn build_branch(nodes: &HashMap<NodeId, Node>) -> Option<Branch> {
-    let root_id = nodes.values().find(|n| n.parent_id.is_none())?.id.clone();
-    build_from(nodes, root_id)
+/// Builds a `Branch` tree from the session, rooted at the session's root node.
+pub fn build_branch<H: SessionHistory>(session: &Session<H>) -> Branch {
+    // Collect children indexed by parent for fast lookup.
+    let mut children_by_parent: HashMap<&NodeId, Vec<&NodeId>> = HashMap::new();
+    for node in session.all_nodes() {
+        if let Some(pid) = node.parent_id {
+            children_by_parent.entry(pid).or_default().push(node.id);
+        }
+    }
+
+    build_from(session, &session.root.id, &children_by_parent)
 }
 
-fn build_from(nodes: &HashMap<NodeId, Node>, root_id: NodeId) -> Option<Branch> {
-    let root = nodes.get(&root_id)?.clone();
+fn build_from<H: SessionHistory>(
+    session: &Session<H>,
+    node_id: &NodeId,
+    children_by_parent: &HashMap<&NodeId, Vec<&NodeId>>,
+) -> Branch {
+    let flat = session
+        .all_nodes()
+        .find(|n| n.id == node_id)
+        .expect("node_id must exist in session");
 
-    let mut children: Vec<&Node> = nodes
-        .values()
-        .filter(|n| n.parent_id.as_ref() == Some(&root_id))
-        .collect();
-    children.sort_by_key(|n| &n.id);
+    let mut child_ids: Vec<&&NodeId> = children_by_parent
+        .get(node_id)
+        .map(|v| v.iter().collect())
+        .unwrap_or_default();
+    child_ids.sort();
 
-    let branches = match children.len() {
+    let branches = match child_ids.len() {
         0 => vec![],
-        1 => build_from(nodes, children[0].id.clone())
-            .map(|child| vec![child])
-            .unwrap_or_default(),
-        _ => children
+        1 => vec![build_from(session, child_ids[0], children_by_parent)],
+        _ => child_ids
             .iter()
-            .filter_map(|c| build_from(nodes, c.id.clone()))
+            .map(|id| build_from(session, id, children_by_parent))
             .collect(),
     };
 
-    Some(Branch {
-        node: root,
+    Branch {
+        id: flat.id.clone(),
+        parent_id: flat.parent_id.cloned(),
+        timestamp: flat.timestamp,
+        message: flat.message.clone(),
+        usage: flat.usage.cloned(),
         branches,
-    })
+    }
 }
 
 #[cfg(test)]
@@ -63,8 +82,6 @@ mod tests {
     use crate::fs::FsSessionRegistry;
     use crate::message::Message;
     use crate::session::registry::SessionRegistry;
-    use crate::session::{Session, SessionHistory};
-    use std::collections::HashMap;
     use tempfile::TempDir;
 
     fn registry() -> (TempDir, FsSessionRegistry) {
@@ -73,34 +90,23 @@ mod tests {
         (tmp, r)
     }
 
-    fn nodes_from_session(session: &Session<impl SessionHistory>) -> HashMap<NodeId, Node> {
-        session
-            .all_nodes()
-            .map(|n| (n.id.clone(), n.clone()))
-            .collect()
-    }
-
-    fn build_tree_for_test(session: &Session<impl SessionHistory>) -> Option<Branch> {
-        let nodes = nodes_from_session(session);
-        build_branch(&nodes)
-    }
-
     #[test]
-    fn build_branch_empty() {
-        let nodes = HashMap::new();
-        let branch = build_branch(&nodes);
-        assert!(branch.is_none());
+    fn build_branch_single_root() {
+        let (_tmp, r) = registry();
+        let session = r.create_session(Message::user("root")).unwrap();
+        let branch = build_branch(&session);
+        assert_eq!(branch.message, Message::user("root"));
+        assert!(branch.branches.is_empty());
     }
 
     #[test]
     fn build_branch_linear() {
         let (_tmp, r) = registry();
-        let mut session = r.create_session().unwrap();
-        session.append_message(Message::user("root")).unwrap();
+        let mut session = r.create_session(Message::user("root")).unwrap();
         session.append_message(Message::assistant("mid")).unwrap();
         session.append_message(Message::user("leaf")).unwrap();
 
-        let branch = build_tree_for_test(&session).unwrap();
+        let branch = build_branch(&session);
 
         // root -> mid -> leaf: each node has exactly one child until the leaf
         assert_eq!(branch.branches.len(), 1);
@@ -111,9 +117,8 @@ mod tests {
     #[test]
     fn build_branch_two_children() {
         let (_tmp, r) = registry();
-        let mut session = r.create_session().unwrap();
-        session.append_message(Message::user("root")).unwrap();
-        let root_id = session.current_leaf_id.clone().unwrap();
+        let mut session = r.create_session(Message::user("root")).unwrap();
+        let root_id = session.current_leaf_id.clone();
         session
             .append_message(Message::assistant("child A"))
             .unwrap();
@@ -122,7 +127,7 @@ mod tests {
             .append_message(Message::assistant("child B"))
             .unwrap();
 
-        let branch = build_tree_for_test(&session).unwrap();
+        let branch = build_branch(&session);
 
         assert_eq!(branch.branches.len(), 2);
         assert!(branch.branches[0].branches.is_empty());
@@ -132,15 +137,14 @@ mod tests {
     #[test]
     fn build_branch_linear_then_fork() {
         let (_tmp, r) = registry();
-        let mut session = r.create_session().unwrap();
-        session.append_message(Message::user("root")).unwrap();
+        let mut session = r.create_session(Message::user("root")).unwrap();
         session.append_message(Message::assistant("mid")).unwrap();
-        let mid_id = session.current_leaf_id.clone().unwrap();
+        let mid_id = session.current_leaf_id.clone();
         session.append_message(Message::user("child A")).unwrap();
         session.branch(&mid_id).unwrap();
         session.append_message(Message::user("child B")).unwrap();
 
-        let branch = build_tree_for_test(&session).unwrap();
+        let branch = build_branch(&session);
 
         // root has one child (mid), mid has two children (child A, child B)
         assert_eq!(branch.branches.len(), 1);
@@ -150,18 +154,17 @@ mod tests {
     #[test]
     fn build_branch_deep_nest() {
         let (_tmp, r) = registry();
-        let mut session = r.create_session().unwrap();
-        session.append_message(Message::user("root")).unwrap();
-        let root_id = session.current_leaf_id.clone().unwrap();
+        let mut session = r.create_session(Message::user("root")).unwrap();
+        let root_id = session.current_leaf_id.clone();
         session.append_message(Message::assistant("A")).unwrap();
-        let a_id = session.current_leaf_id.clone().unwrap();
+        let a_id = session.current_leaf_id.clone();
         session.append_message(Message::user("B")).unwrap();
         session.branch(&a_id).unwrap();
         session.append_message(Message::user("C")).unwrap();
         session.branch(&root_id).unwrap();
         session.append_message(Message::assistant("D")).unwrap();
 
-        let branch = build_tree_for_test(&session).unwrap();
+        let branch = build_branch(&session);
 
         assert_eq!(branch.branches.len(), 2);
 
@@ -169,7 +172,7 @@ mod tests {
             .branches
             .iter()
             .find(|b| {
-                matches!(&b.node.message, Message::Assistant { content, .. } if {
+                matches!(&b.message, Message::Assistant { content, .. } if {
                     use rig::message::AssistantContent;
                     content.iter().any(|c| matches!(c, AssistantContent::Text(t) if t.text == "A"))
                 })
@@ -181,7 +184,7 @@ mod tests {
             .branches
             .iter()
             .find(|b| {
-                matches!(&b.node.message, Message::Assistant { content, .. } if {
+                matches!(&b.message, Message::Assistant { content, .. } if {
                     use rig::message::AssistantContent;
                     content.iter().any(|c| matches!(c, AssistantContent::Text(t) if t.text == "D"))
                 })

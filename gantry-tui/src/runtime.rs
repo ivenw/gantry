@@ -42,14 +42,14 @@ impl Runtime {
         let (session_id, existing_messages, selection, project_path, mut event_rx) = {
             let app = rt.block_on(app.lock());
             (
-                app.session_id().clone(),
+                app.session_id().cloned(),
                 ChatMessage::messages_from(app.history()),
                 app.selection().cloned(),
                 app.project_path.clone(),
                 app.subscribe_events(),
             )
         };
-        model.session_id = Some(session_id);
+        model.session_id = session_id;
         model.chat.messages = existing_messages;
         model.selection = selection;
         model.project_path = project_path;
@@ -486,10 +486,11 @@ impl Runtime {
                     let app = app.lock().await;
                     match app.list_sessions() {
                         Ok(sessions) => {
-                            let active_id = app.session_id().clone();
-                            let _ = tx
-                                .send(Msg::OpenSessionsState(sessions, active_id).into())
-                                .await;
+                            if let Some(active_id) = app.session_id().cloned() {
+                                let _ = tx
+                                    .send(Msg::OpenSessionsState(sessions, active_id).into())
+                                    .await;
+                            }
                         }
                         Err(e) => {
                             let _ = tx

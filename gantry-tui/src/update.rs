@@ -797,18 +797,18 @@ fn handle_enter_tree_view(model: &mut Model) -> Option<Cmd> {
     };
     let rows = branch_rows(&tv.tree.stem, 0);
     let (node, _) = rows.get(tv.selected_idx)?;
-    let msg = if matches!(node.node.message, gantry_core::Message::User { .. }) {
-        let input = node.node.message.text();
+    let msg = if matches!(node.message, gantry_core::Message::User { .. }) {
+        let input = node.message.text();
         let preceding = rows[..tv.selected_idx]
             .iter()
-            .rfind(|(n, _)| !matches!(n.node.message, gantry_core::Message::User { .. }))
-            .map(|(n, _)| n.node.id.to_string())?;
+            .rfind(|(n, _)| !matches!(n.message, gantry_core::Message::User { .. }))
+            .map(|(n, _)| n.id.to_string())?;
         Cmd::BranchToWithInput {
             branch_id: preceding,
             input,
         }
     } else {
-        Cmd::BranchTo(node.node.id.to_string())
+        Cmd::BranchTo(node.id.to_string())
     };
     Some(msg)
 }
