@@ -122,7 +122,7 @@ impl Runtime {
 
             if last_tick.elapsed() >= tick_interval {
                 last_tick = Instant::now();
-                self.view_state.throbber.next();
+                self.view_state.throbber.tick(Instant::now());
                 needs_redraw = true;
             }
 

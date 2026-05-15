@@ -3,13 +3,11 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
 };
 
-use crate::agent_statusline::{AgentStatuslineWidget, AgentStatuslineWidgetState};
-use crate::app_statusline::AppStatuslineWidget;
 use crate::attachment_picker::AttachmentPickerWidget;
 use crate::chat::ChatWidgetState;
 use crate::chat::widget::ChatWidget;
 use crate::command_picker::CommandPickerWidget;
-use crate::effects::throbber::{AsciiThrobberStyle, Throbber};
+use crate::effects::throbber::Throbber;
 use crate::input::InputWidget;
 use crate::model::{InputOverlay, Mode, Model};
 use crate::model_picker::ModelPickerWidget;
@@ -17,6 +15,11 @@ use crate::provider_config::ProviderConfigWidget;
 use crate::session_picker::SessionPickerWidget;
 use crate::tree::TreeWidget;
 use crate::usage::UsageWidget;
+use crate::{
+    agent_statusline::{AgentStatuslineWidget, AgentStatuslineWidgetState},
+    effects::throbber::Utf8ThrobberStyle,
+};
+use crate::{app_statusline::AppStatuslineWidget, effects::throbber::AsciiThrobberStyle};
 
 pub struct WidgetState {
     pub chat: ChatWidgetState,
