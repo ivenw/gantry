@@ -92,7 +92,7 @@ impl Widget for CommandPickerWidget<'_> {
             .skip(start)
             .take(max_visible)
             .map(|(i, entry)| {
-                let is_selected = start + i == selected;
+                let is_selected = i == selected;
                 let cmd = &picker.items[entry.idx];
                 let name_line = if is_selected {
                     Line::from(Span::styled(cmd.name.as_str(), STYLE_SELECTED))
