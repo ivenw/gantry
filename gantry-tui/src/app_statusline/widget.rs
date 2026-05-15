@@ -15,7 +15,7 @@ const SEPARATOR: &str = " | ";
 pub struct AppStatuslineWidget {
     mode: Mode,
     context_window: Option<ContextWindow>,
-    total_consumption: Option<Usage>,
+    total_usage: Option<Usage>,
     project_name: String,
     project_path: PathBuf,
     cwd: PathBuf,
@@ -27,7 +27,7 @@ impl AppStatuslineWidget {
     pub fn new(
         mode: Mode,
         context_window: Option<ContextWindow>,
-        total_consumption: Option<Usage>,
+        total_usage: Option<Usage>,
         project_name: String,
         project_path: PathBuf,
         cwd: PathBuf,
@@ -36,7 +36,7 @@ impl AppStatuslineWidget {
         Self {
             mode,
             context_window,
-            total_consumption,
+            total_usage,
             project_name,
             project_path,
             cwd,
@@ -72,8 +72,9 @@ impl Widget for AppStatuslineWidget {
             Some(Span::styled(text, Style::default().fg(Color::Gray)))
         };
 
-        let consumption_segment = self.total_consumption.map(|u| {
-            Span::styled(
+        let total_usage_segment = {
+            let u = self.total_usage.unwrap_or_default();
+            Some(Span::styled(
                 format!(
                     "I{} O{} R{} W{}",
                     fmt_tokens(u.input_tokens),
@@ -82,8 +83,8 @@ impl Widget for AppStatuslineWidget {
                     fmt_tokens(u.cache_creation_input_tokens),
                 ),
                 Style::default().fg(Color::Gray),
-            )
-        });
+            ))
+        };
 
         let context_segment = self.context_window.map(|cw| {
             Span::styled(
@@ -96,7 +97,7 @@ impl Widget for AppStatuslineWidget {
             mode_segment,
             cwd_segment,
             model_segment,
-            consumption_segment,
+            total_usage_segment,
             context_segment,
         ]
         .into_iter()

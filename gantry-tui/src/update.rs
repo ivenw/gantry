@@ -25,12 +25,14 @@ use gantry_core::SessionId;
 pub fn update(model: &mut Model, view_state: &WidgetState, msg: Msg) -> Option<Cmd> {
     match msg {
         Msg::StreamItem(item) => handle_stream_item(model, item),
-        Msg::StreamDone => {
+        Msg::StreamDone(cw, usage) => {
             if !matches!(model.stream, StreamState::Interrupted { .. }) {
                 model.finish_stream();
                 if !model.chat.user_is_scrolling {
                     model.chat.scroll_offset = 0;
                 }
+                model.context_window = cw;
+                model.total_consumption = Some(usage);
             }
             None
         }
@@ -52,6 +54,8 @@ pub fn update(model: &mut Model, view_state: &WidgetState, msg: Msg) -> Option<C
             model.chat.reset();
             model.status_message = None;
             model.reset_stream();
+            model.total_consumption = None;
+            model.context_window = None;
             None
         }
         Msg::Key(key) => handle_key(model, view_state, key),
@@ -70,6 +74,22 @@ pub fn update(model: &mut Model, view_state: &WidgetState, msg: Msg) -> Option<C
             model.open_tree_view(nodes);
             None
         }
+        Msg::SessionLoaded {
+            session_id,
+            messages,
+            context_window,
+            total_usage: total_consumption,
+        } => {
+            model.session_id = Some(session_id);
+            model.chat.messages = messages;
+            model.chat.scroll_offset = 0;
+            model.chat.user_is_scrolling = false;
+            model.context_window = context_window;
+            model.total_consumption = Some(total_consumption);
+            model.reset_stream();
+            model.status_message = None;
+            None
+        }
         Msg::ReloadMessages(messages) => {
             model.chat.messages = messages;
             model.chat.scroll_offset = 0;
@@ -83,11 +103,6 @@ pub fn update(model: &mut Model, view_state: &WidgetState, msg: Msg) -> Option<C
             model.chat.user_is_scrolling = false;
             model.input.set_text(input);
             model.overlay = InputOverlay::Input(Mode::Normal);
-            None
-        }
-        Msg::ContextWindowUpdated(cw, usage) => {
-            model.context_window = Some(cw);
-            model.total_consumption = Some(usage);
             None
         }
         Msg::OpenProvidersState(providers) => {

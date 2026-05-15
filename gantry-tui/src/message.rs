@@ -17,7 +17,7 @@ pub enum Msg {
 
     // Stream events from the agent
     StreamItem(Result<ChatStreamItem, StreamingError>),
-    StreamDone,
+    StreamDone(Option<ContextWindow>, Usage),
 
     // Out-of-band tool events
     AppEvent(AppEvent),
@@ -40,8 +40,13 @@ pub enum Msg {
 
     // Sessions browser
     OpenSessionsState(Vec<SessionInfo>, SessionId),
+    SessionLoaded {
+        session_id: SessionId,
+        messages: Vec<ChatMessage>,
+        context_window: Option<ContextWindow>,
+        total_usage: Usage,
+    },
 
-    ContextWindowUpdated(ContextWindow, Usage),
     OpenUsageState(ContextWindow, Usage),
 
     // Providers overlay

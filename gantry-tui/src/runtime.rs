@@ -1,7 +1,7 @@
 use anyhow::Result;
 use crossterm::event::{Event as CrosstermEvent, KeyEventKind, MouseEventKind};
 use futures::StreamExt;
-use gantry_core::App;
+use gantry_core::{App, Usage};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use std::sync::Arc;
@@ -57,7 +57,7 @@ impl Runtime {
                 app.project_path.clone(),
                 app.project_name.clone(),
                 app.context_window(),
-                app.total_consumption().clone(),
+                app.total_usage().clone(),
                 app.subscribe_events(),
             )
         };
@@ -247,10 +247,7 @@ impl Runtime {
                 self.handle_select_model(selection);
                 None
             }
-            Cmd::ResumeSession(session_id) => {
-                self.handle_resume_session(session_id);
-                None
-            }
+            Cmd::ResumeSession(session_id) => self.handle_resume_session(session_id),
         }
     }
 
@@ -283,15 +280,12 @@ impl Runtime {
                         }
                     }
                     response.commit().await;
-                    {
+                    let (cw, usage) = {
                         let app = app_ref.lock().await;
-                        if let Some(cw) = app.context_window() {
-                            let usage = app.total_consumption().clone();
-                            let _ = tx.send(Msg::ContextWindowUpdated(cw, usage).into()).await;
-                        }
-                    }
+                        (app.context_window(), app.total_usage().clone())
+                    };
                     is_streaming.store(false, Ordering::SeqCst);
-                    let _ = tx.send(Msg::StreamDone.into()).await;
+                    let _ = tx.send(Msg::StreamDone(cw, usage).into()).await;
                 }
             }
         });
@@ -325,7 +319,9 @@ impl Runtime {
             }
             response.commit().await;
             is_streaming.store(false, Ordering::SeqCst);
-            let _ = tx.send(Msg::StreamDone.into()).await;
+            let _ = tx
+                .send(Msg::StreamDone(None, Usage::default()).into())
+                .await;
         });
         self.stream_task = Some(task);
     }
@@ -431,30 +427,29 @@ impl Runtime {
         }
     }
 
-    fn handle_resume_session(&mut self, session_id: gantry_core::SessionId) {
+    fn handle_resume_session(&mut self, session_id: gantry_core::SessionId) -> Option<Msg> {
         let result = self
             .rt
             .block_on(async { self.app.lock().await.resume_session(&session_id) });
         match result {
             Err(e) => {
                 self.model.status_message = Some(format!("failed to resume session: {e}"));
+                None
             }
             Ok(()) => {
                 let (messages, context_window, total_consumption) = self.rt.block_on(async {
                     let app = self.app.lock().await;
                     let messages = ChatMessage::messages_from(app.history());
                     let context_window = app.context_window();
-                    let total_consumption = app.total_consumption().clone();
+                    let total_consumption = app.total_usage().clone();
                     (messages, context_window, total_consumption)
                 });
-                self.model.chat.messages = messages;
-                self.model.chat.scroll_offset = 0;
-                self.model.chat.user_is_scrolling = false;
-                self.model.session_id = Some(session_id);
-                self.model.context_window = context_window;
-                self.model.total_consumption = Some(total_consumption);
-                self.model.reset_stream();
-                self.model.status_message = None;
+                Some(Msg::SessionLoaded {
+                    session_id,
+                    messages,
+                    context_window,
+                    total_usage: total_consumption,
+                })
             }
         }
     }
@@ -554,7 +549,7 @@ impl Runtime {
                     let guard = app.lock().await;
                     match guard.context_window() {
                         Some(cw) => {
-                            let consumption = guard.total_consumption().clone();
+                            let consumption = guard.total_usage().clone();
                             drop(guard);
                             let _ = tx.send(Msg::OpenUsageState(cw, consumption).into()).await;
                         }
