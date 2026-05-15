@@ -121,7 +121,7 @@ impl Widget for ModelPickerWidget<'_> {
 
         TableWidget::new(
             vec![self.state.model_col_width, self.state.provider_col_width],
-            12,
+            4,
             rows,
         )
         .render(list_area, buf);

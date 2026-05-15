@@ -123,7 +123,7 @@ impl Widget for SessionPickerWidget<'_> {
             })
             .collect();
 
-        TableWidget::new(vec![self.state.name_col_width], 8, rows).render(list_area, buf);
+        TableWidget::new(vec![self.state.name_col_width], 4, rows).render(list_area, buf);
 
         theme::counter_line(selected + 1, count).render(counter_area, buf);
     }

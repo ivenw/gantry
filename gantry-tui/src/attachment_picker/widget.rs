@@ -88,7 +88,7 @@ impl Widget for AttachmentPickerWidget<'_> {
                         vec![name_line]
                     })
                     .collect();
-                TableWidget::new(vec![], 0, rows).render(area, buf);
+                TableWidget::new(vec![], 4, rows).render(area, buf);
             }
             AttachmentPickerKind::Skill(results) => {
                 let rows: Vec<Vec<Line>> = results
@@ -108,7 +108,7 @@ impl Widget for AttachmentPickerWidget<'_> {
                         vec![name_line, desc_line]
                     })
                     .collect();
-                TableWidget::new(vec![self.state.name_col_width], 12, rows).render(area, buf);
+                TableWidget::new(vec![self.state.name_col_width], 4, rows).render(area, buf);
             }
         }
     }
