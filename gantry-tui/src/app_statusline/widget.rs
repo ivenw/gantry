@@ -1,6 +1,6 @@
 use crate::model::Mode;
 use crate::theme;
-use gantry_core::{ContextWindow, Usage};
+use gantry_core::{ContextWindow, ModelSelection, Usage};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -19,6 +19,7 @@ pub struct AppStatuslineWidget {
     project_name: String,
     project_path: PathBuf,
     cwd: PathBuf,
+    model_selection: Option<ModelSelection>,
 }
 
 impl AppStatuslineWidget {
@@ -30,6 +31,7 @@ impl AppStatuslineWidget {
         project_name: String,
         project_path: PathBuf,
         cwd: PathBuf,
+        model_selection: Option<ModelSelection>,
     ) -> Self {
         Self {
             mode,
@@ -38,6 +40,7 @@ impl AppStatuslineWidget {
             project_name,
             project_path,
             cwd,
+            model_selection,
         }
     }
 }
@@ -60,6 +63,14 @@ impl Widget for AppStatuslineWidget {
             fmt_cwd(&self.project_name, &self.project_path, &self.cwd),
             Style::default().fg(Color::Gray),
         ));
+
+        let model_segment = {
+            let text = match &self.model_selection {
+                Some(sel) => format!("{}@{}", sel.model_id.as_str(), sel.provider_alias.as_str(),),
+                None => "No model selected".to_string(),
+            };
+            Some(Span::styled(text, Style::default().fg(Color::Gray)))
+        };
 
         let consumption_segment = self.total_consumption.map(|u| {
             Span::styled(
@@ -84,6 +95,7 @@ impl Widget for AppStatuslineWidget {
         let segments: Vec<Span> = [
             mode_segment,
             cwd_segment,
+            model_segment,
             consumption_segment,
             context_segment,
         ]

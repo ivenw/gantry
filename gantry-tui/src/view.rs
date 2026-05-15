@@ -149,6 +149,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
                     model.project_name.clone(),
                     model.project_path.clone(),
                     model.cwd.clone(),
+                    model.selection.clone(),
                 ),
                 app_statusline_area,
             );
