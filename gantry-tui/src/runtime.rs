@@ -44,6 +44,7 @@ impl Runtime {
             existing_messages,
             selection,
             project_path,
+            project_name,
             context_window,
             total_consumption,
             mut event_rx,
@@ -54,6 +55,7 @@ impl Runtime {
                 ChatMessage::messages_from(app.history()),
                 app.selection().cloned(),
                 app.project_path.clone(),
+                app.project_name.clone(),
                 app.context_window(),
                 app.total_consumption().clone(),
                 app.subscribe_events(),
@@ -63,6 +65,7 @@ impl Runtime {
         model.chat.messages = existing_messages;
         model.selection = selection;
         model.project_path = project_path;
+        model.project_name = project_name;
         model.context_window = context_window;
         model.total_consumption = Some(total_consumption);
         model.cwd = cwd;

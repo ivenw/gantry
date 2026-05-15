@@ -33,6 +33,7 @@ type FsSession = Session<crate::fs::session_registry::FsSessionHistory>;
 /// provider registry. All chat and session operations go through this type.
 pub struct App {
     pub project_path: PathBuf,
+    pub project_name: String,
     pub(crate) cwd: PathBuf,
     sessions_dir: PathBuf,
     /// `None` when a new session is pending — created lazily on the first `append_message` call.
@@ -80,6 +81,7 @@ impl App {
 
         Ok(Self {
             project_path,
+            project_name: project_config.name,
             cwd,
             sessions_dir,
             session,
