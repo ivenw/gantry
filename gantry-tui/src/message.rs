@@ -41,7 +41,7 @@ pub enum Msg {
     // Sessions browser
     OpenSessionsState(Vec<SessionInfo>, SessionId),
 
-    ContextWindowUpdated(ContextWindow),
+    ContextWindowUpdated(ContextWindow, Usage),
     OpenUsageState(ContextWindow, Usage),
 
     // Providers overlay

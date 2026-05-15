@@ -39,13 +39,23 @@ impl Runtime {
 
         let mut model = Model::new();
 
-        let (session_id, existing_messages, selection, project_path, mut event_rx) = {
+        let (
+            session_id,
+            existing_messages,
+            selection,
+            project_path,
+            context_window,
+            total_consumption,
+            mut event_rx,
+        ) = {
             let app = rt.block_on(app.lock());
             (
                 app.session_id().cloned(),
                 ChatMessage::messages_from(app.history()),
                 app.selection().cloned(),
                 app.project_path.clone(),
+                app.context_window(),
+                app.total_consumption().clone(),
                 app.subscribe_events(),
             )
         };
@@ -53,6 +63,8 @@ impl Runtime {
         model.chat.messages = existing_messages;
         model.selection = selection;
         model.project_path = project_path;
+        model.context_window = context_window;
+        model.total_consumption = Some(total_consumption);
         model.cwd = cwd;
 
         let event_tx = msg_tx.clone();
@@ -268,8 +280,12 @@ impl Runtime {
                         }
                     }
                     response.commit().await;
-                    if let Some(cw) = app_ref.lock().await.context_window() {
-                        let _ = tx.send(Msg::ContextWindowUpdated(cw).into()).await;
+                    {
+                        let app = app_ref.lock().await;
+                        if let Some(cw) = app.context_window() {
+                            let usage = app.total_consumption().clone();
+                            let _ = tx.send(Msg::ContextWindowUpdated(cw, usage).into()).await;
+                        }
                     }
                     is_streaming.store(false, Ordering::SeqCst);
                     let _ = tx.send(Msg::StreamDone.into()).await;
@@ -421,13 +437,19 @@ impl Runtime {
                 self.model.status_message = Some(format!("failed to resume session: {e}"));
             }
             Ok(()) => {
-                let messages = self.rt.block_on(async {
-                    ChatMessage::messages_from(self.app.lock().await.history())
+                let (messages, context_window, total_consumption) = self.rt.block_on(async {
+                    let app = self.app.lock().await;
+                    let messages = ChatMessage::messages_from(app.history());
+                    let context_window = app.context_window();
+                    let total_consumption = app.total_consumption().clone();
+                    (messages, context_window, total_consumption)
                 });
                 self.model.chat.messages = messages;
                 self.model.chat.scroll_offset = 0;
                 self.model.chat.user_is_scrolling = false;
                 self.model.session_id = Some(session_id);
+                self.model.context_window = context_window;
+                self.model.total_consumption = Some(total_consumption);
                 self.model.reset_stream();
                 self.model.status_message = None;
             }

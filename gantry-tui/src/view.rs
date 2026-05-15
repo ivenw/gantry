@@ -142,7 +142,11 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
                 _ => Mode::Normal,
             };
             frame.render_widget(
-                AppStatuslineWidget::new(mode, model.context_window.clone()),
+                AppStatuslineWidget::new(
+                    mode,
+                    model.context_window.clone(),
+                    model.total_consumption.clone(),
+                ),
                 app_statusline_area,
             );
         }

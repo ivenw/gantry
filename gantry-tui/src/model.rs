@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use gantry_core::{
     ContextWindow, InputToken, ModelSelection, PathSearchResult, SessionId, SessionInfo,
-    SessionTree, SkillSearchResult,
+    SessionTree, SkillSearchResult, Usage,
 };
 
 /// The state of the agent stream.
@@ -59,6 +59,7 @@ pub struct Model {
     pub stream: StreamState,
     /// Context window snapshot from the most recently completed stream.
     pub context_window: Option<ContextWindow>,
+    pub total_consumption: Option<Usage>,
     /// Cached model list fetched on first open of the model picker.
     pub cached_models: Option<Vec<ModelSelection>>,
 }
@@ -76,6 +77,7 @@ impl Model {
             status_message: None,
             stream: StreamState::Idle,
             context_window: None,
+            total_consumption: None,
             cached_models: None,
         }
     }

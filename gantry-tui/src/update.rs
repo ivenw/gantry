@@ -85,8 +85,9 @@ pub fn update(model: &mut Model, view_state: &WidgetState, msg: Msg) -> Option<C
             model.overlay = InputOverlay::Input(Mode::Normal);
             None
         }
-        Msg::ContextWindowUpdated(cw) => {
+        Msg::ContextWindowUpdated(cw, usage) => {
             model.context_window = Some(cw);
+            model.total_consumption = Some(usage);
             None
         }
         Msg::OpenProvidersState(providers) => {

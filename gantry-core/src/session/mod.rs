@@ -149,6 +149,8 @@ pub trait SessionHistory {
     fn nodes(&self) -> Result<Vec<StoredNode>>;
 }
 
+// TODO: There are many methods that are independent of the history, i wonder if they need to
+// live under the generic H impl.
 impl<H: SessionHistory> Session<H> {
     /// Creates a new session with the given root message.
     pub(super) fn new(session_id: SessionId, root: RootNode, history: H) -> Self {
