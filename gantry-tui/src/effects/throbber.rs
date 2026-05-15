@@ -1,9 +1,48 @@
-const FRAMES_ASCII: &[char] = &['|', '/', '-', '\\'];
-const FRAMES_BRAILLE_CIRCLING: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+pub enum AsciiThrobberStyle {
+    Propeller,
+    CirclePulse,
+    Qpbd,
+}
 
-pub enum ThrobberStyle {
-    Ascii,
+impl AsciiThrobberStyle {
+    /// Returns the animation frames for this style.
+    fn frames(&self) -> &'static [char] {
+        match self {
+            Self::Propeller => &['|', '/', '-', '\\'],
+            Self::CirclePulse => &['.', 'o', 'O', 'o'],
+            Self::Qpbd => &['q', 'p', 'b', 'd'],
+        }
+    }
+}
+
+pub enum Utf8ThrobberStyle {
+    BarPulse,
     BrailleCircling,
+}
+
+impl Utf8ThrobberStyle {
+    /// Returns the animation frames for this style.
+    fn frames(&self) -> &'static [char] {
+        match self {
+            Self::BarPulse => &['-', '=', '≡', '='],
+            Self::BrailleCircling => &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'],
+        }
+    }
+}
+
+enum ThrobberStyle {
+    Ascii(AsciiThrobberStyle),
+    Utf8(Utf8ThrobberStyle),
+}
+
+impl ThrobberStyle {
+    /// Returns the animation frames for this style.
+    fn frames(&self) -> &'static [char] {
+        match self {
+            Self::Ascii(s) => s.frames(),
+            Self::Utf8(s) => s.frames(),
+        }
+    }
 }
 
 pub struct Throbber {
@@ -11,19 +50,34 @@ pub struct Throbber {
     idx: usize,
 }
 
-impl Throbber {
-    pub fn new(style: ThrobberStyle) -> Self {
-        let frames = match style {
-            ThrobberStyle::Ascii => FRAMES_ASCII,
-            ThrobberStyle::BrailleCircling => FRAMES_BRAILLE_CIRCLING,
-        };
-        Self { frames, idx: 0 }
+impl From<AsciiThrobberStyle> for Throbber {
+    fn from(style: AsciiThrobberStyle) -> Self {
+        ThrobberStyle::Ascii(style).into()
     }
+}
 
+impl From<Utf8ThrobberStyle> for Throbber {
+    fn from(style: Utf8ThrobberStyle) -> Self {
+        ThrobberStyle::Utf8(style).into()
+    }
+}
+
+impl From<ThrobberStyle> for Throbber {
+    fn from(style: ThrobberStyle) -> Self {
+        Self {
+            frames: style.frames(),
+            idx: 0,
+        }
+    }
+}
+
+impl Throbber {
+    /// Advances to the next frame, wrapping around.
     pub fn next(&mut self) {
         self.idx = (self.idx + 1) % self.frames.len();
     }
 
+    /// Returns the current frame character.
     pub fn current(&self) -> char {
         self.frames[self.idx]
     }

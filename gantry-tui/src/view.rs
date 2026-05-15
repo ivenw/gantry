@@ -9,7 +9,7 @@ use crate::attachment_picker::AttachmentPickerWidget;
 use crate::chat::ChatWidgetState;
 use crate::chat::widget::ChatWidget;
 use crate::command_picker::CommandPickerWidget;
-use crate::effects::throbber::{Throbber, ThrobberStyle};
+use crate::effects::throbber::{AsciiThrobberStyle, Throbber};
 use crate::input::InputWidget;
 use crate::model::{InputOverlay, Mode, Model};
 use crate::model_picker::ModelPickerWidget;
@@ -29,7 +29,7 @@ impl Default for WidgetState {
         Self {
             chat: ChatWidgetState::default(),
             agent_statusline: AgentStatuslineWidgetState::default(),
-            throbber: Throbber::new(ThrobberStyle::Ascii),
+            throbber: AsciiThrobberStyle::Propeller.into(),
         }
     }
 }
