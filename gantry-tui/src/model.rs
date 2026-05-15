@@ -234,21 +234,23 @@ impl Model {
 
     /// Opens the sessions browser, pre-selecting the currently active session.
     pub fn open_sessions_view(&mut self, sessions: Vec<SessionInfo>, active_session_id: SessionId) {
-        let selected_idx = sessions
+        let mut state = SessionPickerState::new(sessions, active_session_id);
+        // Pre-select the active session (last match, so the most recent active session wins).
+        if let Some(idx) = state
+            .picker
+            .filtered
             .iter()
-            .rposition(|s| s.id == active_session_id)
-            .unwrap_or(sessions.len().saturating_sub(1));
-        self.overlay = InputOverlay::SessionPicker(SessionPickerState {
-            sessions,
-            selected_idx,
-            active_session_id,
-        });
+            .rposition(|e| state.picker.items[e.idx].id == state.active_session_id)
+        {
+            state.picker.selected_idx = idx;
+        }
+        self.overlay = InputOverlay::SessionPicker(state);
     }
 
     /// Returns the session highlighted in the sessions browser, if any.
     pub fn selected_session(&self) -> Option<&SessionInfo> {
         if let InputOverlay::SessionPicker(ref sv) = self.overlay {
-            sv.sessions.get(sv.selected_idx)
+            sv.picker.selected()
         } else {
             None
         }

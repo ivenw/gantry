@@ -521,19 +521,10 @@ fn handle_key_sessions_view(model: &mut Model, key: crossterm::event::KeyEvent) 
         return None;
     };
     match key.code {
-        KeyCode::Up | KeyCode::Char('k') => {
-            if !sv.sessions.is_empty() {
-                sv.selected_idx = sv
-                    .selected_idx
-                    .checked_sub(1)
-                    .unwrap_or(sv.sessions.len() - 1);
-            }
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            if !sv.sessions.is_empty() {
-                sv.selected_idx = (sv.selected_idx + 1) % sv.sessions.len();
-            }
-        }
+        KeyCode::Up | KeyCode::Char('k') => sv.picker.move_up(),
+        KeyCode::Down | KeyCode::Char('j') => sv.picker.move_down(),
+        KeyCode::Backspace => sv.pop_filter(),
+        KeyCode::Char(c) => sv.push_filter(c),
         _ => {}
     }
     None

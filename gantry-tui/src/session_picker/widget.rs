@@ -2,10 +2,26 @@ use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Widget},
 };
 
+use crate::picker::highlight_matched_chars;
 use crate::session_picker::SessionPickerState;
+use crate::theme;
+use crate::theme::title;
+use crate::widgets::table::TableWidget;
+
+const MAX_VISIBLE: usize = 10;
+
+/// Overhead rows: top border + prompt row + blank separator + counter row + bottom border.
+const CHROME_HEIGHT: u16 = 5;
+
+const STYLE_TEXT: Style = Style::new().fg(Color::White);
+const STYLE_MATCH: Style = Style::new().fg(Color::LightCyan);
+const STYLE_SELECTED: Style = Style::new().fg(Color::LightCyan).bold();
+const STYLE_ACTIVE: Style = Style::new().fg(Color::White);
+const STYLE_AGE: Style = Style::new().fg(Color::DarkGray);
 
 pub struct SessionPickerWidget<'a> {
     state: &'a SessionPickerState,
@@ -17,111 +33,121 @@ impl<'a> SessionPickerWidget<'a> {
         Self { state }
     }
 
-    /// Returns the height required to render the sessions list, capped at 10 content rows.
-    ///
-    /// Layout: 1 top-padding + content rows (capped) + 1 footer + 1 bottom-padding.
+    /// Returns the total height needed to render the sessions list, capped at `MAX_VISIBLE` content rows.
     pub fn height(&self) -> u16 {
-        let content_rows = (self.state.sessions.len() as u16).min(10).max(1);
-        1 + content_rows + 1 + 1
+        CHROME_HEIGHT + self.state.picker.filtered.len().clamp(1, MAX_VISIBLE) as u16
     }
 }
 
 impl Widget for SessionPickerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let block = Block::default().borders(Borders::NONE);
-        block.render(area, buf);
+        let picker = &self.state.picker;
+        let filtered = &picker.filtered;
 
-        let inner = Rect::new(
-            area.x + 1,
-            area.y + 1,
-            area.width.saturating_sub(2),
-            area.height.saturating_sub(2),
-        );
+        let block = Block::default()
+            .title(title("SESSIONS"))
+            .borders(Borders::ALL)
+            .border_set(theme::border_set())
+            .border_style(Style::default().fg(Color::Gray));
+        let inner = block.inner(area);
+        block.render(area, buf);
 
         if inner.width == 0 || inner.height == 0 {
             return;
         }
 
-        let footer_height = 1u16;
-        let chunks = Layout::default()
+        let list_height = filtered.len().clamp(1, MAX_VISIBLE) as u16;
+        let [prompt_area, _, list_area, counter_area] = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(footer_height)])
-            .split(inner);
+            .constraints([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(list_height),
+                Constraint::Length(1),
+            ])
+            .areas(inner);
 
-        let list_area = chunks[0];
-        let footer_area = chunks[1];
+        Line::from(format!("> {}", picker.filter)).render(prompt_area, buf);
 
-        let viewport_height = list_area.height as usize;
-        let sessions = &self.state.sessions;
-        let selected = self.state.selected_idx;
-
-        // Keep selected row in view.
-        let scroll = if selected < viewport_height {
-            0
-        } else {
-            selected.saturating_sub(viewport_height - 1)
-        };
-
-        for (i, session) in sessions.iter().enumerate() {
-            let row = i.wrapping_sub(scroll);
-            if i < scroll || row >= viewport_height {
-                continue;
-            }
-            let y = list_area.y + row as u16;
-
-            let is_selected = i == selected;
-            let is_active = session.id == self.state.active_session_id;
-
-            let base_style = if is_selected {
-                Style::default().fg(Color::Black).bg(Color::Cyan)
-            } else {
-                Style::default().fg(Color::White)
-            };
-
-            // Fill the entire row background when selected.
-            if is_selected {
-                for x in 0..list_area.width {
-                    if let Some(cell) = buf.cell_mut((list_area.x + x, y)) {
-                        cell.set_style(base_style);
-                    }
-                }
-            }
-
-            let active_marker = if is_active { ">" } else { " " };
-            let ts = session.timestamp.strftime("%Y-%m-%d %H:%M").to_string();
-            let id_short = session.id.to_string();
-            // Show the last 8 chars of the UUID so it's recognisable but compact.
-            let id_suffix = &id_short[id_short.len().saturating_sub(8)..];
-            let line = format!("{} {}  …{}", active_marker, ts, id_suffix);
-
-            buf.set_string(list_area.x, y, &line, base_style);
-
-            // Paint the active marker in cyan even when not selected.
-            if is_active && !is_selected {
-                buf.set_string(
-                    list_area.x,
-                    y,
-                    active_marker,
-                    Style::default().fg(Color::Cyan),
-                );
-            }
+        if filtered.is_empty() {
+            Line::styled("No matches", Style::default().fg(Color::DarkGray)).render(list_area, buf);
+            return;
         }
 
-        if sessions.is_empty() {
-            buf.set_string(
-                list_area.x,
-                list_area.y,
-                "No sessions",
-                Style::default().fg(Color::DarkGray),
-            );
-        }
+        let selected = picker.selected_idx;
+        let count = filtered.len();
+        let max_visible = (list_area.height as usize).min(MAX_VISIBLE);
 
-        let footer = " ↑↓ navigate   Enter resume   Esc cancel ";
-        buf.set_string(
-            footer_area.x,
-            footer_area.y,
-            footer,
-            Style::default().fg(Color::DarkGray),
-        );
+        // Bottom-anchor scroll: the selected item sits at the bottom of the visible window
+        // until doing so would extend past the end of the list, at which point the window
+        // is pinned to show the last `max_visible` items.
+        let start = selected
+            .saturating_sub(max_visible - 1)
+            .min(count.saturating_sub(max_visible));
+
+        // name column (marker + name) + gap + age column (last, fills remainder)
+        let rows: Vec<Vec<Line>> = filtered
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(max_visible)
+            .map(|(i, entry)| {
+                let session = &picker.items[entry.idx];
+                let is_selected = i == selected;
+                let is_active = session.id == self.state.active_session_id;
+
+                let name = &session.first_message;
+                let age = relative_time(&session.timestamp);
+
+                let name_line = if is_selected {
+                    let marker = if is_active { "> " } else { "  " };
+                    Line::from(vec![
+                        Span::styled(marker, STYLE_SELECTED),
+                        Span::styled(name.clone(), STYLE_SELECTED),
+                    ])
+                } else if is_active {
+                    Line::from(vec![
+                        Span::styled("> ", STYLE_TEXT),
+                        Span::styled(name.clone(), STYLE_ACTIVE),
+                    ])
+                } else {
+                    let mut spans = vec![Span::styled("  ", STYLE_TEXT)];
+                    spans.extend(
+                        highlight_matched_chars(name, &entry.indices, STYLE_TEXT, STYLE_MATCH)
+                            .spans,
+                    );
+                    Line::from(spans)
+                };
+
+                vec![name_line, Line::from(Span::styled(age, STYLE_AGE))]
+            })
+            .collect();
+
+        TableWidget::new(vec![self.state.name_col_width], 8, rows).render(list_area, buf);
+
+        theme::counter_line(selected + 1, count).render(counter_area, buf);
+    }
+}
+
+/// Formats a timestamp as a compact relative age string.
+fn relative_time(ts: &jiff::Timestamp) -> String {
+    let now = jiff::Timestamp::now();
+    let secs = now.duration_since(*ts).as_secs().max(0) as u64;
+
+    const MIN: u64 = 60;
+    const HOUR: u64 = 60 * MIN;
+    const DAY: u64 = 24 * HOUR;
+    const WEEK: u64 = 7 * DAY;
+
+    if secs < MIN {
+        format!("{}s", secs)
+    } else if secs < HOUR {
+        format!("{}m", secs / MIN)
+    } else if secs < DAY {
+        format!("{}h", secs / HOUR)
+    } else if secs < WEEK {
+        format!("{}d", secs / DAY)
+    } else {
+        format!("{}w", secs / WEEK)
     }
 }

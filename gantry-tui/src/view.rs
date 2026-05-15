@@ -3,6 +3,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
 };
 
+use crate::agent_statusline::{AgentStatuslineWidget, AgentStatuslineWidgetState};
 use crate::attachment_picker::AttachmentPickerWidget;
 use crate::chat::ChatWidgetState;
 use crate::chat::widget::ChatWidget;
@@ -15,10 +16,6 @@ use crate::provider_config::ProviderConfigWidget;
 use crate::session_picker::SessionPickerWidget;
 use crate::tree::TreeWidget;
 use crate::usage::UsageWidget;
-use crate::{
-    agent_statusline::{AgentStatuslineWidget, AgentStatuslineWidgetState},
-    effects::throbber::Utf8ThrobberStyle,
-};
 use crate::{app_statusline::AppStatuslineWidget, effects::throbber::AsciiThrobberStyle};
 
 pub struct WidgetState {
@@ -43,13 +40,13 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
     let spinner = view_state.throbber.current();
 
     let input_height = match &model.overlay {
-        InputOverlay::Usage(uv) => UsageWidget::new(uv).height(),
-        InputOverlay::CommandPicker(picker) => CommandPickerWidget::new(picker).height(),
-        InputOverlay::ModelPicker(mv) => ModelPickerWidget::new(mv).height(),
-        InputOverlay::SessionPicker(sv) => SessionPickerWidget::new(sv).height(),
-        InputOverlay::Tree(tv) => TreeWidget::new(tv).height(),
-        InputOverlay::ProviderConfig(pv) => ProviderConfigWidget::new(pv).height(),
-        InputOverlay::AttachmentPicker(_) | InputOverlay::Input(_) => {
+        InputOverlay::Usage(s) => UsageWidget::new(s).height(),
+        InputOverlay::CommandPicker(s) => CommandPickerWidget::new(s).height(),
+        InputOverlay::ModelPicker(s) => ModelPickerWidget::new(s).height(),
+        InputOverlay::SessionPicker(s) => SessionPickerWidget::new(s).height(),
+        InputOverlay::Tree(s) => TreeWidget::new(s).height(),
+        InputOverlay::ProviderConfig(s) => ProviderConfigWidget::new(s).height(),
+        InputOverlay::Input(_) | InputOverlay::AttachmentPicker(_) => {
             InputWidget::new(&model.input, &model.cwd, Mode::Normal, 0).height(area.width)
         }
     };
@@ -67,7 +64,14 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
 
     let agent_statusline_bottom_pad = if agent_statusline_height > 0 { 1 } else { 0 };
 
-    let chunks = Layout::default()
+    let [
+        chat_area,
+        _,
+        agent_statusline_area,
+        _,
+        input_area,
+        app_statusline_area,
+    ] = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(1),
@@ -77,12 +81,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
             Constraint::Length(input_height),
             Constraint::Length(app_statusline_height),
         ])
-        .split(area);
-
-    let chat_area = chunks[0];
-    let agent_statusline_area = chunks[2];
-    let input_area = chunks[4];
-    let app_statusline_area = chunks[5];
+        .areas(area);
 
     let chat = ChatWidget::new(&model.chat, spinner);
     frame.render_stateful_widget(chat, chat_area, &mut view_state.chat);
