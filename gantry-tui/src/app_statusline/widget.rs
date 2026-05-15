@@ -15,7 +15,7 @@ const SEPARATOR: &str = " | ";
 pub struct AppStatuslineWidget {
     mode: Mode,
     context_window: Option<ContextWindow>,
-    total_usage: Option<Usage>,
+    total_consumption: Option<Usage>,
     project_name: String,
     project_path: PathBuf,
     cwd: PathBuf,
@@ -27,7 +27,7 @@ impl AppStatuslineWidget {
     pub fn new(
         mode: Mode,
         context_window: Option<ContextWindow>,
-        total_usage: Option<Usage>,
+        total_consumption: Option<Usage>,
         project_name: String,
         project_path: PathBuf,
         cwd: PathBuf,
@@ -36,7 +36,7 @@ impl AppStatuslineWidget {
         Self {
             mode,
             context_window,
-            total_usage,
+            total_consumption,
             project_name,
             project_path,
             cwd,
@@ -72,8 +72,8 @@ impl Widget for AppStatuslineWidget {
             Some(Span::styled(text, Style::default().fg(Color::Gray)))
         };
 
-        let total_usage_segment = {
-            let u = self.total_usage.unwrap_or_default();
+        let total_consumption_segment = {
+            let u = self.total_consumption.unwrap_or_default();
             Some(Span::styled(
                 format!(
                     "I{} O{} R{} W{}",
@@ -97,7 +97,7 @@ impl Widget for AppStatuslineWidget {
             mode_segment,
             cwd_segment,
             model_segment,
-            total_usage_segment,
+            total_consumption_segment,
             context_segment,
         ]
         .into_iter()

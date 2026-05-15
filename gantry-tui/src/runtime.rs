@@ -14,8 +14,7 @@ use tokio::task::JoinHandle;
 use crate::chat::ChatMessage;
 use crate::message::{Cmd, Msg};
 use crate::model::Model;
-use crate::provider_config::{ProvidersConfigState, ProvidersSubView};
-use crate::update::update;
+use crate::model::update;
 use crate::view::{self, WidgetState};
 
 pub struct Runtime {
@@ -37,8 +36,6 @@ impl Runtime {
         let rt = tokio::runtime::Runtime::new()?;
         let (msg_tx, msg_rx) = channel::<Event>(256);
 
-        let mut model = Model::new();
-
         let (
             session_id,
             existing_messages,
@@ -57,18 +54,20 @@ impl Runtime {
                 app.project_path.clone(),
                 app.project_name.clone(),
                 app.context_window(),
-                app.total_usage().clone(),
+                app.total_consumption().clone(),
                 app.subscribe_events(),
             )
         };
-        model.session_id = session_id;
-        model.chat.messages = existing_messages;
-        model.selection = selection;
-        model.project_path = project_path;
-        model.project_name = project_name;
-        model.context_window = context_window;
-        model.total_consumption = Some(total_consumption);
-        model.cwd = cwd;
+        let model = Model::new(
+            session_id,
+            existing_messages,
+            selection,
+            project_path,
+            project_name,
+            context_window,
+            total_consumption,
+            cwd,
+        );
 
         let event_tx = msg_tx.clone();
         let event_task = rt.spawn(async move {
@@ -111,7 +110,7 @@ impl Runtime {
                     CrosstermEvent::Key(key)
                         if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat =>
                     {
-                        let _ = self.msg_tx.try_send(Msg::Key(key).into());
+                        let _ = self.msg_tx.try_send(Msg::KeyEvent(key).into());
                     }
                     CrosstermEvent::Mouse(mouse) => {
                         let delta: i32 = match mouse.kind {
@@ -188,8 +187,7 @@ impl Runtime {
             }
             Cmd::InterruptStream => {
                 self.interrupt_stream();
-                self.model.cancel_stream();
-                None
+                Some(Msg::CancelStream)
             }
             Cmd::BranchTo(entry_id) => {
                 self.spawn_branch(entry_id);
@@ -201,29 +199,22 @@ impl Runtime {
             }
             Cmd::SendMessage(tokens) => {
                 self.spawn_send_message(tokens);
-                None
+                Some(Msg::StartStream)
             }
             Cmd::OpenPathPicker(query) => {
                 let paths = self
                     .rt
                     .block_on(async { self.app.lock().await.search_paths(&query) });
-                self.model.activate_path_picker(paths);
-                None
+                Some(Msg::ActivatePathPicker(paths))
             }
             Cmd::OpenSkillPicker(query) => {
                 let skills = self
                     .rt
                     .block_on(async { self.app.lock().await.search_skills(&query) });
-                self.model.activate_skill_picker(skills);
-                None
+                Some(Msg::ActivateSkillPicker(skills))
             }
             Cmd::RefineAttachmentPicker(query) => {
-                let is_skill = matches!(
-                    &self.model.overlay,
-                    crate::model::InputOverlay::AttachmentPicker(p)
-                        if matches!(p.kind, crate::attachment_picker::AttachmentPickerKind::Skill(_))
-                );
-                if is_skill {
+                if self.model.is_skill_attachment_picker_active() {
                     let skills = self
                         .rt
                         .block_on(async { self.app.lock().await.search_skills(&query) });
@@ -235,18 +226,9 @@ impl Runtime {
                     Some(Msg::SetPathPickerResults(paths))
                 }
             }
-            Cmd::AddProvider(config, credential) => {
-                self.handle_add_provider(config, credential);
-                None
-            }
-            Cmd::RemoveProvider(alias) => {
-                self.handle_remove_provider(alias);
-                None
-            }
-            Cmd::SelectModel(selection) => {
-                self.handle_select_model(selection);
-                None
-            }
+            Cmd::AddProvider(config, credential) => self.handle_add_provider(config, credential),
+            Cmd::RemoveProvider(alias) => self.handle_remove_provider(alias),
+            Cmd::SelectModel(selection) => self.handle_select_model(selection),
             Cmd::ResumeSession(session_id) => self.handle_resume_session(session_id),
         }
     }
@@ -282,7 +264,7 @@ impl Runtime {
                     response.commit().await;
                     let (cw, usage) = {
                         let app = app_ref.lock().await;
-                        (app.context_window(), app.total_usage().clone())
+                        (app.context_window(), app.total_consumption().clone())
                     };
                     is_streaming.store(false, Ordering::SeqCst);
                     let _ = tx.send(Msg::StreamDone(cw, usage).into()).await;
@@ -368,62 +350,33 @@ impl Runtime {
         &mut self,
         config: gantry_core::ProviderConfig,
         credential: Option<gantry_core::StoredCredential>,
-    ) {
+    ) -> Option<Msg> {
         match self
             .rt
             .block_on(async { self.app.lock().await.add_provider(config, credential) })
         {
             Ok(()) => {
-                self.model.cached_models = None;
                 let providers = self
                     .rt
                     .block_on(async { self.app.lock().await.list_providers().to_vec() });
-                self.model.overlay =
-                    crate::model::InputOverlay::ProviderConfig(ProvidersConfigState {
-                        providers,
-                        sub: ProvidersSubView::List { selected_idx: 0 },
-                    });
+                Some(Msg::ProviderAdded(providers))
             }
-            Err(e) => {
-                // Surface the error inside the wizard.
-                if let crate::model::InputOverlay::ProviderConfig(ref mut pv) = self.model.overlay
-                    && let ProvidersSubView::Wizard(ref mut w) = pv.sub
-                {
-                    w.error = Some(e.to_string());
-                } else {
-                    self.model.status_message = Some(e.to_string());
-                }
-            }
+            Err(e) => Some(Msg::ProviderAddFailed(e.to_string())),
         }
     }
 
-    fn handle_remove_provider(&mut self, alias: gantry_core::ProviderAlias) {
+    fn handle_remove_provider(&mut self, alias: gantry_core::ProviderAlias) -> Option<Msg> {
         match self
             .rt
             .block_on(async { self.app.lock().await.remove_provider(&alias) })
         {
             Ok(()) => {
-                self.model.cached_models = None;
                 let providers = self
                     .rt
                     .block_on(async { self.app.lock().await.list_providers().to_vec() });
-                // Refresh the list view, clamping selection if it is now out of bounds.
-                if let crate::model::InputOverlay::ProviderConfig(ref mut pv) = self.model.overlay
-                    && let ProvidersSubView::List {
-                        ref mut selected_idx,
-                    } = pv.sub
-                {
-                    pv.providers = providers;
-                    if !pv.providers.is_empty() {
-                        *selected_idx = (*selected_idx).min(pv.providers.len() - 1);
-                    } else {
-                        *selected_idx = 0;
-                    }
-                }
+                Some(Msg::ProviderRemoved(providers))
             }
-            Err(e) => {
-                self.model.status_message = Some(e.to_string());
-            }
+            Err(e) => Some(Msg::SetStatus(e.to_string())),
         }
     }
 
@@ -432,33 +385,30 @@ impl Runtime {
             .rt
             .block_on(async { self.app.lock().await.resume_session(&session_id) });
         match result {
-            Err(e) => {
-                self.model.status_message = Some(format!("failed to resume session: {e}"));
-                None
-            }
+            Err(e) => Some(Msg::SetStatus(format!("failed to resume session: {e}"))),
             Ok(()) => {
                 let (messages, context_window, total_consumption) = self.rt.block_on(async {
                     let app = self.app.lock().await;
                     let messages = ChatMessage::messages_from(app.history());
                     let context_window = app.context_window();
-                    let total_consumption = app.total_usage().clone();
+                    let total_consumption = app.total_consumption().clone();
                     (messages, context_window, total_consumption)
                 });
                 Some(Msg::SessionLoaded {
                     session_id,
                     messages,
                     context_window,
-                    total_usage: total_consumption,
+                    total_consumption,
                 })
             }
         }
     }
 
-    fn handle_select_model(&mut self, selection: gantry_core::ModelSelection) {
+    fn handle_select_model(&mut self, selection: gantry_core::ModelSelection) -> Option<Msg> {
         self.rt.block_on(async {
             self.app.lock().await.set_selection(selection.clone());
         });
-        self.model.selection = Some(selection);
+        Some(Msg::ModelSelected(selection))
     }
 
     /// Dispatches a `KnownCommand`, either immediately updating the model or spawning an async task.
@@ -472,8 +422,8 @@ impl Runtime {
                 let _ = self.msg_tx.try_send(Cmd::NewSession.into());
             }
             KnownCommand::Model => {
-                if let Some(models) = self.model.cached_models.clone() {
-                    self.model.open_model_picker(models);
+                if let Some(models) = self.model.cached_models().map(|s| s.to_vec()) {
+                    let _ = self.msg_tx.try_send(Msg::OpenModelPicker(models).into());
                     return;
                 }
                 let tx = self.msg_tx.clone();
@@ -481,7 +431,7 @@ impl Runtime {
                 self.rt.spawn(async move {
                     match app.lock().await.list_models().await {
                         Ok(models) => {
-                            let _ = tx.send(Msg::OpenModelPicker(models).into()).await;
+                            let _ = tx.send(Msg::ModelsFetched(models).into()).await;
                         }
                         Err(e) => {
                             let _ = tx
@@ -496,7 +446,7 @@ impl Runtime {
                 let app = self.app.clone();
                 self.rt.spawn(async move {
                     let providers = app.lock().await.list_providers().to_vec();
-                    let _ = tx.send(Msg::OpenProvidersState(providers).into()).await;
+                    let _ = tx.send(Msg::OpenProviderConfig(providers).into()).await;
                 });
             }
             KnownCommand::Sessions => {
@@ -508,7 +458,7 @@ impl Runtime {
                         Ok(sessions) => {
                             if let Some(active_id) = app.session_id().cloned() {
                                 let _ = tx
-                                    .send(Msg::OpenSessionsState(sessions, active_id).into())
+                                    .send(Msg::OpenSessionsPicker(sessions, active_id).into())
                                     .await;
                             }
                         }
@@ -528,7 +478,7 @@ impl Runtime {
                 self.rt.spawn(async move {
                     match app.lock().await.get_tree() {
                         Some(tree) => {
-                            let _ = tx.send(Msg::OpenTreeView(tree).into()).await;
+                            let _ = tx.send(Msg::OpenSessionTree(tree).into()).await;
                         }
                         None => {
                             let _ = tx
@@ -539,7 +489,7 @@ impl Runtime {
                 });
             }
             KnownCommand::Debug => {
-                self.model.start_stream();
+                let _ = self.msg_tx.try_send(Msg::StartStream.into());
                 self.spawn_mock_chat();
             }
             KnownCommand::Usage => {
@@ -549,7 +499,7 @@ impl Runtime {
                     let guard = app.lock().await;
                     match guard.context_window() {
                         Some(cw) => {
-                            let consumption = guard.total_usage().clone();
+                            let consumption = guard.total_consumption().clone();
                             drop(guard);
                             let _ = tx.send(Msg::OpenUsageState(cw, consumption).into()).await;
                         }

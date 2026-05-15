@@ -319,6 +319,20 @@ impl ChatState {
         self.streaming_rendered_len = 0;
     }
 
+    /// Scrolls by `delta` lines within `[0, max]`, updating the user-scrolling flag.
+    pub fn scroll_by(&mut self, delta: i32, max: u16) {
+        let offset = self.scroll_offset as i32 + delta;
+        self.scroll_offset = offset.clamp(0, max as i32) as u16;
+        self.user_is_scrolling = self.scroll_offset > 0;
+    }
+
+    /// Resets scroll to the bottom unless the user is actively scrolling.
+    pub fn scroll_to_bottom(&mut self) {
+        if !self.user_is_scrolling {
+            self.scroll_offset = 0;
+        }
+    }
+
     /// Clears all chat state, resetting to a fresh empty session.
     pub fn reset(&mut self) {
         self.messages.clear();

@@ -46,7 +46,7 @@ pub struct App {
     /// Character counts per component, captured just before the most recent request.
     pub(crate) last_char_counts: Option<CharCounts>,
     /// Accumulated token consumption across all nodes in the active session.
-    total_usage: Usage,
+    total_consumption: Usage,
     event_tx: broadcast::Sender<AppEvent>,
 }
 
@@ -90,7 +90,7 @@ impl App {
             system_prompt,
             last_usage: None,
             last_char_counts: None,
-            total_usage: total_consumption,
+            total_consumption,
             event_tx,
         })
     }
@@ -114,7 +114,7 @@ impl App {
     pub fn resume_session(&mut self, session_id: &SessionId) -> Result<()> {
         let session_registry = FsSessionRegistry::new(&self.sessions_dir)?;
         let session = session_registry.load_session(session_id)?;
-        self.total_usage = session.total_consumption();
+        self.total_consumption = session.total_consumption();
         self.session = Some(session);
         self.last_usage = None;
         self.last_char_counts = None;
@@ -129,7 +129,7 @@ impl App {
     /// Marks the app as ready for a new session, created lazily on the next `append_message`.
     pub fn new_session(&mut self) -> Result<()> {
         self.session = None;
-        self.total_usage = Usage::default();
+        self.total_consumption = Usage::default();
         self.last_usage = None;
         self.last_char_counts = None;
         Ok(())
@@ -157,8 +157,8 @@ impl App {
     }
 
     /// Returns the accumulated token consumption across all nodes in the active session.
-    pub fn total_usage(&self) -> &Usage {
-        &self.total_usage
+    pub fn total_consumption(&self) -> &Usage {
+        &self.total_consumption
     }
 
     /// Returns the ordered messages on the active branch, or an empty vec if no session is active.
@@ -334,7 +334,7 @@ impl App {
                 let _ = self
                     .append_message_with_usage(Message::assistant(text), Some(consumption.clone()));
             }
-            self.total_usage += consumption;
+            self.total_consumption += consumption;
             self.last_usage = Some(u);
         } else if !text.is_empty() {
             let _ = self.append_message(Message::assistant(text));

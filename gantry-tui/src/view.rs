@@ -39,7 +39,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
     let area = frame.area();
     let spinner = view_state.throbber.current();
 
-    let input_height = match &model.overlay {
+    let input_height = match model.overlay() {
         InputOverlay::Usage(s) => UsageWidget::new(s).height(),
         InputOverlay::CommandPicker(s) => CommandPickerWidget::new(s).height(),
         InputOverlay::ModelPicker(s) => ModelPickerWidget::new(s).height(),
@@ -47,19 +47,19 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
         InputOverlay::Tree(s) => TreeWidget::new(s).height(),
         InputOverlay::ProviderConfig(s) => ProviderConfigWidget::new(s).height(),
         InputOverlay::Input(_) | InputOverlay::AttachmentPicker(_) => {
-            InputWidget::new(&model.input, &model.cwd, Mode::Normal, 0).height(area.width)
+            InputWidget::new(model.input(), model.cwd(), Mode::Normal, 0).height(area.width)
         }
     };
 
-    let app_statusline_height = match &model.overlay {
+    let app_statusline_height = match model.overlay() {
         InputOverlay::AttachmentPicker(picker) => {
-            AttachmentPickerWidget::new(picker, &model.cwd).height()
+            AttachmentPickerWidget::new(picker, model.cwd()).height()
         }
         _ => 1,
     };
 
     let agent_statusline =
-        AgentStatuslineWidget::new(&model.stream, model.status_message.as_deref(), spinner);
+        AgentStatuslineWidget::new(model.stream(), model.status_message(), spinner);
     let agent_statusline_height = agent_statusline.height();
 
     let agent_statusline_bottom_pad = if agent_statusline_height > 0 { 1 } else { 0 };
@@ -83,7 +83,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
         ])
         .areas(area);
 
-    let chat = ChatWidget::new(&model.chat, spinner);
+    let chat = ChatWidget::new(model.chat(), spinner);
     frame.render_stateful_widget(chat, chat_area, &mut view_state.chat);
 
     frame.render_stateful_widget(
@@ -92,7 +92,7 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
         &mut view_state.agent_statusline,
     );
 
-    match &model.overlay {
+    match model.overlay() {
         InputOverlay::Usage(uv) => {
             frame.render_widget(UsageWidget::new(uv), input_area);
         }
@@ -112,44 +112,44 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
             frame.render_widget(ProviderConfigWidget::new(pv), input_area);
         }
         InputOverlay::AttachmentPicker(_) | InputOverlay::Input(_) => {
-            let picker_filter_len =
-                if let InputOverlay::AttachmentPicker(ref picker) = model.overlay {
-                    1 + picker.filter.len() // sigil + filter chars
-                } else {
-                    0
-                };
-            let mode = match &model.overlay {
+            let picker_filter_len = if let InputOverlay::AttachmentPicker(picker) = model.overlay()
+            {
+                1 + picker.filter.len() // sigil + filter chars
+            } else {
+                0
+            };
+            let mode = match model.overlay() {
                 InputOverlay::Input(m) => *m,
                 _ => Mode::Insert,
             };
             frame.render_widget(
-                InputWidget::new(&model.input, &model.cwd, mode, picker_filter_len),
+                InputWidget::new(model.input(), model.cwd(), mode, picker_filter_len),
                 input_area,
             );
         }
     }
 
-    match &model.overlay {
+    match model.overlay() {
         InputOverlay::AttachmentPicker(picker) => {
             frame.render_widget(
-                AttachmentPickerWidget::new(picker, &model.cwd),
+                AttachmentPickerWidget::new(picker, model.cwd()),
                 app_statusline_area,
             );
         }
         _ => {
-            let mode = match &model.overlay {
+            let mode = match model.overlay() {
                 InputOverlay::Input(m) => *m,
                 _ => Mode::Normal,
             };
             frame.render_widget(
                 AppStatuslineWidget::new(
                     mode,
-                    model.context_window.clone(),
-                    model.total_consumption.clone(),
-                    model.project_name.clone(),
-                    model.project_path.clone(),
-                    model.cwd.clone(),
-                    model.selection.clone(),
+                    model.context_window(),
+                    model.total_consumption(),
+                    model.project_name().to_string(),
+                    model.project_path().clone(),
+                    model.cwd().clone(),
+                    model.selection().cloned(),
                 ),
                 app_statusline_area,
             );

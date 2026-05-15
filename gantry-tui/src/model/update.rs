@@ -1,20 +1,17 @@
-use std::time::Duration;
-
 use crossterm::event::{KeyCode, KeyModifiers};
 use gantry_core::{
     AppEvent, ChatStreamItem, MultiTurnStreamItem, ReasoningContent, StreamedAssistantContent,
     StreamedUserContent, StreamingError, ToolResultContent,
 };
 
-use crate::command_picker::CommandEntry;
-use crate::commands::KnownCommand;
+use super::{InputOverlay, Mode, Model};
 use crate::input::prev_char_boundary;
 use crate::message::{Cmd, Msg};
-use crate::model::{InputOverlay, Mode, Model, StreamState};
 use crate::provider_config::{
     CopilotAuthKind, ProviderWizard, ProvidersSubView, WizardProviderKind,
 };
 use crate::tree::branch_rows;
+use crate::usage::UsageState;
 use crate::view::WidgetState;
 use gantry_core::SessionId;
 
@@ -24,26 +21,30 @@ use gantry_core::SessionId;
 /// out by `Runtime` after inspecting the returned `Cmd`.
 pub fn update(model: &mut Model, view_state: &WidgetState, msg: Msg) -> Option<Cmd> {
     match msg {
+        Msg::KeyEvent(key) => handle_key(model, view_state, key),
+        Msg::ScrollChat(delta) => {
+            model.chat.scroll_by(delta, view_state.chat.max_scroll);
+            None
+        }
+        Msg::StartStream => {
+            model.start_stream();
+            None
+        }
+        Msg::CancelStream => {
+            model.cancel_stream();
+            None
+        }
+        Msg::AppEvent(AppEvent::EditDiff { path, hunks }) => {
+            model.chat.attach_edit_diff(&path, hunks);
+            None
+        }
         Msg::StreamItem(item) => handle_stream_item(model, item),
         Msg::StreamDone(cw, usage) => {
-            if !matches!(model.stream, StreamState::Interrupted { .. }) {
-                model.finish_stream();
-                if !model.chat.user_is_scrolling {
-                    model.chat.scroll_offset = 0;
-                }
-                model.context_window = cw;
-                model.total_consumption = Some(usage);
-            }
+            model.complete_stream(cw, usage);
             None
         }
         Msg::StreamError(e) => {
-            if let Some(text) = model.chat.cancel_streaming() {
-                model.input.set_text(text);
-            }
-            model.stream = StreamState::Interrupted {
-                duration: Duration::ZERO,
-            };
-            model.status_message = Some(e);
+            model.fail_stream(e);
             None
         }
         Msg::SetStatus(s) => {
@@ -51,75 +52,48 @@ pub fn update(model: &mut Model, view_state: &WidgetState, msg: Msg) -> Option<C
             None
         }
         Msg::SessionCreated => {
-            model.chat.reset();
-            model.status_message = None;
-            model.reset_stream();
-            model.total_consumption = None;
-            model.context_window = None;
+            model.reset_session();
             None
         }
-        Msg::Key(key) => handle_key(model, view_state, key),
-        Msg::ScrollChat(delta) => {
-            let max = view_state.chat.max_scroll;
-            let offset = model.chat.scroll_offset as i32 + delta;
-            model.chat.scroll_offset = offset.clamp(0, max as i32) as u16;
-            model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
+        Msg::OpenSessionsPicker(sessions, active_id) => {
+            model.open_sessions_picker(sessions, active_id);
             None
         }
-        Msg::OpenSessionsState(sessions, active_id) => {
-            model.open_sessions_view(sessions, active_id);
-            None
-        }
-        Msg::OpenTreeView(nodes) => {
-            model.open_tree_view(nodes);
+        Msg::OpenSessionTree(nodes) => {
+            model.open_session_tree(nodes);
             None
         }
         Msg::SessionLoaded {
             session_id,
             messages,
             context_window,
-            total_usage: total_consumption,
+            total_consumption,
         } => {
-            model.session_id = Some(session_id);
-            model.chat.messages = messages;
-            model.chat.scroll_offset = 0;
-            model.chat.user_is_scrolling = false;
-            model.context_window = context_window;
-            model.total_consumption = Some(total_consumption);
-            model.reset_stream();
-            model.status_message = None;
+            model.load_session(session_id, messages, context_window, total_consumption);
             None
         }
         Msg::ReloadMessages(messages) => {
-            model.chat.messages = messages;
-            model.chat.scroll_offset = 0;
-            model.chat.user_is_scrolling = false;
-            model.overlay = InputOverlay::Input(Mode::Normal);
+            model.reload_messages(messages);
             None
         }
         Msg::ReloadMessagesWithInput(messages, input) => {
-            model.chat.messages = messages;
-            model.chat.scroll_offset = 0;
-            model.chat.user_is_scrolling = false;
-            model.input.set_text(input);
-            model.overlay = InputOverlay::Input(Mode::Normal);
+            model.reload_messages_with_input(messages, input);
             None
         }
-        Msg::OpenProvidersState(providers) => {
-            use crate::provider_config::{ProvidersConfigState, ProvidersSubView};
-            model.overlay = InputOverlay::ProviderConfig(ProvidersConfigState {
-                providers,
-                sub: ProvidersSubView::List { selected_idx: 0 },
-            });
+        Msg::OpenProviderConfig(providers) => {
+            model.open_provider_config(providers);
             None
         }
         Msg::OpenModelPicker(selections) => {
-            model.cached_models = Some(selections.clone());
             model.open_model_picker(selections);
             None
         }
+        Msg::ModelsFetched(models) => {
+            model.cached_models = Some(models.clone());
+            model.open_model_picker(models);
+            None
+        }
         Msg::OpenUsageState(cw, consumption) => {
-            use crate::usage::UsageState;
             model.overlay = InputOverlay::Usage(UsageState {
                 context_window: cw,
                 consumption,
@@ -138,8 +112,47 @@ pub fn update(model: &mut Model, view_state: &WidgetState, msg: Msg) -> Option<C
             }
             None
         }
-        Msg::AppEvent(AppEvent::EditDiff { path, hunks }) => {
-            model.chat.attach_edit_diff(&path, hunks);
+        Msg::ActivatePathPicker(results) => {
+            model.activate_path_picker(results);
+            None
+        }
+        Msg::ActivateSkillPicker(results) => {
+            model.activate_skill_picker(results);
+            None
+        }
+        Msg::ProviderAdded(providers) => {
+            model.open_provider_config(providers);
+            None
+        }
+        Msg::ProviderRemoved(providers) => {
+            model.cached_models = None;
+            if let InputOverlay::ProviderConfig(ref mut pv) = model.overlay {
+                if let ProvidersSubView::List {
+                    ref mut selected_idx,
+                } = pv.sub
+                {
+                    pv.providers = providers;
+                    if !pv.providers.is_empty() {
+                        *selected_idx = (*selected_idx).min(pv.providers.len() - 1);
+                    } else {
+                        *selected_idx = 0;
+                    }
+                }
+            }
+            None
+        }
+        Msg::ProviderAddFailed(error) => {
+            if let InputOverlay::ProviderConfig(ref mut pv) = model.overlay
+                && let ProvidersSubView::Wizard(ref mut w) = pv.sub
+            {
+                w.error = Some(error);
+            } else {
+                model.status_message = Some(error);
+            }
+            None
+        }
+        Msg::ModelSelected(selection) => {
+            model.selection = Some(selection);
             None
         }
     }
@@ -164,16 +177,12 @@ fn handle_stream_item(
                 .collect();
             if !text.is_empty() {
                 model.chat.append_to_reasoning(&text);
-                if !model.chat.user_is_scrolling {
-                    model.chat.scroll_offset = 0;
-                }
+                model.chat.scroll_to_bottom();
             }
         }
         Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text))) => {
             model.chat.append_to_streaming(&text.text);
-            if !model.chat.user_is_scrolling {
-                model.chat.scroll_offset = 0;
-            }
+            model.chat.scroll_to_bottom();
         }
         Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ToolCall {
             tool_call,
@@ -205,9 +214,8 @@ fn handle_stream_item(
             model.chat.start_streaming_message();
         }
         Ok(_) => {}
-        Err(e) => {
-            model.status_message = Some(e.to_string());
-        }
+        // Direct write — already inside update(), no need to route through Msg::SetStatus.
+        Err(e) => model.status_message = Some(e.to_string()),
     }
     None
 }
@@ -266,22 +274,14 @@ fn handle_key_model_picker(model: &mut Model, key: crossterm::event::KeyEvent) -
 }
 
 fn handle_key_providers_view(model: &mut Model, key: crossterm::event::KeyEvent) -> Option<Cmd> {
-    let sub_kind = if let InputOverlay::ProviderConfig(ref pv) = model.overlay {
-        match pv.sub {
-            ProvidersSubView::List { .. } => 0u8,
-            ProvidersSubView::TypePicker { .. } => 1,
-            ProvidersSubView::CopilotAuthPicker { .. } => 2,
-            ProvidersSubView::Wizard(_) => 3,
-        }
-    } else {
+    let InputOverlay::ProviderConfig(ref pv) = model.overlay else {
         return None;
     };
-
-    match sub_kind {
-        0 => handle_key_providers_list(model, key),
-        1 => handle_key_providers_type_picker(model, key),
-        2 => handle_key_copilot_auth_picker(model, key),
-        _ => handle_key_wizard(model, key),
+    match pv.sub {
+        ProvidersSubView::List { .. } => handle_key_providers_list(model, key),
+        ProvidersSubView::TypePicker { .. } => handle_key_providers_type_picker(model, key),
+        ProvidersSubView::CopilotAuthPicker { .. } => handle_key_copilot_auth_picker(model, key),
+        ProvidersSubView::Wizard(_) => handle_key_wizard(model, key),
     }
 }
 
@@ -292,16 +292,7 @@ fn handle_key_providers_list(model: &mut Model, key: crossterm::event::KeyEvent)
             return None;
         }
         KeyCode::Char('d') => {
-            let InputOverlay::ProviderConfig(ref pv) = model.overlay else {
-                return None;
-            };
-            if let ProvidersSubView::List { selected_idx } = pv.sub
-                && selected_idx < pv.providers.len()
-            {
-                let alias = pv.providers[selected_idx].alias().clone();
-                return Some(Cmd::RemoveProvider(alias));
-            }
-            return None;
+            return selected_provider_alias(&model.overlay).map(Cmd::RemoveProvider);
         }
         _ => {}
     }
@@ -335,6 +326,16 @@ fn handle_key_providers_list(model: &mut Model, key: crossterm::event::KeyEvent)
         _ => {}
     }
     None
+}
+
+fn selected_provider_alias(overlay: &InputOverlay) -> Option<gantry_core::ProviderAlias> {
+    let InputOverlay::ProviderConfig(pv) = overlay else {
+        return None;
+    };
+    let ProvidersSubView::List { selected_idx } = pv.sub else {
+        return None;
+    };
+    pv.providers.get(selected_idx).map(|p| p.alias().clone())
 }
 
 fn handle_key_providers_type_picker(
@@ -650,17 +651,18 @@ fn handle_key_attachment_picker(model: &mut Model, key: crossterm::event::KeyEve
             if is_empty {
                 model.input.delete_before_cursor();
                 model.overlay = InputOverlay::Input(Mode::Insert);
+                return None;
             } else {
                 model.attachment_picker_filter_clear();
                 return Some(Cmd::RefineAttachmentPicker(String::new()));
             }
-            return None;
         }
         KeyCode::Char(c) => {
             model.attachment_picker_filter_push(c);
             let query = model.attachment_picker_filter().unwrap_or("").to_string();
             return Some(Cmd::RefineAttachmentPicker(query));
         }
+        // Navigation keys fall through to the picker below.
         _ => {}
     }
     let InputOverlay::AttachmentPicker(ref mut picker) = model.overlay else {
@@ -696,31 +698,24 @@ fn handle_key_normal(
             None
         }
         KeyCode::Char(' ') => {
-            let picker =
-                crate::command_picker::CommandPickerState::new(available_command_entries());
-            model.overlay = InputOverlay::CommandPicker(picker);
+            model.overlay =
+                InputOverlay::CommandPicker(crate::command_picker::CommandPickerState::new_all());
             None
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            model.chat.scroll_offset = model.chat.scroll_offset.saturating_sub(1);
-            model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
+            model.chat.scroll_by(-1, view_state.chat.max_scroll);
             None
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            let max = view_state.chat.max_scroll;
-            model.chat.scroll_offset = model.chat.scroll_offset.saturating_add(1).min(max);
-            model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
+            model.chat.scroll_by(1, view_state.chat.max_scroll);
             None
         }
         KeyCode::PageDown => {
-            model.chat.scroll_offset = model.chat.scroll_offset.saturating_sub(10);
-            model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
+            model.chat.scroll_by(-10, view_state.chat.max_scroll);
             None
         }
         KeyCode::PageUp => {
-            let max = view_state.chat.max_scroll;
-            model.chat.scroll_offset = model.chat.scroll_offset.saturating_add(10).min(max);
-            model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
+            model.chat.scroll_by(10, view_state.chat.max_scroll);
             None
         }
         _ => None,
@@ -778,25 +773,19 @@ fn handle_key_insert(
             None
         }
         KeyCode::Up => {
-            let max = view_state.chat.max_scroll;
-            model.chat.scroll_offset = model.chat.scroll_offset.saturating_add(1).min(max);
-            model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
+            model.chat.scroll_by(1, view_state.chat.max_scroll);
             None
         }
         KeyCode::Down => {
-            model.chat.scroll_offset = model.chat.scroll_offset.saturating_sub(1);
-            model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
+            model.chat.scroll_by(-1, view_state.chat.max_scroll);
             None
         }
         KeyCode::PageUp => {
-            let max = view_state.chat.max_scroll;
-            model.chat.scroll_offset = model.chat.scroll_offset.saturating_add(10).min(max);
-            model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
+            model.chat.scroll_by(10, view_state.chat.max_scroll);
             None
         }
         KeyCode::PageDown => {
-            model.chat.scroll_offset = model.chat.scroll_offset.saturating_sub(10);
-            model.chat.user_is_scrolling = model.chat.scroll_offset > 0;
+            model.chat.scroll_by(-10, view_state.chat.max_scroll);
             None
         }
         _ => None,
@@ -826,53 +815,9 @@ fn handle_enter_tree_view(model: &mut Model) -> Option<Cmd> {
 }
 
 fn handle_enter_insert(model: &mut Model, modifiers: KeyModifiers) -> Option<Cmd> {
-    if model.status_message.is_some() {
-        model.status_message = None;
-        return None;
-    }
-
     if modifiers.contains(KeyModifiers::SHIFT) {
         model.input.insert('\n');
         return None;
     }
-
-    if model.input.is_blank() || model.is_streaming() {
-        return None;
-    }
-
-    if model.selection.is_none() {
-        model.status_message = Some("No model selected".to_string());
-        return None;
-    }
-
-    let display = model.input.raw_display(&model.project_path);
-    if display.starts_with('/') {
-        let filter = display.strip_prefix('/').unwrap_or("");
-        let available = available_command_entries();
-        let has_match = available.iter().any(|c| c.name.starts_with(filter));
-        if !has_match {
-            model.input.clear();
-            return None;
-        }
-    }
-
-    let tokens = model.input.tokens.clone();
-    model.input.clear();
-    model.chat.add_user_message(display);
-    model.start_stream();
-    model.chat.scroll_offset = 0;
-    model.chat.user_is_scrolling = false;
-    Some(Cmd::SendMessage(tokens))
-}
-
-/// Builds the full list of command entries for the command picker.
-pub fn available_command_entries() -> Vec<CommandEntry> {
-    KnownCommand::ALL
-        .iter()
-        .map(|k| CommandEntry {
-            name: k.name().to_string(),
-            description: k.description().to_string(),
-            command: *k,
-        })
-        .collect()
+    model.submit_message().map(Cmd::SendMessage)
 }

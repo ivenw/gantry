@@ -17,7 +17,6 @@ mod runtime;
 mod session_picker;
 pub mod theme;
 mod tree;
-mod update;
 mod usage;
 mod utils;
 mod view;

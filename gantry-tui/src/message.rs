@@ -13,7 +13,7 @@ use crate::commands::KnownCommand;
 /// a side effect from `Runtime`.
 pub enum Msg {
     // Input
-    Key(crossterm::event::KeyEvent),
+    KeyEvent(crossterm::event::KeyEvent),
 
     // Stream events from the agent
     StreamItem(Result<ChatStreamItem, StreamingError>),
@@ -34,30 +34,51 @@ pub enum Msg {
     ScrollChat(i32),
 
     // Tree view
-    OpenTreeView(SessionTree),
+    OpenSessionTree(SessionTree),
     ReloadMessages(Vec<ChatMessage>),
     ReloadMessagesWithInput(Vec<ChatMessage>, String),
 
     // Sessions browser
-    OpenSessionsState(Vec<SessionInfo>, SessionId),
+    OpenSessionsPicker(Vec<SessionInfo>, SessionId),
     SessionLoaded {
         session_id: SessionId,
         messages: Vec<ChatMessage>,
         context_window: Option<ContextWindow>,
-        total_usage: Usage,
+        total_consumption: Usage,
     },
 
     OpenUsageState(ContextWindow, Usage),
 
     // Providers overlay
-    OpenProvidersState(Vec<ProviderConfig>),
+    OpenProviderConfig(Vec<ProviderConfig>),
 
     // Model picker overlay
+    /// Opens the model picker with a previously cached list.
     OpenModelPicker(Vec<ModelSelection>),
+    /// Fresh fetch result: caches the list and opens the picker.
+    ModelsFetched(Vec<ModelSelection>),
 
     // Attachment picker results (produced by Runtime after a search)
     SetPathPickerResults(Vec<PathSearchResult>),
     SetSkillPickerResults(Vec<SkillSearchResult>),
+
+    // Activate the path or skill attachment picker with initial results.
+    ActivatePathPicker(Vec<PathSearchResult>),
+    ActivateSkillPicker(Vec<SkillSearchResult>),
+
+    // Provider mutations completed; carries the refreshed provider list.
+    ProviderAdded(Vec<ProviderConfig>),
+    ProviderRemoved(Vec<ProviderConfig>),
+    ProviderAddFailed(String),
+
+    // Model selection applied to the app.
+    ModelSelected(ModelSelection),
+
+    // Transitions stream state to Active and opens a streaming message slot.
+    StartStream,
+
+    // Transitions stream state to Interrupted and flushes any buffered content.
+    CancelStream,
 }
 
 /// Side-effect commands returned by `update()` and executed by `Runtime`.
