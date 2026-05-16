@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use gantry_core::{
     AppEvent, ChatStreamItem, MultiTurnStreamItem, ReasoningContent, StreamedAssistantContent,
-    StreamedUserContent, StreamingError, ToolResultContent,
+    StreamedUserContent, ToolResultContent,
 };
 
 use super::{InputOverlay, Mode, Model};
@@ -31,8 +31,8 @@ pub fn update(model: &mut Model, view_state: &WidgetState, msg: Msg) -> Option<C
             model.start_stream();
             None
         }
-        Msg::CancelStream => {
-            model.cancel_stream();
+        Msg::StreamInterrupted => {
+            model.interrupt_stream();
             None
         }
         Msg::AppEvent(AppEvent::EditDiff { path, hunks }) => {
@@ -158,12 +158,9 @@ pub fn update(model: &mut Model, view_state: &WidgetState, msg: Msg) -> Option<C
     }
 }
 
-fn handle_stream_item(
-    model: &mut Model,
-    item: Result<ChatStreamItem, StreamingError>,
-) -> Option<Cmd> {
+fn handle_stream_item(model: &mut Model, item: ChatStreamItem) -> Option<Cmd> {
     match item {
-        Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(r))) => {
+        MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Reasoning(r)) => {
             let text: String = r
                 .content
                 .iter()
@@ -180,14 +177,14 @@ fn handle_stream_item(
                 model.chat.scroll_to_bottom();
             }
         }
-        Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text))) => {
+        MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text)) => {
             model.chat.append_to_streaming(&text.text);
             model.chat.scroll_to_bottom();
         }
-        Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ToolCall {
+        MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::ToolCall {
             tool_call,
             internal_call_id,
-        })) => {
+        }) => {
             model.chat.push_tool_call(
                 internal_call_id,
                 tool_call.function.name,
@@ -196,10 +193,10 @@ fn handle_stream_item(
         }
         // A tool result closes the pending tool call and opens a fresh streaming slot so the
         // next assistant text turn renders as a separate message.
-        Ok(MultiTurnStreamItem::StreamUserItem(StreamedUserContent::ToolResult {
+        MultiTurnStreamItem::StreamUserItem(StreamedUserContent::ToolResult {
             internal_call_id,
             tool_result,
-        })) => {
+        }) => {
             let result_text = tool_result.content.iter().find_map(|c| {
                 if let ToolResultContent::Text(t) = c {
                     Some(t.text.as_str())
@@ -213,9 +210,7 @@ fn handle_stream_item(
             model.chat.finish_tool_call(&internal_call_id, is_error);
             model.chat.start_streaming_message();
         }
-        Ok(_) => {}
-        // Direct write — already inside update(), no need to route through Msg::SetStatus.
-        Err(e) => model.status_message = Some(e.to_string()),
+        _ => {}
     }
     None
 }
@@ -761,7 +756,7 @@ fn handle_key_insert(
         KeyCode::Esc => {
             model.overlay = InputOverlay::Input(Mode::Normal);
             if model.is_streaming() {
-                return Some(Cmd::InterruptStream);
+                return Some(Cmd::StopStream);
             }
             None
         }

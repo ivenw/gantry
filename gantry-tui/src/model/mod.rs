@@ -169,7 +169,7 @@ impl Model {
 
     /// Transitions stream state to `Interrupted`, capturing elapsed duration, and flushes
     /// any buffered content to the visible message so the partial response remains readable.
-    pub fn cancel_stream(&mut self) {
+    pub fn interrupt_stream(&mut self) {
         let duration = match self.stream {
             StreamState::Active { started_at } => started_at.elapsed(),
             _ => Duration::ZERO,
@@ -372,12 +372,12 @@ impl Model {
         self.session_stats = stats;
     }
 
-    /// Fails the stream, restoring the input from the cancelled message and recording the error.
+    /// Fails the stream, rolling back optimistic messages, restoring the input, and recording the error.
     pub fn fail_stream(&mut self, error: String) {
-        if let Some(text) = self.chat.cancel_streaming() {
+        if let Some(text) = self.chat.rollback_streaming() {
             self.input.set_text(text);
         }
-        self.cancel_stream();
+        self.interrupt_stream();
         self.status_message = Some(error);
     }
 

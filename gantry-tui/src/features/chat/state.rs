@@ -262,10 +262,10 @@ impl ChatState {
         self.streaming_rendered_len = 0;
     }
 
-    /// Cancels an in-progress stream, rolling back the optimistic user message and any
+    /// Rolls back an in-progress stream, removing the optimistic user message and any
     /// partial assistant content. Returns the rolled-back user message text so the caller
     /// can restore it to the input.
-    pub fn cancel_streaming(&mut self) -> Option<String> {
+    pub fn rollback_streaming(&mut self) -> Option<String> {
         // Remove any partial assistant message that was pushed during streaming.
         if self.streaming_message_pushed
             && let Some(idx) = self.streaming_message_idx

@@ -26,7 +26,7 @@ pub struct Runtime {
     view_state: WidgetState,
     stream_task: Option<JoinHandle<()>>,
     is_streaming: Arc<AtomicBool>,
-    cancel_stream: Arc<AtomicBool>,
+    cancel_token: Arc<AtomicBool>,
     _event_task: JoinHandle<()>,
 }
 
@@ -93,7 +93,7 @@ impl Runtime {
             view_state: WidgetState::default(),
             stream_task: None,
             is_streaming: Arc::new(AtomicBool::new(false)),
-            cancel_stream: Arc::new(AtomicBool::new(false)),
+            cancel_token: Arc::new(AtomicBool::new(false)),
             _event_task: event_task,
         })
     }
@@ -185,9 +185,9 @@ impl Runtime {
                 self.run_command(cmd);
                 None
             }
-            Cmd::InterruptStream => {
-                self.interrupt_stream();
-                Some(Msg::CancelStream)
+            Cmd::StopStream => {
+                self.cancel_stream();
+                Some(Msg::StreamInterrupted)
             }
             Cmd::BranchTo(entry_id) => {
                 self.spawn_branch(entry_id);
@@ -235,7 +235,7 @@ impl Runtime {
 
     fn spawn_send_message(&mut self, input: Vec<gantry_core::InputToken>) {
         // Cancel any in-flight stream before starting a new one.
-        self.cancel_stream.store(true, Ordering::SeqCst);
+        self.cancel_token.store(true, Ordering::SeqCst);
         if let Some(old) = self.stream_task.take() {
             old.abort();
         }
@@ -244,21 +244,32 @@ impl Runtime {
         let app = self.app.clone();
         let app_ref = self.app.clone();
         let is_streaming = self.is_streaming.clone();
-        let cancel = self.cancel_stream.clone();
+        let cancel = self.cancel_token.clone();
         cancel.store(false, Ordering::SeqCst);
 
         let task = self.rt.spawn(async move {
             match gantry_core::stream_message(app, input.clone()).await {
                 Err(e) => {
+                    is_streaming.store(false, Ordering::SeqCst);
                     let _ = tx.send(Msg::StreamError(e.to_string()).into()).await;
                 }
                 Ok(mut response) => {
                     is_streaming.store(true, Ordering::SeqCst);
                     while let Some(item) = response.stream.next().await {
-                        if cancel.load(Ordering::SeqCst)
-                            || tx.send(Msg::StreamItem(item).into()).await.is_err()
-                        {
-                            break;
+                        match item {
+                            Err(e) => {
+                                is_streaming.store(false, Ordering::SeqCst);
+                                let _ = tx.send(Msg::StreamError(e.to_string()).into()).await;
+                                return;
+                            }
+                            Ok(item) => {
+                                if cancel.load(Ordering::SeqCst)
+                                    || tx.send(Msg::StreamItem(item).into()).await.is_err()
+                                {
+                                    is_streaming.store(false, Ordering::SeqCst);
+                                    return;
+                                }
+                            }
                         }
                     }
                     response.commit().await;
@@ -279,14 +290,14 @@ impl Runtime {
 
     /// Starts a mock streaming response for testing the TUI rendering pipeline.
     fn spawn_mock_chat(&mut self) {
-        self.cancel_stream.store(true, Ordering::SeqCst);
+        self.cancel_token.store(true, Ordering::SeqCst);
         if let Some(old) = self.stream_task.take() {
             old.abort();
         }
 
         let tx = self.msg_tx.clone();
         let is_streaming = self.is_streaming.clone();
-        let cancel = self.cancel_stream.clone();
+        let cancel = self.cancel_token.clone();
         cancel.store(false, Ordering::SeqCst);
 
         let event_tx = self
@@ -296,10 +307,19 @@ impl Runtime {
             let mut response = gantry_core::mock_stream_message(event_tx);
             is_streaming.store(true, Ordering::SeqCst);
             while let Some(item) = response.stream.next().await {
-                if cancel.load(Ordering::SeqCst)
-                    || tx.send(Msg::StreamItem(item).into()).await.is_err()
-                {
-                    break;
+                match item {
+                    Err(e) => {
+                        is_streaming.store(false, Ordering::SeqCst);
+                        let _ = tx.send(Msg::StreamError(e.to_string()).into()).await;
+                        return;
+                    }
+                    Ok(item) => {
+                        if cancel.load(Ordering::SeqCst)
+                            || tx.send(Msg::StreamItem(item).into()).await.is_err()
+                        {
+                            break;
+                        }
+                    }
                 }
             }
             response.commit().await;
@@ -311,8 +331,8 @@ impl Runtime {
         self.stream_task = Some(task);
     }
 
-    fn interrupt_stream(&mut self) {
-        self.cancel_stream.store(true, Ordering::SeqCst);
+    fn cancel_stream(&mut self) {
+        self.cancel_token.store(true, Ordering::SeqCst);
         self.stream_task.take();
         self.is_streaming.store(false, Ordering::SeqCst);
     }

@@ -2,7 +2,7 @@ use crate::model::SessionStats;
 use gantry_core::{
     AppEvent, ChatStreamItem, ContextWindow, InputToken, ModelSelection, PathSearchResult,
     ProviderAlias, ProviderConfig, SessionId, SessionInfo, SessionTree, SkillSearchResult,
-    StoredCredential, StreamingError, Usage,
+    StoredCredential, Usage,
 };
 
 use crate::features::chat::ChatMessage;
@@ -17,7 +17,7 @@ pub enum Msg {
     KeyEvent(crossterm::event::KeyEvent),
 
     // Stream events from the agent
-    StreamItem(Result<ChatStreamItem, StreamingError>),
+    StreamItem(ChatStreamItem),
     StreamDone(SessionStats),
 
     // Out-of-band tool events
@@ -77,8 +77,8 @@ pub enum Msg {
     // Transitions stream state to Active and opens a streaming message slot.
     StartStream,
 
-    // Transitions stream state to Interrupted and flushes any buffered content.
-    CancelStream,
+    // Transitions stream state to Interrupted and flushes any buffered content (user-initiated).
+    StreamInterrupted,
 }
 
 /// Side-effect commands returned by `update()` and executed by `Runtime`.
@@ -101,7 +101,8 @@ pub enum Cmd {
 
     /// Creates a new session in the app and then sends `Msg::SessionCreated`.
     NewSession,
-    InterruptStream,
+    /// User-initiated stop: kills the stream task and sends `Msg::StreamInterrupted`.
+    StopStream,
     RunCommand(KnownCommand),
 
     // Session branching
