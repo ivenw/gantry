@@ -5,8 +5,8 @@ use gantry_core::{
     StoredCredential, StreamingError, Usage,
 };
 
-use crate::chat::ChatMessage;
-use crate::command_picker::KnownCommand;
+use crate::features::chat::ChatMessage;
+use crate::features::command_picker::KnownCommand;
 
 /// Pure model-update messages handled by `update()`.
 ///

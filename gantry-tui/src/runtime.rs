@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinHandle;
 
-use crate::chat::ChatMessage;
+use crate::features::chat::ChatMessage;
 use crate::message::{Cmd, Msg};
 use crate::model::update;
 use crate::model::{Model, SessionStats};
@@ -416,8 +416,8 @@ impl Runtime {
     }
 
     /// Dispatches a `KnownCommand`, either immediately updating the model or spawning an async task.
-    fn run_command(&mut self, cmd: crate::command_picker::KnownCommand) {
-        use crate::command_picker::KnownCommand;
+    fn run_command(&mut self, cmd: crate::features::command_picker::KnownCommand) {
+        use crate::features::command_picker::KnownCommand;
         match cmd {
             KnownCommand::Quit => {
                 let _ = self.msg_tx.try_send(Cmd::Quit.into());

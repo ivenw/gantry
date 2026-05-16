@@ -7,7 +7,10 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::{input::InputState, model::Mode, theme, utils::wrapped_line_count};
+use crate::features::input::InputState;
+use crate::model::Mode;
+use crate::theme;
+use crate::utils::wrapped_line_count;
 
 const PREFIX: &str = "> ";
 const PREFIX_WIDTH: u16 = PREFIX.len() as u16;

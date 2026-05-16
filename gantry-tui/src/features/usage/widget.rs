@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Widget},
 };
 
-use crate::usage::UsageState;
+use crate::features::usage::UsageState;
 
 /// Colors for each usage bar segment, in render order: system prompt, messages, other, remaining.
 const COLOR_SYSTEM: Color = Color::Cyan;

@@ -5,13 +5,13 @@ use gantry_core::{
 };
 
 use super::{InputOverlay, Mode, Model};
-use crate::input::prev_char_boundary;
-use crate::message::{Cmd, Msg};
-use crate::provider_config::{
+use crate::features::input::prev_char_boundary;
+use crate::features::provider_config::{
     CopilotAuthKind, ProviderWizard, ProvidersSubView, WizardProviderKind,
 };
-use crate::tree::branch_rows;
-use crate::usage::UsageState;
+use crate::features::tree::branch_rows;
+use crate::features::usage::UsageState;
+use crate::message::{Cmd, Msg};
 use crate::view::WidgetState;
 use gantry_core::SessionId;
 
@@ -721,8 +721,9 @@ fn handle_key_normal(
             None
         }
         KeyCode::Char(' ') => {
-            model.overlay =
-                InputOverlay::CommandPicker(crate::command_picker::CommandPickerState::new());
+            model.overlay = InputOverlay::CommandPicker(
+                crate::features::command_picker::CommandPickerState::new(),
+            );
             None
         }
         KeyCode::Char('j') | KeyCode::Down => {

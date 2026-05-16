@@ -1,22 +1,12 @@
 #![allow(dead_code)]
 
-mod agent_statusline;
-mod app_statusline;
-mod attachment_picker;
-mod chat;
-mod command_picker;
-pub mod effects;
-mod input;
+mod effects;
+mod features;
 mod message;
 mod model;
-mod model_picker;
 mod picker;
-mod provider_config;
 mod runtime;
-mod session_picker;
-pub mod theme;
-mod tree;
-mod usage;
+mod theme;
 mod utils;
 mod view;
 mod widgets;

@@ -9,12 +9,12 @@ use gantry_core::{
     SessionTree, SkillSearchResult, Usage,
 };
 
-use crate::attachment_picker::{AttachmentPickerKind, AttachmentPickerState};
-use crate::chat::ChatState;
-use crate::input::InputState;
-use crate::model_picker::ModelPickerState;
-use crate::session_picker::SessionPickerState;
-use crate::tree::{TreeState, branch_rows};
+use crate::features::attachment_picker::{AttachmentPickerKind, AttachmentPickerState};
+use crate::features::chat::ChatState;
+use crate::features::input::InputState;
+use crate::features::model_picker::ModelPickerState;
+use crate::features::session_picker::SessionPickerState;
+use crate::features::tree::{TreeState, branch_rows};
 
 pub struct Model {
     session_id: Option<SessionId>,
@@ -47,7 +47,7 @@ impl Model {
     /// Creates a new model with the given initial application state.
     pub fn new(
         session_id: Option<SessionId>,
-        messages: Vec<crate::chat::ChatMessage>,
+        messages: Vec<crate::features::chat::ChatMessage>,
         selection: Option<ModelSelection>,
         project_path: PathBuf,
         project_name: String,
@@ -326,7 +326,7 @@ impl Model {
     pub fn load_session(
         &mut self,
         session_id: SessionId,
-        messages: Vec<crate::chat::ChatMessage>,
+        messages: Vec<crate::features::chat::ChatMessage>,
         session_stats: SessionStats,
     ) {
         self.session_id = Some(session_id);
@@ -339,7 +339,7 @@ impl Model {
     }
 
     /// Replaces the visible messages and returns to normal input mode.
-    pub fn reload_messages(&mut self, messages: Vec<crate::chat::ChatMessage>) {
+    pub fn reload_messages(&mut self, messages: Vec<crate::features::chat::ChatMessage>) {
         self.chat.messages = messages;
         self.chat.scroll_offset = 0;
         self.chat.user_is_scrolling = false;
@@ -349,7 +349,7 @@ impl Model {
     /// Replaces the visible messages, restores the input buffer, and returns to normal input mode.
     pub fn reload_messages_with_input(
         &mut self,
-        messages: Vec<crate::chat::ChatMessage>,
+        messages: Vec<crate::features::chat::ChatMessage>,
         input: String,
     ) {
         self.chat.messages = messages;
@@ -386,10 +386,11 @@ impl Model {
     /// Invalidates the cached model list and opens the provider config overlay.
     pub fn open_provider_config(&mut self, providers: Vec<gantry_core::ProviderConfig>) {
         self.cached_models = None;
-        self.overlay = InputOverlay::ProviderConfig(crate::provider_config::ProvidersConfigState {
-            providers,
-            sub: crate::provider_config::ProvidersSubView::List { selected_idx: 0 },
-        });
+        self.overlay =
+            InputOverlay::ProviderConfig(crate::features::provider_config::ProvidersConfigState {
+                providers,
+                sub: crate::features::provider_config::ProvidersSubView::List { selected_idx: 0 },
+            });
     }
 
     // ── Input submission ──────────────────────────────────────────────────────
@@ -417,7 +418,7 @@ impl Model {
         let display = self.input.raw_display(&self.project_path);
         if display.starts_with('/') {
             let filter = display.strip_prefix('/').unwrap_or("");
-            let has_match = crate::command_picker::KnownCommand::ALL
+            let has_match = crate::features::command_picker::KnownCommand::ALL
                 .iter()
                 .any(|k| k.name().starts_with(filter));
             if !has_match {
@@ -454,13 +455,13 @@ impl Model {
 pub enum InputOverlay {
     /// No overlay; the input buffer is active in the given mode.
     Input(Mode),
-    CommandPicker(crate::command_picker::CommandPickerState),
-    ModelPicker(crate::model_picker::ModelPickerState),
-    AttachmentPicker(crate::attachment_picker::AttachmentPickerState),
-    Usage(crate::usage::UsageState),
-    SessionPicker(crate::session_picker::SessionPickerState),
-    Tree(crate::tree::TreeState),
-    ProviderConfig(crate::provider_config::ProvidersConfigState),
+    CommandPicker(crate::features::command_picker::CommandPickerState),
+    ModelPicker(crate::features::model_picker::ModelPickerState),
+    AttachmentPicker(crate::features::attachment_picker::AttachmentPickerState),
+    Usage(crate::features::usage::UsageState),
+    SessionPicker(crate::features::session_picker::SessionPickerState),
+    Tree(crate::features::tree::TreeState),
+    ProviderConfig(crate::features::provider_config::ProvidersConfigState),
 }
 
 /// The editing sub-mode active when no overlay is open.

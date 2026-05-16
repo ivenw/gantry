@@ -6,10 +6,11 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
+use crate::features::command_picker::CommandPickerState;
 use crate::theme;
+use crate::theme::title;
 use crate::utils::highlight_matched_chars;
 use crate::widgets::table::TableWidget;
-use crate::{command_picker::CommandPickerState, theme::title};
 
 /// Fixed column gutter between the command name column and the description column.
 const COLUMN_GAP: u16 = 4;

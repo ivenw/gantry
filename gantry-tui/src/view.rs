@@ -3,20 +3,21 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
 };
 
-use crate::agent_statusline::{AgentStatuslineWidget, AgentStatuslineWidgetState};
-use crate::attachment_picker::AttachmentPickerWidget;
-use crate::chat::ChatWidgetState;
-use crate::chat::widget::ChatWidget;
-use crate::command_picker::CommandPickerWidget;
+use crate::effects::throbber::AsciiThrobberStyle;
 use crate::effects::throbber::Throbber;
-use crate::input::InputWidget;
+use crate::features::agent_statusline::{AgentStatuslineWidget, AgentStatuslineWidgetState};
+use crate::features::app_statusline::AppStatuslineWidget;
+use crate::features::attachment_picker::AttachmentPickerWidget;
+use crate::features::chat::ChatWidgetState;
+use crate::features::chat::widget::ChatWidget;
+use crate::features::command_picker::CommandPickerWidget;
+use crate::features::input::InputWidget;
+use crate::features::model_picker::ModelPickerWidget;
+use crate::features::provider_config::ProviderConfigWidget;
+use crate::features::session_picker::SessionPickerWidget;
+use crate::features::tree::TreeWidget;
+use crate::features::usage::UsageWidget;
 use crate::model::{InputOverlay, Mode, Model};
-use crate::model_picker::ModelPickerWidget;
-use crate::provider_config::ProviderConfigWidget;
-use crate::session_picker::SessionPickerWidget;
-use crate::tree::TreeWidget;
-use crate::usage::UsageWidget;
-use crate::{app_statusline::AppStatuslineWidget, effects::throbber::AsciiThrobberStyle};
 
 pub struct WidgetState {
     pub chat: ChatWidgetState,
