@@ -194,8 +194,7 @@ impl StatefulWidget for ChatWidget<'_> {
                         ASSISTANT_PREFIX,
                         Style::default().fg(ratatui::style::Color::DarkGray),
                     );
-                    Paragraph::new(Text::raw(content))
-                        .style(Style::default())
+                    Paragraph::new(tui_markdown::from_str(content))
                         .wrap(ratatui::widgets::Wrap { trim: false })
                         .scroll((clip_top, 0))
                         .render(text_area, buf);
