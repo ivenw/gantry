@@ -141,11 +141,12 @@ pub fn render(frame: &mut Frame, model: &mut Model, view_state: &mut WidgetState
                 InputOverlay::Input(m) => *m,
                 _ => Mode::Normal,
             };
+            let stats = model.session_stats();
             frame.render_widget(
                 AppStatuslineWidget::new(
                     mode,
-                    model.context_window(),
-                    model.total_consumption(),
+                    stats.context_window.clone(),
+                    stats.usage.clone(),
                     model.project_name().to_string(),
                     model.project_path().clone(),
                     model.cwd().clone(),

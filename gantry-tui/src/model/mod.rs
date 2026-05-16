@@ -27,11 +27,20 @@ pub struct Model {
     cwd: PathBuf,
     status_message: Option<String>,
     stream: StreamState,
-    /// Context window snapshot from the most recently completed stream.
-    context_window: Option<ContextWindow>,
-    total_consumption: Option<Usage>,
+    session_stats: SessionStats,
     /// Cached model list fetched on first open of the model picker.
     cached_models: Option<Vec<ModelSelection>>,
+}
+
+/// Snapshot of token consumption and context window from the most recently completed stream.
+///
+/// Both fields are updated atomically so they always reflect the same checkpoint.
+#[derive(Clone, Default)]
+pub struct SessionStats {
+    /// Context window fill at the end of the last stream, or `None` before the first stream completes.
+    pub context_window: Option<ContextWindow>,
+    /// Cumulative token usage for the session. Zero before the first stream completes.
+    pub usage: Usage,
 }
 
 impl Model {
@@ -42,8 +51,7 @@ impl Model {
         selection: Option<ModelSelection>,
         project_path: PathBuf,
         project_name: String,
-        context_window: Option<ContextWindow>,
-        total_consumption: Usage,
+        session_stats: SessionStats,
         cwd: PathBuf,
     ) -> Self {
         let mut chat = ChatState::new();
@@ -59,8 +67,7 @@ impl Model {
             cwd,
             status_message: None,
             stream: StreamState::Idle,
-            context_window,
-            total_consumption: Some(total_consumption),
+            session_stats,
             cached_models: None,
         }
     }
@@ -92,14 +99,9 @@ impl Model {
         self.status_message.as_deref()
     }
 
-    /// Returns the context window snapshot from the most recently completed stream.
-    pub fn context_window(&self) -> Option<ContextWindow> {
-        self.context_window.clone()
-    }
-
-    /// Returns the total token consumption across the session.
-    pub fn total_consumption(&self) -> Option<Usage> {
-        self.total_consumption.clone()
+    /// Returns the session stats snapshot from the most recently completed stream.
+    pub fn session_stats(&self) -> &SessionStats {
+        &self.session_stats
     }
 
     /// Returns the project name.
@@ -329,8 +331,7 @@ impl Model {
         self.chat.reset();
         self.status_message = None;
         self.reset_stream();
-        self.total_consumption = None;
-        self.context_window = None;
+        self.session_stats = SessionStats::default();
     }
 
     /// Replaces all session-scoped state with the given session's data.
@@ -338,15 +339,13 @@ impl Model {
         &mut self,
         session_id: SessionId,
         messages: Vec<crate::chat::ChatMessage>,
-        context_window: Option<ContextWindow>,
-        total_consumption: Usage,
+        session_stats: SessionStats,
     ) {
         self.session_id = Some(session_id);
         self.chat.messages = messages;
         self.chat.scroll_offset = 0;
         self.chat.user_is_scrolling = false;
-        self.context_window = context_window;
-        self.total_consumption = Some(total_consumption);
+        self.session_stats = session_stats;
         self.reset_stream();
         self.status_message = None;
     }
@@ -376,14 +375,13 @@ impl Model {
     ///
     /// No-ops if the stream was interrupted, so a late done signal does not overwrite
     /// the interrupted state.
-    pub fn complete_stream(&mut self, context_window: Option<ContextWindow>, usage: Usage) {
+    pub fn complete_stream(&mut self, stats: SessionStats) {
         if matches!(self.stream, StreamState::Interrupted { .. }) {
             return;
         }
         self.finish_stream();
         self.chat.scroll_to_bottom();
-        self.context_window = context_window;
-        self.total_consumption = Some(usage);
+        self.session_stats = stats;
     }
 
     /// Fails the stream, restoring the input from the cancelled message and recording the error.

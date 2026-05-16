@@ -3,6 +3,7 @@ use gantry_core::{
     ProviderAlias, ProviderConfig, SessionId, SessionInfo, SessionTree, SkillSearchResult,
     StoredCredential, StreamingError, Usage,
 };
+use crate::model::SessionStats;
 
 use crate::chat::ChatMessage;
 use crate::commands::KnownCommand;
@@ -17,7 +18,7 @@ pub enum Msg {
 
     // Stream events from the agent
     StreamItem(Result<ChatStreamItem, StreamingError>),
-    StreamDone(Option<ContextWindow>, Usage),
+    StreamDone(SessionStats),
 
     // Out-of-band tool events
     AppEvent(AppEvent),
@@ -43,8 +44,7 @@ pub enum Msg {
     SessionLoaded {
         session_id: SessionId,
         messages: Vec<ChatMessage>,
-        context_window: Option<ContextWindow>,
-        total_consumption: Usage,
+        session_stats: SessionStats,
     },
 
     OpenUsageState(ContextWindow, Usage),

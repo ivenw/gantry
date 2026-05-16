@@ -1,7 +1,7 @@
 use anyhow::Result;
 use crossterm::event::{Event as CrosstermEvent, KeyEventKind, MouseEventKind};
 use futures::StreamExt;
-use gantry_core::{App, Usage};
+use gantry_core::App;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::io;
 use std::sync::Arc;
@@ -13,7 +13,7 @@ use tokio::task::JoinHandle;
 
 use crate::chat::ChatMessage;
 use crate::message::{Cmd, Msg};
-use crate::model::Model;
+use crate::model::{Model, SessionStats};
 use crate::model::update;
 use crate::view::{self, WidgetState};
 
@@ -42,8 +42,7 @@ impl Runtime {
             selection,
             project_path,
             project_name,
-            context_window,
-            total_consumption,
+            session_stats,
             mut event_rx,
         ) = {
             let app = rt.block_on(app.lock());
@@ -53,8 +52,10 @@ impl Runtime {
                 app.selection().cloned(),
                 app.project_path.clone(),
                 app.project_name.clone(),
-                app.context_window(),
-                app.total_consumption().clone(),
+                SessionStats {
+                    context_window: app.context_window(),
+                    usage: app.total_consumption().clone(),
+                },
                 app.subscribe_events(),
             )
         };
@@ -64,8 +65,7 @@ impl Runtime {
             selection,
             project_path,
             project_name,
-            context_window,
-            total_consumption,
+            session_stats,
             cwd,
         );
 
@@ -262,12 +262,15 @@ impl Runtime {
                         }
                     }
                     response.commit().await;
-                    let (cw, usage) = {
+                    let stats = {
                         let app = app_ref.lock().await;
-                        (app.context_window(), app.total_consumption().clone())
+                        SessionStats {
+                            context_window: app.context_window(),
+                            usage: app.total_consumption().clone(),
+                        }
                     };
                     is_streaming.store(false, Ordering::SeqCst);
-                    let _ = tx.send(Msg::StreamDone(cw, usage).into()).await;
+                    let _ = tx.send(Msg::StreamDone(stats).into()).await;
                 }
             }
         });
@@ -302,7 +305,7 @@ impl Runtime {
             response.commit().await;
             is_streaming.store(false, Ordering::SeqCst);
             let _ = tx
-                .send(Msg::StreamDone(None, Usage::default()).into())
+                .send(Msg::StreamDone(SessionStats::default()).into())
                 .await;
         });
         self.stream_task = Some(task);
@@ -387,18 +390,19 @@ impl Runtime {
         match result {
             Err(e) => Some(Msg::SetStatus(format!("failed to resume session: {e}"))),
             Ok(()) => {
-                let (messages, context_window, total_consumption) = self.rt.block_on(async {
+                let (messages, session_stats) = self.rt.block_on(async {
                     let app = self.app.lock().await;
                     let messages = ChatMessage::messages_from(app.history());
-                    let context_window = app.context_window();
-                    let total_consumption = app.total_consumption().clone();
-                    (messages, context_window, total_consumption)
+                    let session_stats = SessionStats {
+                        context_window: app.context_window(),
+                        usage: app.total_consumption().clone(),
+                    };
+                    (messages, session_stats)
                 });
                 Some(Msg::SessionLoaded {
                     session_id,
                     messages,
-                    context_window,
-                    total_consumption,
+                    session_stats,
                 })
             }
         }

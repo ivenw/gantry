@@ -39,8 +39,8 @@ pub fn update(model: &mut Model, view_state: &WidgetState, msg: Msg) -> Option<C
             None
         }
         Msg::StreamItem(item) => handle_stream_item(model, item),
-        Msg::StreamDone(cw, usage) => {
-            model.complete_stream(cw, usage);
+        Msg::StreamDone(stats) => {
+            model.complete_stream(stats);
             None
         }
         Msg::StreamError(e) => {
@@ -66,10 +66,9 @@ pub fn update(model: &mut Model, view_state: &WidgetState, msg: Msg) -> Option<C
         Msg::SessionLoaded {
             session_id,
             messages,
-            context_window,
-            total_consumption,
+            session_stats,
         } => {
-            model.load_session(session_id, messages, context_window, total_consumption);
+            model.load_session(session_id, messages, session_stats);
             None
         }
         Msg::ReloadMessages(messages) => {
