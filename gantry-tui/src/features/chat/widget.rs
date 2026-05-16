@@ -4,7 +4,7 @@ use super::{ChatMessage, ChatState};
 use crate::utils::wrapped_line_count;
 use ratatui::{
     buffer::Buffer,
-    layout::{Margin, Rect},
+    layout::Rect,
     style::Style,
     symbols::scrollbar::Set as ScrollbarSet,
     text::Text,
@@ -67,27 +67,7 @@ impl StatefulWidget for ChatWidget<'_> {
                     hunks,
                     ..
                 } => {
-                    let raw_arg = tool_display_arg(name, arguments);
-                    let display_name = if name == "bash" { "$" } else { name.as_str() };
-                    let formatted = raw_arg.map(|a| {
-                        if name == "bash" {
-                            format_bash_command(&a)
-                        } else {
-                            a
-                        }
-                    });
-                    let mut line = match &formatted {
-                        Some(a) => format!("x {} {}", display_name, a),
-                        None => format!("x {}", display_name),
-                    };
-                    if !hunks.is_empty() {
-                        line.push(' ');
-                        line.push_str(&format_diff_summary(hunks));
-                    }
-                    for hunk in hunks {
-                        line.push('\n');
-                        line.push_str(&format_hunk_header(hunk));
-                    }
+                    let line = format_tool_call_line("x", name, arguments, hunks);
                     Self::calc_msg_height(&line, area.width)
                 }
                 _ => {
@@ -209,30 +189,10 @@ impl StatefulWidget for ChatWidget<'_> {
                 } => {
                     let indicator = match (done, is_error) {
                         (false, _) => self.spinner.to_string(),
-                        (true, false) => "+".to_string(),
-                        (true, true) => "-".to_string(),
+                        (true, false) => TOOL_SUCCESS_INDICATOR.to_string(),
+                        (true, true) => TOOL_ERROR_INDICATOR.to_string(),
                     };
-                    let raw_arg = tool_display_arg(name, arguments);
-                    let display_name = if name == "bash" { "$" } else { name.as_str() };
-                    let formatted_arg: Option<String> = raw_arg.map(|a| {
-                        if name == "bash" {
-                            format_bash_command(&a)
-                        } else {
-                            a
-                        }
-                    });
-                    let mut line = match &formatted_arg {
-                        Some(a) => format!("{} {} {}", indicator, display_name, a),
-                        None => format!("{} {}", indicator, display_name),
-                    };
-                    if !hunks.is_empty() {
-                        line.push(' ');
-                        line.push_str(&format_diff_summary(hunks));
-                    }
-                    for hunk in hunks.iter() {
-                        line.push('\n');
-                        line.push_str(&format_hunk_header(hunk));
-                    }
+                    let line = format_tool_call_line(&indicator, name, arguments, hunks);
                     let color = match (done, is_error) {
                         (false, _) => ratatui::style::Color::Cyan,
                         (true, false) => ratatui::style::Color::DarkGray,
@@ -272,17 +232,40 @@ impl StatefulWidget for ChatWidget<'_> {
                     end: "",
                 })
                 .thumb_style(Style::default().fg(ratatui::style::Color::DarkGray));
-            StatefulWidget::render(
-                scrollbar,
-                area.inner(Margin {
-                    vertical: 0,
-                    horizontal: 0,
-                }),
-                buf,
-                &mut state.scrollbar,
-            );
+            StatefulWidget::render(scrollbar, area, buf, &mut state.scrollbar);
         }
     }
+}
+
+/// Builds the display line for a tool call, including optional diff summary and hunk headers.
+fn format_tool_call_line(
+    indicator: &str,
+    name: &str,
+    arguments: &serde_json::Value,
+    hunks: &[DiffHunk],
+) -> String {
+    let raw_arg = tool_display_arg(name, arguments);
+    let display_name = if name == "bash" { "$" } else { name };
+    let formatted_arg = raw_arg.map(|a| {
+        if name == "bash" {
+            format_bash_command(&a)
+        } else {
+            a
+        }
+    });
+    let mut line = match &formatted_arg {
+        Some(a) => format!("{} {} {}", indicator, display_name, a),
+        None => format!("{} {}", indicator, display_name),
+    };
+    if !hunks.is_empty() {
+        line.push(' ');
+        line.push_str(&format_diff_summary(hunks));
+    }
+    for hunk in hunks {
+        line.push('\n');
+        line.push_str(&format_hunk_header(hunk));
+    }
+    line
 }
 
 /// Returns a short display string for the most informative argument of a known tool.
@@ -391,8 +374,9 @@ fn split_on_unescaped_and(cmd: &str) -> Vec<&str> {
 
 /// Summarises a diff as `+N -N` for the total lines added and removed across all hunks.
 fn format_diff_summary(hunks: &[DiffHunk]) -> String {
-    let added: usize = hunks.iter().map(|h| h.new_count()).sum();
-    let removed: usize = hunks.iter().map(|h| h.old_count()).sum();
+    let (added, removed) = hunks.iter().fold((0usize, 0usize), |(a, r), h| {
+        (a + h.new_count(), r + h.old_count())
+    });
     format!("+{}/-{}", added, removed)
 }
 
@@ -411,7 +395,7 @@ fn msg_content(message: &ChatMessage) -> &str {
     match message {
         ChatMessage::User { content, .. }
         | ChatMessage::Reasoning { content }
-        | ChatMessage::Assistant { content } => content.trim(),
+        | ChatMessage::Assistant { content } => content.as_str(),
         ChatMessage::ToolCall { .. } => "",
     }
 }

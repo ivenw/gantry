@@ -2,19 +2,7 @@ use gantry_core::{DiffHunk, UserId};
 
 pub struct ChatState {
     pub messages: Vec<ChatMessage>,
-    pub streaming_content: Option<String>,
-    pub streaming_message_idx: Option<usize>,
-    /// False until the first content is appended — delays the assistant message from appearing.
-    pub streaming_message_pushed: bool,
-    /// Byte offset into `streaming_content` up to which content has been synced to `messages`.
-    /// Tokens are only flushed to the visible message on paragraph boundaries (`\n\n`).
-    streaming_rendered_len: usize,
-    pub streaming_reasoning_content: Option<String>,
-    pub streaming_reasoning_message_idx: Option<usize>,
-    /// False until the first reasoning content is appended.
-    pub streaming_reasoning_pushed: bool,
-    /// Byte offset into `streaming_reasoning_content` up to which content has been synced to `messages`.
-    streaming_reasoning_rendered_len: usize,
+    buffer: Option<TurnBuffer>,
     /// Number of lines scrolled up from the bottom (0 = pinned to bottom).
     pub scroll_offset: u16,
     /// True while the user has manually scrolled up; suppresses auto-scroll-to-bottom.
@@ -26,29 +14,15 @@ impl ChatState {
     pub fn new() -> Self {
         Self {
             messages: Vec::new(),
-            streaming_content: None,
-            streaming_message_idx: None,
-            streaming_message_pushed: false,
-            streaming_rendered_len: 0,
-            streaming_reasoning_content: None,
-            streaming_reasoning_message_idx: None,
-            streaming_reasoning_pushed: false,
-            streaming_reasoning_rendered_len: 0,
+            buffer: None,
             scroll_offset: 0,
             user_is_scrolling: false,
         }
     }
 
-    /// Ensures any accumulated streaming text is committed to `messages` before an
-    /// interleaved event (tool call or new streaming turn) modifies the list.
-    fn flush_streaming(&mut self) {
-        self.flush_reasoning_rendered();
-        self.flush_rendered();
-    }
-
-    /// Inserts a tool call row with `done: false`, flushing any pending assistant text first.
+    /// Inserts a tool call row with `done: false`, flushing any pending buffered text first.
     pub fn push_tool_call(&mut self, id: String, name: String, arguments: serde_json::Value) {
-        self.flush_streaming();
+        self.drain_buffer();
         self.messages.push(ChatMessage::ToolCall {
             id,
             name,
@@ -85,7 +59,7 @@ impl ChatState {
 
     /// Marks the tool call with `id` as done, recording whether it produced an error.
     pub fn finish_tool_call(&mut self, id: &str, is_error: bool) {
-        for msg in &mut self.messages {
+        for msg in self.messages.iter_mut().rev() {
             if let ChatMessage::ToolCall {
                 id: msg_id,
                 done,
@@ -105,218 +79,68 @@ impl ChatState {
     pub fn add_user_message(&mut self, content: String) {
         self.messages.push(ChatMessage::User {
             sender: None,
-            content,
+            content: content.trim().to_string(),
         });
     }
 
-    /// Begins a new assistant streaming slot. Flushes any buffered text from the previous
-    /// slot first so that text arriving before a tool result is not discarded.
+    /// Begins a new assistant turn, flushing any buffered content from the previous turn first.
     pub fn start_streaming_message(&mut self) {
-        self.flush_streaming();
-        self.streaming_reasoning_content = Some(String::new());
-        self.streaming_reasoning_message_idx = None;
-        self.streaming_reasoning_pushed = false;
-        self.streaming_reasoning_rendered_len = 0;
-        self.streaming_content = Some(String::new());
-        self.streaming_message_idx = None;
-        self.streaming_message_pushed = false;
-        self.streaming_rendered_len = 0;
+        self.drain_buffer();
+        self.buffer = Some(TurnBuffer::new(BufferKind::Reasoning));
     }
 
-    /// Appends `content` to the current reasoning turn, syncing to the visible message only
-    /// at paragraph boundaries (`\n\n`). The message slot is not pushed until the first flush.
+    /// Appends reasoning content to the current turn buffer.
     pub fn append_to_reasoning(&mut self, content: &str) {
-        let Some(ref mut streaming) = self.streaming_reasoning_content else {
-            return;
-        };
-        streaming.push_str(content);
-
-        let unrendered = &streaming[self.streaming_reasoning_rendered_len..];
-        let flush_end = match unrendered.rfind("\n\n") {
-            Some(pos) => self.streaming_reasoning_rendered_len + pos + 2,
-            None => return,
-        };
-
-        if flush_end <= self.streaming_reasoning_rendered_len {
-            return;
-        }
-
-        let pending = streaming[self.streaming_reasoning_rendered_len..flush_end].to_owned();
-        self.streaming_reasoning_rendered_len = flush_end;
-
-        if !self.streaming_reasoning_pushed {
-            self.messages
-                .push(ChatMessage::Reasoning { content: pending });
-            self.streaming_reasoning_message_idx = Some(self.messages.len() - 1);
-            self.streaming_reasoning_pushed = true;
-        } else if let Some(idx) = self.streaming_reasoning_message_idx
-            && let Some(ChatMessage::Reasoning {
-                content: msg_content,
-            }) = self.messages.get_mut(idx)
-        {
-            msg_content.push_str(&pending);
+        if let Some(ref mut buf) = self.buffer {
+            buf.append(content, &mut self.messages);
         }
     }
 
-    /// Syncs all buffered reasoning content to the visible message entry.
-    fn flush_reasoning_rendered(&mut self) {
-        let Some(ref streaming) = self.streaming_reasoning_content else {
-            return;
-        };
-        if self.streaming_reasoning_rendered_len >= streaming.len() {
-            return;
-        }
-        let pending = streaming[self.streaming_reasoning_rendered_len..].to_owned();
-        self.streaming_reasoning_rendered_len = streaming.len();
-
-        if !self.streaming_reasoning_pushed {
-            self.messages
-                .push(ChatMessage::Reasoning { content: pending });
-            self.streaming_reasoning_message_idx = Some(self.messages.len() - 1);
-            self.streaming_reasoning_pushed = true;
-        } else if let Some(idx) = self.streaming_reasoning_message_idx
-            && let Some(ChatMessage::Reasoning {
-                content: msg_content,
-            }) = self.messages.get_mut(idx)
-        {
-            msg_content.push_str(&pending);
-        }
-    }
-
-    /// Appends `content` to the current streaming turn, syncing to the visible message only
-    /// at paragraph boundaries (`\n\n`) to reduce render churn. The message slot is not pushed
-    /// until the first flush so that an empty `<<` never appears.
+    /// Appends assistant content to the current turn buffer, switching the buffer kind if needed.
     pub fn append_to_streaming(&mut self, content: &str) {
-        let Some(ref mut streaming) = self.streaming_content else {
-            return;
-        };
-        streaming.push_str(content);
-
-        // Flush up to the end of the last complete paragraph. Hold back content that hasn't
-        // reached a paragraph boundary yet — it will be flushed by finish_streaming.
-        let unrendered = &streaming[self.streaming_rendered_len..];
-        let flush_end = match unrendered.rfind("\n\n") {
-            Some(pos) => self.streaming_rendered_len + pos + 2,
-            None => return,
-        };
-
-        if flush_end <= self.streaming_rendered_len {
-            return;
-        }
-
-        let pending = streaming[self.streaming_rendered_len..flush_end].to_owned();
-        self.streaming_rendered_len = flush_end;
-
-        if !self.streaming_message_pushed {
-            self.messages
-                .push(ChatMessage::Assistant { content: pending });
-            self.streaming_message_idx = Some(self.messages.len() - 1);
-            self.streaming_message_pushed = true;
-        } else if let Some(idx) = self.streaming_message_idx
-            && let Some(ChatMessage::Assistant {
-                content: msg_content,
-            }) = self.messages.get_mut(idx)
-        {
-            msg_content.push_str(&pending);
+        if let Some(ref mut buf) = self.buffer {
+            if !matches!(buf.kind, BufferKind::Assistant) {
+                buf.flush_all(&mut self.messages);
+                *buf = TurnBuffer::new(BufferKind::Assistant);
+            }
+            buf.append(content, &mut self.messages);
         }
     }
 
-    /// Syncs all buffered streaming content to the visible message entry, pushing the message
-    /// slot if it hasn't been created yet.
-    fn flush_rendered(&mut self) {
-        let Some(ref streaming) = self.streaming_content else {
-            return;
-        };
-        if self.streaming_rendered_len >= streaming.len() {
-            return;
-        }
-        let pending = streaming[self.streaming_rendered_len..].to_owned();
-        self.streaming_rendered_len = streaming.len();
-
-        if !self.streaming_message_pushed {
-            self.messages
-                .push(ChatMessage::Assistant { content: pending });
-            self.streaming_message_idx = Some(self.messages.len() - 1);
-            self.streaming_message_pushed = true;
-        } else if let Some(idx) = self.streaming_message_idx
-            && let Some(ChatMessage::Assistant {
-                content: msg_content,
-            }) = self.messages.get_mut(idx)
-        {
-            msg_content.push_str(&pending);
-        }
-    }
-
-    /// Interrupts an in-progress stream, flushing any buffered content to the visible
-    /// message so it remains readable. Unlike `cancel_streaming`, no messages are removed.
+    /// Interrupts an in-progress turn, flushing buffered content so it remains readable.
     pub fn interrupt_streaming(&mut self) {
-        self.flush_reasoning_rendered();
-        self.streaming_reasoning_content = None;
-        self.streaming_reasoning_message_idx = None;
-        self.streaming_reasoning_pushed = false;
-        self.streaming_reasoning_rendered_len = 0;
-        self.flush_rendered();
-        self.streaming_content = None;
-        self.streaming_message_idx = None;
-        self.streaming_message_pushed = false;
-        self.streaming_rendered_len = 0;
+        self.drain_buffer();
     }
 
-    /// Rolls back an in-progress stream, removing the optimistic user message and any
+    /// Rolls back an in-progress turn, removing the optimistic user message and any
     /// partial assistant content. Returns the rolled-back user message text so the caller
     /// can restore it to the input.
     pub fn rollback_streaming(&mut self) -> Option<String> {
-        // Remove any partial assistant message that was pushed during streaming.
-        if self.streaming_message_pushed
-            && let Some(idx) = self.streaming_message_idx
-            && idx < self.messages.len()
-        {
+        // Determine the message index the buffer was writing into (if any).
+        let buf_msg_idx = self.buffer.as_ref().and_then(|b| b.message_idx);
+        self.buffer = None;
+
+        if let Some(idx) = buf_msg_idx {
             self.messages.remove(idx);
         }
-        // Remove the optimistic user message that was added just before streaming started.
-        // It sits immediately before the (now-removed) assistant message.
-        let user_idx = self
-            .streaming_message_idx
+
+        // The optimistic user message sits immediately before the (now-removed) assistant slot.
+        let user_idx = buf_msg_idx
             .map(|i| i.saturating_sub(1))
             .unwrap_or_else(|| self.messages.len().saturating_sub(1));
-        let restored = if user_idx < self.messages.len() {
-            if let ChatMessage::User { .. } = self.messages[user_idx] {
-                let msg = self.messages.remove(user_idx);
-                if let ChatMessage::User { content, .. } = msg {
-                    Some(content)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-        self.streaming_reasoning_content = None;
-        self.streaming_reasoning_message_idx = None;
-        self.streaming_reasoning_pushed = false;
-        self.streaming_reasoning_rendered_len = 0;
-        self.streaming_content = None;
-        self.streaming_message_idx = None;
-        self.streaming_message_pushed = false;
-        self.streaming_rendered_len = 0;
-        restored
+
+        if matches!(self.messages.get(user_idx), Some(ChatMessage::User { .. })) {
+            let ChatMessage::User { content, .. } = self.messages.remove(user_idx) else {
+                unreachable!()
+            };
+            return Some(content);
+        }
+        None
     }
 
-    /// Finalizes the current streaming turn, flushing any remaining buffered content and
-    /// clearing all streaming state.
+    /// Finalizes the current turn, flushing all remaining buffered content.
     pub fn finish_streaming(&mut self) {
-        self.flush_reasoning_rendered();
-        self.streaming_reasoning_content = None;
-        self.streaming_reasoning_message_idx = None;
-        self.streaming_reasoning_pushed = false;
-        self.streaming_reasoning_rendered_len = 0;
-        self.flush_rendered();
-        self.streaming_content = None;
-        self.streaming_message_idx = None;
-        self.streaming_message_pushed = false;
-        self.streaming_rendered_len = 0;
+        self.drain_buffer();
     }
 
     /// Scrolls by `delta` lines within `[0, max]`, updating the user-scrolling flag.
@@ -336,16 +160,17 @@ impl ChatState {
     /// Clears all chat state, resetting to a fresh empty session.
     pub fn reset(&mut self) {
         self.messages.clear();
-        self.streaming_reasoning_content = None;
-        self.streaming_reasoning_message_idx = None;
-        self.streaming_reasoning_pushed = false;
-        self.streaming_reasoning_rendered_len = 0;
-        self.streaming_content = None;
-        self.streaming_message_idx = None;
-        self.streaming_message_pushed = false;
-        self.streaming_rendered_len = 0;
+        self.buffer = None;
         self.scroll_offset = 0;
         self.user_is_scrolling = false;
+    }
+
+    /// Flushes all buffered content to `messages` and clears the buffer.
+    fn drain_buffer(&mut self) {
+        if let Some(ref mut buf) = self.buffer {
+            buf.flush_all(&mut self.messages);
+        }
+        self.buffer = None;
     }
 }
 
@@ -387,5 +212,77 @@ impl ChatMessage {
                 }
             })
             .collect()
+    }
+}
+
+struct TurnBuffer {
+    kind: BufferKind,
+    content: String,
+    /// Byte offset up to which content has been flushed to `messages`.
+    /// Content is only flushed on paragraph boundaries (`\n\n`).
+    rendered_len: usize,
+    /// Index into `messages` for the slot this buffer writes into.
+    /// `None` until the first flush.
+    message_idx: Option<usize>,
+}
+
+enum BufferKind {
+    Reasoning,
+    Assistant,
+}
+
+impl TurnBuffer {
+    fn new(kind: BufferKind) -> Self {
+        Self {
+            kind,
+            content: String::new(),
+            rendered_len: 0,
+            message_idx: None,
+        }
+    }
+
+    /// Appends `content` and flushes up to the last paragraph boundary.
+    fn append(&mut self, content: &str, messages: &mut Vec<ChatMessage>) {
+        self.content.push_str(content);
+
+        let unrendered = &self.content[self.rendered_len..];
+        let flush_end = match unrendered.rfind("\n\n") {
+            Some(pos) => self.rendered_len + pos + 2,
+            None => return,
+        };
+
+        self.flush_up_to(flush_end, messages);
+    }
+
+    /// Flushes all remaining buffered content to `messages`, trimming trailing whitespace.
+    fn flush_all(&mut self, messages: &mut Vec<ChatMessage>) {
+        // Trim trailing whitespace from the accumulated content before the final flush.
+        let trimmed_end = self.content.trim_end().len();
+        if self.rendered_len < trimmed_end {
+            self.flush_up_to(trimmed_end, messages);
+        }
+    }
+
+    fn flush_up_to(&mut self, end: usize, messages: &mut Vec<ChatMessage>) {
+        let pending = self.content[self.rendered_len..end].to_owned();
+        self.rendered_len = end;
+
+        match self.message_idx {
+            None => {
+                let msg = match self.kind {
+                    BufferKind::Reasoning => ChatMessage::Reasoning { content: pending },
+                    BufferKind::Assistant => ChatMessage::Assistant { content: pending },
+                };
+                messages.push(msg);
+                self.message_idx = Some(messages.len() - 1);
+            }
+            Some(idx) => match (&self.kind, messages.get_mut(idx)) {
+                (BufferKind::Reasoning, Some(ChatMessage::Reasoning { content }))
+                | (BufferKind::Assistant, Some(ChatMessage::Assistant { content })) => {
+                    content.push_str(&pending);
+                }
+                _ => {}
+            },
+        }
     }
 }
