@@ -51,8 +51,8 @@ pub fn highlight_matched_chars<'a>(
     Line::from(spans)
 }
 
-/// Returns the number of visual lines a string occupies when wrapped at `text_width` columns.
-pub fn wrapped_line_count(value: &str, text_width: usize) -> usize {
+/// Returns the number of visual lines a string occupies when wrapped at `width` columns.
+pub fn wrapped_line_count(value: &str, width: usize) -> usize {
     if value.is_empty() {
         return 1;
     }
@@ -64,7 +64,7 @@ pub fn wrapped_line_count(value: &str, text_width: usize) -> usize {
             if char_count == 0 {
                 1
             } else {
-                char_count.div_ceil(text_width)
+                char_count.div_ceil(width)
             }
         })
         .sum::<usize>()
@@ -75,6 +75,19 @@ pub fn wrapped_line_count(value: &str, text_width: usize) -> usize {
 mod tests {
     use super::*;
     use ratatui::style::Color;
+    use rstest::rstest;
+
+    #[rstest]
+    #[case("", 80, 1)]
+    #[case("hello", 80, 1)]
+    #[case("hello", 5, 1)]
+    #[case("hello world", 5, 3)]
+    #[case("hello\nworld", 80, 2)]
+    #[case("hello\n\nworld", 80, 3)]
+    #[case("hello\nworld!", 5, 3)]
+    fn wrapped_line_count_cases(#[case] text: &str, #[case] width: usize, #[case] expected: usize) {
+        assert_eq!(wrapped_line_count(text, width), expected);
+    }
 
     #[test]
     fn highlight_no_indices_produces_single_base_span() {

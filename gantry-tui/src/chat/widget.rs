@@ -1,6 +1,7 @@
 use gantry_core::DiffHunk;
 
 use crate::chat::{ChatState, state::ChatMessage};
+use crate::utils::wrapped_line_count;
 use ratatui::{
     buffer::Buffer,
     layout::{Margin, Rect},
@@ -31,19 +32,7 @@ impl<'a> ChatWidget<'a> {
         if width == 0 {
             return 1;
         }
-        let width = width as usize;
-        let mut line_count = 0usize;
-
-        for line in content.split('\n') {
-            let char_count = line.chars().count();
-            line_count += if char_count == 0 {
-                1
-            } else {
-                char_count.div_ceil(width)
-            };
-        }
-
-        line_count.max(1) as u16
+        wrapped_line_count(content, width as usize) as u16
     }
 }
 
