@@ -95,11 +95,11 @@ impl Widget for CommandPickerWidget<'_> {
                 let is_selected = i == selected;
                 let cmd = &picker.items[entry.idx];
                 let name_line = if is_selected {
-                    Line::from(Span::styled(cmd.name.as_str(), STYLE_SELECTED))
+                    Line::from(Span::styled(cmd.name(), STYLE_SELECTED))
                 } else {
-                    highlight_matched_chars(&cmd.name, &entry.indices, STYLE_TEXT, STYLE_MATCH)
+                    highlight_matched_chars(cmd.name(), &entry.indices, STYLE_TEXT, STYLE_MATCH)
                 };
-                let desc_line = Line::from(Span::styled(cmd.description.as_str(), STYLE_DESC));
+                let desc_line = Line::from(Span::styled(cmd.description(), STYLE_DESC));
                 vec![name_line, desc_line]
             })
             .collect();

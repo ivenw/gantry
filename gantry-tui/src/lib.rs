@@ -5,7 +5,6 @@ mod app_statusline;
 mod attachment_picker;
 mod chat;
 mod command_picker;
-mod commands;
 pub mod effects;
 mod input;
 mod message;

@@ -591,7 +591,7 @@ fn handle_key_command_picker(model: &mut Model, key: crossterm::event::KeyEvent)
                 None
             };
             model.overlay = InputOverlay::Input(Mode::Normal);
-            return selected.map(|cmd| Cmd::RunCommand(cmd.command));
+            return selected.map(Cmd::RunCommand);
         }
         _ => {}
     }
@@ -698,7 +698,7 @@ fn handle_key_normal(
         }
         KeyCode::Char(' ') => {
             model.overlay =
-                InputOverlay::CommandPicker(crate::command_picker::CommandPickerState::new_all());
+                InputOverlay::CommandPicker(crate::command_picker::CommandPickerState::new());
             None
         }
         KeyCode::Char('j') | KeyCode::Down => {

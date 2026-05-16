@@ -429,7 +429,7 @@ impl Model {
         let display = self.input.raw_display(&self.project_path);
         if display.starts_with('/') {
             let filter = display.strip_prefix('/').unwrap_or("");
-            let has_match = crate::commands::KnownCommand::ALL
+            let has_match = crate::command_picker::KnownCommand::ALL
                 .iter()
                 .any(|k| k.name().starts_with(filter));
             if !has_match {

@@ -1,12 +1,12 @@
+use crate::model::SessionStats;
 use gantry_core::{
     AppEvent, ChatStreamItem, ContextWindow, InputToken, ModelSelection, PathSearchResult,
     ProviderAlias, ProviderConfig, SessionId, SessionInfo, SessionTree, SkillSearchResult,
     StoredCredential, StreamingError, Usage,
 };
-use crate::model::SessionStats;
 
 use crate::chat::ChatMessage;
-use crate::commands::KnownCommand;
+use crate::command_picker::KnownCommand;
 
 /// Pure model-update messages handled by `update()`.
 ///
