@@ -9,7 +9,7 @@ use ratatui::{
 };
 
 use crate::attachment_picker::{AttachmentPickerKind, AttachmentPickerState};
-use crate::picker::highlight_matched_chars;
+use crate::utils::highlight_matched_chars;
 use crate::widgets::table::TableWidget;
 
 const STYLE_TEXT: Style = Style::new().fg(Color::White);

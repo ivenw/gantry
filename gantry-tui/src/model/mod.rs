@@ -273,14 +273,7 @@ impl Model {
         let mut picker = ModelPickerState::new(models, active_selection);
         // Pre-select the currently active model if it is in the list.
         if let Some(active) = active_ref {
-            if let Some(idx) = picker
-                .picker
-                .filtered
-                .iter()
-                .position(|e| picker.picker.items[e.idx].selection == active)
-            {
-                picker.picker.selected_idx = idx;
-            }
+            picker.picker.set_selected(|e| e.selection == active);
         }
         self.overlay = InputOverlay::ModelPicker(picker);
     }
@@ -304,14 +297,9 @@ impl Model {
     ) {
         let mut state = SessionPickerState::new(sessions, active_session_id);
         // Pre-select the active session (last match, so the most recent active session wins).
-        if let Some(idx) = state
+        state
             .picker
-            .filtered
-            .iter()
-            .rposition(|e| state.picker.items[e.idx].id == state.active_session_id)
-        {
-            state.picker.selected_idx = idx;
-        }
+            .set_selected_last(|s| s.id == state.active_session_id);
         self.overlay = InputOverlay::SessionPicker(state);
     }
 

@@ -6,10 +6,10 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::picker::highlight_matched_chars;
 use crate::session_picker::SessionPickerState;
 use crate::theme;
 use crate::theme::title;
+use crate::utils::highlight_matched_chars;
 use crate::widgets::table::TableWidget;
 
 const MAX_VISIBLE: usize = 10;
@@ -35,14 +35,14 @@ impl<'a> SessionPickerWidget<'a> {
 
     /// Returns the total height needed to render the sessions list, capped at `MAX_VISIBLE` content rows.
     pub fn height(&self) -> u16 {
-        CHROME_HEIGHT + self.state.picker.filtered.len().clamp(1, MAX_VISIBLE) as u16
+        CHROME_HEIGHT + self.state.picker.matched_count().clamp(1, MAX_VISIBLE) as u16
     }
 }
 
 impl Widget for SessionPickerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let picker = &self.state.picker;
-        let filtered = &picker.filtered;
+        let count = picker.matched_count();
 
         let block = Block::default()
             .title(title("SESSIONS"))
@@ -56,7 +56,7 @@ impl Widget for SessionPickerWidget<'_> {
             return;
         }
 
-        let list_height = filtered.len().clamp(1, MAX_VISIBLE) as u16;
+        let list_height = count.clamp(1, MAX_VISIBLE) as u16;
         let [prompt_area, _, list_area, counter_area] = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -67,15 +67,14 @@ impl Widget for SessionPickerWidget<'_> {
             ])
             .areas(inner);
 
-        Line::from(format!("> {}", picker.filter)).render(prompt_area, buf);
+        Line::from(format!("> {}", picker.filter())).render(prompt_area, buf);
 
-        if filtered.is_empty() {
+        if count == 0 {
             Line::styled("No matches", Style::default().fg(Color::DarkGray)).render(list_area, buf);
             return;
         }
 
-        let selected = picker.selected_idx;
-        let count = filtered.len();
+        let selected = picker.cursor();
         let max_visible = (list_area.height as usize).min(MAX_VISIBLE);
 
         // Bottom-anchor scroll: the selected item sits at the bottom of the visible window
@@ -86,18 +85,17 @@ impl Widget for SessionPickerWidget<'_> {
             .min(count.saturating_sub(max_visible));
 
         // name column (marker + name) + gap + age column (last, fills remainder)
-        let rows: Vec<Vec<Line>> = filtered
-            .iter()
+        let rows: Vec<Vec<Line>> = picker
+            .matched_items()
             .enumerate()
             .skip(start)
             .take(max_visible)
-            .map(|(i, entry)| {
-                let session = &picker.items[entry.idx];
+            .map(|(i, matched)| {
                 let is_selected = i == selected;
-                let is_active = session.id == self.state.active_session_id;
+                let is_active = matched.item.id == self.state.active_session_id;
 
-                let name = &session.first_message;
-                let age = relative_time(&session.timestamp);
+                let name = &matched.item.first_message;
+                let age = relative_time(&matched.item.timestamp);
 
                 let name_line = if is_selected {
                     let marker = if is_active { "> " } else { "  " };
@@ -113,8 +111,13 @@ impl Widget for SessionPickerWidget<'_> {
                 } else {
                     let mut spans = vec![Span::styled("  ", STYLE_TEXT)];
                     spans.extend(
-                        highlight_matched_chars(name, &entry.indices, STYLE_TEXT, STYLE_MATCH)
-                            .spans,
+                        highlight_matched_chars(
+                            name,
+                            matched.match_positions,
+                            STYLE_TEXT,
+                            STYLE_MATCH,
+                        )
+                        .spans,
                     );
                     Line::from(spans)
                 };

@@ -265,8 +265,16 @@ fn handle_key_model_picker(model: &mut Model, key: crossterm::event::KeyEvent) -
     match key.code {
         KeyCode::Up => mv.picker.move_up(),
         KeyCode::Down => mv.picker.move_down(),
-        KeyCode::Backspace => mv.pop_filter(),
-        KeyCode::Char(c) => mv.push_filter(c),
+        KeyCode::Backspace => {
+            let mut f = mv.picker.filter().to_owned();
+            f.pop();
+            mv.picker.set_filter(&f);
+        }
+        KeyCode::Char(c) => {
+            let mut f = mv.picker.filter().to_owned();
+            f.push(c);
+            mv.picker.set_filter(&f);
+        }
         _ => {}
     }
     None
@@ -544,8 +552,16 @@ fn handle_key_sessions_view(model: &mut Model, key: crossterm::event::KeyEvent) 
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => sv.picker.move_up(),
         KeyCode::Down | KeyCode::Char('j') => sv.picker.move_down(),
-        KeyCode::Backspace => sv.pop_filter(),
-        KeyCode::Char(c) => sv.push_filter(c),
+        KeyCode::Backspace => {
+            let mut f = sv.picker.filter().to_owned();
+            f.pop();
+            sv.picker.set_filter(&f);
+        }
+        KeyCode::Char(c) => {
+            let mut f = sv.picker.filter().to_owned();
+            f.push(c);
+            sv.picker.set_filter(&f);
+        }
         _ => {}
     }
     None
@@ -601,8 +617,16 @@ fn handle_key_command_picker(model: &mut Model, key: crossterm::event::KeyEvent)
     match key.code {
         KeyCode::Up => picker.picker.move_up(),
         KeyCode::Down => picker.picker.move_down(),
-        KeyCode::Char(c) => picker.push_filter(c),
-        KeyCode::Backspace => picker.pop_filter(),
+        KeyCode::Char(c) => {
+            let mut f = picker.picker.filter().to_owned();
+            f.push(c);
+            picker.picker.set_filter(&f);
+        }
+        KeyCode::Backspace => {
+            let mut f = picker.picker.filter().to_owned();
+            f.pop();
+            picker.picker.set_filter(&f);
+        }
         _ => {}
     }
     None

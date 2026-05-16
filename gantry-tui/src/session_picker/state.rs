@@ -28,16 +28,4 @@ impl SessionPickerState {
             name_col_width,
         }
     }
-
-    /// Appends a character to the filter and recomputes filtered results.
-    pub fn push_filter(&mut self, c: char) {
-        self.picker.filter.push(c);
-        self.picker.refilter(|s| s.first_message.as_str());
-    }
-
-    /// Removes the last character from the filter and recomputes filtered results.
-    pub fn pop_filter(&mut self) {
-        self.picker.filter.pop();
-        self.picker.refilter(|s| s.first_message.as_str());
-    }
 }

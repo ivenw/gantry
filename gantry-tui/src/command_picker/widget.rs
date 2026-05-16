@@ -6,8 +6,8 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::picker::highlight_matched_chars;
 use crate::theme;
+use crate::utils::highlight_matched_chars;
 use crate::widgets::table::TableWidget;
 use crate::{command_picker::CommandPickerState, theme::title};
 
@@ -36,14 +36,14 @@ impl<'a> CommandPickerWidget<'a> {
 
     /// Returns the total height needed to render the picker.
     pub fn height(&self) -> u16 {
-        CHROME_HEIGHT + self.state.picker.filtered.len().clamp(1, MAX_VISIBLE) as u16
+        CHROME_HEIGHT + self.state.picker.matched_count().clamp(1, MAX_VISIBLE) as u16
     }
 }
 
 impl Widget for CommandPickerWidget<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let picker = &self.state.picker;
-        let filtered = &picker.filtered;
+        let count = picker.matched_count();
 
         let block = Block::default()
             .title(title("COMMANDS"))
@@ -57,7 +57,7 @@ impl Widget for CommandPickerWidget<'_> {
             return;
         }
 
-        let list_height = filtered.len().clamp(1, MAX_VISIBLE) as u16;
+        let list_height = count.clamp(1, MAX_VISIBLE) as u16;
         let [prompt_area, _, list_area, counter_area] = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -68,15 +68,14 @@ impl Widget for CommandPickerWidget<'_> {
             ])
             .areas(inner);
 
-        Line::from(format!("> {}", picker.filter)).render(prompt_area, buf);
+        Line::from(format!("> {}", picker.filter())).render(prompt_area, buf);
 
-        if filtered.is_empty() {
+        if count == 0 {
             Line::styled("No matches", Style::default().fg(Color::DarkGray)).render(list_area, buf);
             return;
         }
 
-        let selected = picker.selected_idx;
-        let count = filtered.len();
+        let selected = picker.cursor();
         let max_visible = (list_area.height as usize).min(MAX_VISIBLE);
 
         // Bottom-anchor scroll: the selected item sits at the bottom of the visible window
@@ -86,20 +85,24 @@ impl Widget for CommandPickerWidget<'_> {
             .saturating_sub(max_visible - 1)
             .min(count.saturating_sub(max_visible));
 
-        let rows: Vec<Vec<Line>> = filtered
-            .iter()
+        let rows: Vec<Vec<Line>> = picker
+            .matched_items()
             .enumerate()
             .skip(start)
             .take(max_visible)
-            .map(|(i, entry)| {
+            .map(|(i, matched)| {
                 let is_selected = i == selected;
-                let cmd = &picker.items[entry.idx];
                 let name_line = if is_selected {
-                    Line::from(Span::styled(cmd.name(), STYLE_SELECTED))
+                    Line::from(Span::styled(matched.item.name(), STYLE_SELECTED))
                 } else {
-                    highlight_matched_chars(cmd.name(), &entry.indices, STYLE_TEXT, STYLE_MATCH)
+                    highlight_matched_chars(
+                        matched.item.name(),
+                        matched.match_positions,
+                        STYLE_TEXT,
+                        STYLE_MATCH,
+                    )
                 };
-                let desc_line = Line::from(Span::styled(cmd.description(), STYLE_DESC));
+                let desc_line = Line::from(Span::styled(matched.item.description(), STYLE_DESC));
                 vec![name_line, desc_line]
             })
             .collect();
