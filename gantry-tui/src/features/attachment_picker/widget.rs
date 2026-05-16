@@ -8,7 +8,7 @@ use ratatui::{
     widgets::Widget,
 };
 
-use crate::features::attachment_picker::{AttachmentPickerKind, AttachmentPickerState};
+use super::{AttachmentPickerKind, AttachmentPickerState};
 use crate::utils::highlight_matched_chars;
 use crate::widgets::table::TableWidget;
 

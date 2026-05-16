@@ -5,6 +5,7 @@ use gantry_core::{
 };
 
 use super::{InputOverlay, Mode, Model};
+use crate::features::command_picker::CommandPickerState;
 use crate::features::input::prev_char_boundary;
 use crate::features::provider_config::{
     CopilotAuthKind, ProviderWizard, ProvidersSubView, WizardProviderKind,
@@ -721,9 +722,7 @@ fn handle_key_normal(
             None
         }
         KeyCode::Char(' ') => {
-            model.overlay = InputOverlay::CommandPicker(
-                crate::features::command_picker::CommandPickerState::new(),
-            );
+            model.overlay = InputOverlay::CommandPicker(CommandPickerState::new());
             None
         }
         KeyCode::Char('j') | KeyCode::Down => {

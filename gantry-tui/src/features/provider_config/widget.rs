@@ -5,7 +5,7 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Widget},
 };
 
-use crate::features::provider_config::{
+use super::{
     CopilotAuthKind, ProviderWizard, ProvidersConfigState, ProvidersSubView, WizardProviderKind,
 };
 

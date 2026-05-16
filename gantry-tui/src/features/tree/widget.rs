@@ -5,7 +5,7 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::features::tree::{TreeState, branch_rows};
+use super::{TreeState, branch_rows};
 
 pub struct TreeWidget<'a> {
     state: &'a TreeState,

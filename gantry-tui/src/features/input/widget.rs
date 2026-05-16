@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::features::input::InputState;
+use super::InputState;
 use crate::model::Mode;
 use crate::theme;
 use crate::utils::wrapped_line_count;

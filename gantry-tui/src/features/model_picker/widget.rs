@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::features::model_picker::{ModelPickerState, format_context_length};
+use super::{ModelPickerState, format_context_length};
 use crate::theme;
 use crate::theme::title;
 use crate::utils::highlight_matched_chars;

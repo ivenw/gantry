@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::features::session_picker::SessionPickerState;
+use super::SessionPickerState;
 use crate::theme;
 use crate::theme::title;
 use crate::utils::highlight_matched_chars;

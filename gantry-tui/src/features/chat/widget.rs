@@ -1,6 +1,6 @@
 use gantry_core::DiffHunk;
 
-use crate::features::chat::{ChatState, state::ChatMessage};
+use super::{ChatMessage, ChatState};
 use crate::utils::wrapped_line_count;
 use ratatui::{
     buffer::Buffer,

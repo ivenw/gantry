@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use crate::features::command_picker::CommandPickerState;
+use super::CommandPickerState;
 use crate::theme;
 use crate::theme::title;
 use crate::utils::highlight_matched_chars;
