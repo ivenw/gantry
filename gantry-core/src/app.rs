@@ -45,6 +45,14 @@ pub struct App {
     pub(crate) last_usage: Option<RigUsage>,
     /// Character counts per component, captured just before the most recent request.
     pub(crate) last_char_counts: Option<CharCounts>,
+    // TODO: Should we even keep the consumption here? For the live tracker the TUI updates its
+    // own usage state over a running session. On session reload the usage can also be got from
+    // the session itself.
+    // Right now the stat function in the TUI uses this but there is not really a reason why the
+    // TUI wouldn't use its own tracked state. Keeping this here only makes sense if the TUI
+    // doesn't track its own usage state and the live tracker gets update through some push pub sub
+    // pattern. Which is maybe not a terrible idea either. When it comes to state of the agent loop
+    // I would like this app struct to be the single source of truth.
     /// Accumulated token consumption across all nodes in the active session.
     total_consumption: Usage,
     event_tx: broadcast::Sender<AppEvent>,
@@ -327,17 +335,26 @@ impl App {
     }
 
     /// Persists a completed assistant turn and updates token usage and consumption totals.
-    pub fn commit_response(&mut self, text: String, usage: Option<RigUsage>) {
-        if let Some(u) = usage {
-            let consumption = Usage::from(&u);
-            if !text.is_empty() {
-                let _ = self
-                    .append_message_with_usage(Message::assistant(text), Some(consumption.clone()));
+    ///
+    /// Appends all messages in order. Usage is attached to the last message, which must be an
+    /// assistant message — this invariant is enforced by [`CommittingStream`], which always
+    /// flushes any open assistant content as the final entry before sending the commit payload.
+    pub fn commit_response(&mut self, messages: Vec<Message>, usage: Option<RigUsage>) {
+        if messages.is_empty() {
+            return;
+        }
+        let consumption = usage.as_ref().map(Usage::from);
+        let last_idx = messages.len() - 1;
+        for (i, msg) in messages.into_iter().enumerate() {
+            if i == last_idx {
+                let _ = self.append_message_with_usage(msg, consumption.clone());
+            } else {
+                let _ = self.append_message(msg);
             }
-            self.total_consumption += consumption;
+        }
+        if let Some(u) = usage {
+            self.total_consumption += Usage::from(&u);
             self.last_usage = Some(u);
-        } else if !text.is_empty() {
-            let _ = self.append_message(Message::assistant(text));
         }
     }
 

@@ -78,6 +78,11 @@ impl Message {
         }
     }
 
+    /// Creates an assistant message from structured content.
+    pub fn assistant_content(content: OneOrMany<AssistantContent>) -> Self {
+        Self::Assistant { id: None, content }
+    }
+
     /// Creates a user message wrapping a tool result.
     pub fn tool_result(call_id: impl Into<String>, output: impl Into<String>) -> Self {
         Self::User {

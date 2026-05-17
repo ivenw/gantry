@@ -8,7 +8,10 @@ use async_stream::stream;
 use futures::Stream;
 use rig::agent::{FinalResponse, MultiTurnStreamItem, StreamingError};
 use rig::completion::Usage as RigUsage;
-use rig::message::{Reasoning, ToolCall, ToolFunction};
+use rig::message::{
+    AssistantContent, Reasoning, ReasoningContent, ToolCall, ToolFunction, UserContent,
+};
+use rig::one_or_many::OneOrMany;
 use rig::streaming::{StreamedAssistantContent, StreamedUserContent};
 use tokio::sync::Mutex;
 use tokio::sync::oneshot;
@@ -16,6 +19,7 @@ use tokio::time::sleep;
 
 use crate::app::App;
 use crate::input::{InputToken, build_user_message};
+use crate::message::Message;
 use crate::metrics::CharCounts;
 use crate::provider::agent::ChatStream;
 
@@ -37,11 +41,219 @@ impl StreamingResponse {
     }
 }
 
-/// Produces a fake streaming response for exercising the TUI rendering pipeline.
+/// Wraps a [`ChatStream`], accumulating structured assistant content and tool results into a
+/// sequence of [`Message`]s. On drop — whether the stream was fully consumed or interrupted —
+/// the accumulated messages are sent through a oneshot channel so the caller can persist them.
 ///
-/// Emits a scripted sequence of reasoning tokens, text, two tool calls with their
-/// results, and a final text turn, with realistic per-item delays to simulate token
-/// streaming and tool execution latency.
+/// The accumulator mirrors rig's conversation structure: assistant content (text, reasoning,
+/// tool calls) is collected into a single `Message::Assistant`. When a tool result arrives, the
+/// in-progress assistant message is flushed and a `Message::User { ToolResult }` is appended,
+/// then a fresh assistant message begins. This preserves the invariant that tool results are
+/// recorded as user messages, which is required for replaying history to the agent correctly.
+///
+/// Reasoning chunks are concatenated into a single [`AssistantContent::Reasoning`] per
+/// contiguous reasoning block. Partial content at interrupt time is flushed as-is — dangling
+/// tool calls (no result yet) are acceptable and recoverable.
+///
+/// Usage from the [`FinalResponse`] is attached to the last message in the chain, which is
+/// always an assistant message.
+struct CommittingStream {
+    inner: ChatStream,
+    commit_tx: Option<oneshot::Sender<(Vec<Message>, Option<RigUsage>)>>,
+    /// Completed messages (assistant + tool result pairs) from earlier in the turn.
+    completed: Vec<Message>,
+    /// Assistant content items being assembled for the current assistant message.
+    current_assistant: Vec<AssistantContent>,
+    usage: Option<RigUsage>,
+}
+
+impl CommittingStream {
+    fn new(
+        inner: ChatStream,
+        commit_tx: oneshot::Sender<(Vec<Message>, Option<RigUsage>)>,
+    ) -> Self {
+        Self {
+            inner,
+            commit_tx: Some(commit_tx),
+            completed: Vec::new(),
+            current_assistant: Vec::new(),
+            usage: None,
+        }
+    }
+
+    /// Appends a text chunk to the current assistant message, merging into an existing
+    /// trailing `Text` item if present to avoid redundant content items.
+    fn push_text(&mut self, text: &str) {
+        if let Some(AssistantContent::Text(t)) = self.current_assistant.last_mut() {
+            t.text.push_str(text);
+        } else {
+            self.current_assistant.push(AssistantContent::text(text));
+        }
+    }
+
+    /// Appends a reasoning chunk to the current assistant message, merging into an existing
+    /// trailing `Reasoning` item if present.
+    fn push_reasoning(&mut self, incoming: &Reasoning) {
+        let text: String = incoming
+            .content
+            .iter()
+            .filter_map(|c| {
+                if let ReasoningContent::Text { text, .. } = c {
+                    Some(text.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        if text.is_empty() {
+            return;
+        }
+        if let Some(AssistantContent::Reasoning(r)) = self.current_assistant.last_mut() {
+            r.content.push(ReasoningContent::Text {
+                text,
+                signature: None,
+            });
+        } else {
+            self.current_assistant
+                .push(AssistantContent::Reasoning(Reasoning::new(&text)));
+        }
+    }
+
+    /// Flushes the current in-progress assistant content into `completed` as a
+    /// `Message::Assistant`, then appends the tool result as a `Message::User`.
+    fn flush_assistant_and_push_tool_result(&mut self, result: rig::message::ToolResult) {
+        if !self.current_assistant.is_empty() {
+            let content = OneOrMany::many(std::mem::take(&mut self.current_assistant))
+                .expect("current_assistant is non-empty");
+            self.completed.push(Message::assistant_content(content));
+        }
+        self.completed.push(Message::User {
+            sender: None,
+            content: OneOrMany::one(UserContent::ToolResult(result)),
+        });
+    }
+
+    /// Assembles and sends the final message sequence through the oneshot channel.
+    ///
+    /// Any remaining assistant content is flushed as the last message, and usage is
+    /// attached to it — enforcing the invariant that usage always lands on the final
+    /// assistant message.
+    fn send_commit(&mut self) {
+        let Some(tx) = self.commit_tx.take() else {
+            return;
+        };
+        if !self.current_assistant.is_empty() {
+            let content = OneOrMany::many(std::mem::take(&mut self.current_assistant))
+                .expect("current_assistant is non-empty");
+            self.completed.push(Message::assistant_content(content));
+        }
+        let messages = std::mem::take(&mut self.completed);
+        let usage = self.usage.take();
+        let _ = tx.send((messages, usage));
+    }
+}
+
+impl Drop for CommittingStream {
+    fn drop(&mut self) {
+        self.send_commit();
+    }
+}
+
+impl Stream for CommittingStream {
+    type Item = Result<MultiTurnStreamItem<()>, StreamingError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        match Pin::new(&mut self.inner).poll_next(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Some(item)) => {
+                match &item {
+                    Ok(MultiTurnStreamItem::StreamAssistantItem(
+                        StreamedAssistantContent::Text(t),
+                    )) => {
+                        self.push_text(&t.text);
+                    }
+                    Ok(MultiTurnStreamItem::StreamAssistantItem(
+                        StreamedAssistantContent::Reasoning(r),
+                    )) => {
+                        let r = r.clone();
+                        self.push_reasoning(&r);
+                    }
+                    Ok(MultiTurnStreamItem::StreamAssistantItem(
+                        StreamedAssistantContent::ToolCall { tool_call, .. },
+                    )) => {
+                        self.current_assistant
+                            .push(AssistantContent::ToolCall(tool_call.clone()));
+                    }
+                    Ok(MultiTurnStreamItem::StreamUserItem(StreamedUserContent::ToolResult {
+                        tool_result,
+                        ..
+                    })) => {
+                        let result = tool_result.clone();
+                        self.flush_assistant_and_push_tool_result(result);
+                    }
+                    Ok(MultiTurnStreamItem::FinalResponse(f)) => {
+                        self.usage = Some(f.usage());
+                    }
+                    _ => {}
+                }
+                Poll::Ready(Some(item))
+            }
+            Poll::Ready(None) => {
+                self.send_commit();
+                Poll::Ready(None)
+            }
+        }
+    }
+}
+
+/// Expands `tokens` into a user message, persists it, then streams the agent response.
+///
+/// Returns a [`StreamingResponse`]. The caller must call [`StreamingResponse::commit`] after
+/// the stream is done or abandoned to persist the assistant reply and update token usage.
+pub async fn stream_message(
+    app: Arc<Mutex<App>>,
+    tokens: Vec<InputToken>,
+) -> Result<StreamingResponse> {
+    let mut guard = app.lock().await;
+    let message = build_user_message(tokens, &guard.project_path).await?;
+    guard.append_message(message)?;
+    let history: Vec<rig::message::Message> = guard.history().into_iter().map(Into::into).collect();
+    guard.last_char_counts = Some(CharCounts::new(&guard.system_prompt, &history));
+    let selection = guard
+        .selection
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("no active model selection"))?;
+    let system_prompt = guard.system_prompt.to_string();
+    let tools = guard.tools();
+    let agent = guard
+        .registry
+        .agent(&selection, Some(&system_prompt), tools)?;
+    let Some(prompt) = history.last().cloned() else {
+        anyhow::bail!("no messages to stream");
+    };
+    let history = history[..history.len() - 1].to_vec();
+    drop(guard);
+    let (commit_tx, commit_rx) = oneshot::channel::<(Vec<Message>, Option<RigUsage>)>();
+    let inner = agent.stream_chat(prompt, history).await;
+    let stream = Box::pin(CommittingStream::new(inner, commit_tx));
+    let commit_future = async move {
+        let Ok((messages, usage)) = commit_rx.await else {
+            return;
+        };
+        app.lock().await.commit_response(messages, usage);
+    };
+    Ok(StreamingResponse {
+        stream,
+        commit_future: Box::pin(commit_future),
+    })
+}
+
+/// Produces a scripted streaming response for testing consumers of the streaming protocol.
+///
+/// Emits a sequence of reasoning tokens, text, tool calls with results, and a final text
+/// turn, with realistic per-item delays to simulate token streaming and tool execution
+/// latency. Useful for any client — TUI, RPC, or otherwise — that needs a predictable
+/// stream without hitting a real model.
 pub fn mock_stream_message(
     event_tx: tokio::sync::broadcast::Sender<crate::AppEvent>,
 ) -> StreamingResponse {
@@ -356,117 +568,12 @@ pub fn mock_stream_message(
     });
 
     // Use a no-op commit: nothing is persisted to session history.
-    let (commit_tx, _commit_rx) = oneshot::channel::<(String, Option<RigUsage>)>();
-    let buffering = Box::pin(BufferingStream::new(chat_stream, commit_tx));
+    let (commit_tx, _commit_rx) = oneshot::channel::<(Vec<Message>, Option<RigUsage>)>();
+    let committing = Box::pin(CommittingStream::new(chat_stream, commit_tx));
     let commit_future = async move {};
 
     StreamingResponse {
-        stream: buffering,
+        stream: committing,
         commit_future: Box::pin(commit_future),
-    }
-}
-
-/// Expands `tokens` into a user message, persists it, then streams the agent response.
-///
-/// Returns a [`StreamingResponse`]. The caller must call [`StreamingResponse::commit`] after
-/// the stream is done or abandoned to persist the assistant reply and update token usage.
-pub async fn stream_message(
-    app: Arc<Mutex<App>>,
-    tokens: Vec<InputToken>,
-) -> Result<StreamingResponse> {
-    let mut guard = app.lock().await;
-    let message = build_user_message(tokens, &guard.project_path).await?;
-    guard.append_message(message)?;
-    let history: Vec<rig::message::Message> = guard.history().into_iter().map(Into::into).collect();
-    guard.last_char_counts = Some(CharCounts::new(&guard.system_prompt, &history));
-    let selection = guard
-        .selection
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("no active model selection"))?;
-    let system_prompt = guard.system_prompt.to_string();
-    let tools = guard.tools();
-    let agent = guard
-        .registry
-        .agent(&selection, Some(&system_prompt), tools)?;
-    let Some(prompt) = history.last().cloned() else {
-        anyhow::bail!("no messages to stream");
-    };
-    let history = history[..history.len() - 1].to_vec();
-    drop(guard);
-    let (commit_tx, commit_rx) = oneshot::channel::<(String, Option<RigUsage>)>();
-    let inner = agent.stream_chat(prompt, history).await;
-    let stream = Box::pin(BufferingStream::new(inner, commit_tx));
-    let commit_future = async move {
-        let Ok((text, usage)) = commit_rx.await else {
-            return;
-        };
-        app.lock().await.commit_response(text, usage);
-    };
-    Ok(StreamingResponse {
-        stream,
-        commit_future: Box::pin(commit_future),
-    })
-}
-
-/// Wraps a [`ChatStream`], accumulating streamed text and usage. On drop (whether the stream
-/// was fully consumed or interrupted), sends the buffer through a oneshot channel so the
-/// caller's commit future can persist the assistant reply.
-struct BufferingStream {
-    inner: ChatStream,
-    commit_tx: Option<oneshot::Sender<(String, Option<RigUsage>)>>,
-    buffer: String,
-    usage: Option<RigUsage>,
-}
-
-impl BufferingStream {
-    fn new(inner: ChatStream, commit_tx: oneshot::Sender<(String, Option<RigUsage>)>) -> Self {
-        Self {
-            inner,
-            commit_tx: Some(commit_tx),
-            buffer: String::new(),
-            usage: None,
-        }
-    }
-
-    fn send_commit(&mut self) {
-        if let Some(tx) = self.commit_tx.take() {
-            let text = std::mem::take(&mut self.buffer);
-            let usage = self.usage.take();
-            let _ = tx.send((text, usage));
-        }
-    }
-}
-
-impl Drop for BufferingStream {
-    fn drop(&mut self) {
-        self.send_commit();
-    }
-}
-
-impl Stream for BufferingStream {
-    type Item = Result<MultiTurnStreamItem<()>, StreamingError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match Pin::new(&mut self.inner).poll_next(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Some(item)) => {
-                match &item {
-                    Ok(MultiTurnStreamItem::StreamAssistantItem(
-                        StreamedAssistantContent::Text(t),
-                    )) => {
-                        self.buffer.push_str(&t.text);
-                    }
-                    Ok(MultiTurnStreamItem::FinalResponse(f)) => {
-                        self.usage = Some(f.usage());
-                    }
-                    _ => {}
-                }
-                Poll::Ready(Some(item))
-            }
-            Poll::Ready(None) => {
-                self.send_commit();
-                Poll::Ready(None)
-            }
-        }
     }
 }
