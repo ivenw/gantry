@@ -45,14 +45,6 @@ pub struct App {
     pub(crate) last_usage: Option<RigUsage>,
     /// Character counts per component, captured just before the most recent request.
     pub(crate) last_char_counts: Option<CharCounts>,
-    // TODO: Should we even keep the consumption here? For the live tracker the TUI updates its
-    // own usage state over a running session. On session reload the usage can also be got from
-    // the session itself.
-    // Right now the stat function in the TUI uses this but there is not really a reason why the
-    // TUI wouldn't use its own tracked state. Keeping this here only makes sense if the TUI
-    // doesn't track its own usage state and the live tracker gets update through some push pub sub
-    // pattern. Which is maybe not a terrible idea either. When it comes to state of the agent loop
-    // I would like this app struct to be the single source of truth.
     /// Accumulated token consumption across all nodes in the active session.
     total_consumption: Usage,
     event_tx: broadcast::Sender<AppEvent>,
@@ -119,6 +111,8 @@ impl App {
     }
 
     /// Switches the active session to the one identified by `session_id`.
+    ///
+    /// Broadcasts `MetricsUpdated` after loading so subscribers receive the resumed session's metrics.
     pub fn resume_session(&mut self, session_id: &SessionId) -> Result<()> {
         let session_registry = FsSessionRegistry::new(&self.sessions_dir)?;
         let session = session_registry.load_session(session_id)?;
@@ -126,6 +120,11 @@ impl App {
         self.session = Some(session);
         self.last_usage = None;
         self.last_char_counts = None;
+        let (context_window, total_consumption) = self.metrics_snapshot();
+        let _ = self.event_tx.send(AppEvent::MetricsUpdated {
+            context_window,
+            total_consumption,
+        });
         Ok(())
     }
 
@@ -164,8 +163,7 @@ impl App {
             .append_message_with_usage(msg, usage)
     }
 
-    /// Returns the accumulated token consumption across all nodes in the active session.
-    pub fn total_consumption(&self) -> &Usage {
+    pub(crate) fn total_consumption(&self) -> &Usage {
         &self.total_consumption
     }
 
@@ -226,7 +224,7 @@ impl App {
     /// Returns a context window snapshot for the most recent request, or `None` if no request has
     /// been made yet or the model's max tokens are unknown. Combines last usage with the configured
     /// max tokens.
-    pub fn context_window(&self) -> Option<ContextWindow> {
+    pub(crate) fn context_window(&self) -> Option<ContextWindow> {
         let usage = self.last_usage.as_ref()?;
         let char_counts = self.last_char_counts.as_ref()?;
         if usage.total_tokens == 0 {
@@ -234,6 +232,24 @@ impl App {
         }
         let max_tokens = self.selection.as_ref().and_then(|s| s.context_length)?;
         Some(ContextWindow::new(usage, max_tokens, char_counts))
+    }
+
+    /// Returns a metrics snapshot derived from the current session state.
+    ///
+    /// Unlike [`context_window`], this builds the context window directly from the last branch
+    /// usage and a freshly computed [`CharCounts`], making it suitable for seeding metrics after
+    /// a session load or resume — before any streaming request has been made.
+    pub fn metrics_snapshot(&self) -> (Option<ContextWindow>, Usage) {
+        let total_consumption = self.total_consumption.clone();
+        let context_window = self.session.as_ref().and_then(|s| {
+            let rig_usage = rig::completion::Usage::from(s.last_branch_usage()?);
+            let max_tokens = self.selection.as_ref()?.context_length?;
+            let history: Vec<rig::message::Message> =
+                s.history().into_iter().map(Into::into).collect();
+            let char_counts = CharCounts::new(&self.system_prompt, &history);
+            Some(ContextWindow::new(&rig_usage, max_tokens, &char_counts))
+        });
+        (context_window, total_consumption)
     }
 
     /// Returns all configured providers.

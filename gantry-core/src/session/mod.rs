@@ -307,6 +307,14 @@ impl<H: SessionHistory> Session<H> {
         std::iter::once(root).chain(children)
     }
 
+    /// Returns the usage from the tip of the active branch, or `None` if the tip has no usage.
+    ///
+    /// Usage is only present on assistant nodes produced by a completed turn. A `None` return
+    /// means the session ended on a user message or an interrupted assistant turn.
+    pub fn last_branch_usage(&self) -> Option<&Usage> {
+        self.children.get(&self.current_leaf_id)?.usage.as_ref()
+    }
+
     /// Sums token consumption across all child nodes in the session, regardless of branch.
     pub fn total_consumption(&self) -> Usage {
         self.children.values().filter_map(|c| c.usage.clone()).fold(

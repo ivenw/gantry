@@ -6,8 +6,6 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Widget},
 };
 
-use super::UsageState;
-
 /// Colors for each usage bar segment, in render order: system prompt, messages, other, remaining.
 const COLOR_SYSTEM: Color = Color::Cyan;
 const COLOR_MESSAGES: Color = Color::Blue;
@@ -15,19 +13,18 @@ const COLOR_OTHER: Color = Color::Gray;
 const COLOR_REMAINING: Color = Color::DarkGray;
 
 pub struct UsageWidget<'a> {
-    state: &'a UsageState,
+    context_window: &'a ContextWindow,
 }
 
 impl<'a> UsageWidget<'a> {
-    /// Creates a new widget bound to the given usage view state.
-    pub fn new(state: &'a UsageState) -> Self {
-        Self { state }
+    /// Creates a new widget bound to the given context window.
+    pub fn new(context_window: &'a ContextWindow) -> Self {
+        Self { context_window }
     }
 
     /// Computes the total height needed to render the overlay at the given width.
     pub fn height(&self) -> u16 {
-        let cw = &self.state.context_window;
-        let agent_file_rows = cw.agent_files_tokens.len() as u16;
+        let agent_file_rows = self.context_window.agent_files_tokens.len() as u16;
         // borders(2) + bar(1) + blank(1) + header(1) + system_prompt(1) + base_prompt(1) + agent_files(N) + messages(1) + other(1) + remaining(1)
         2 + 1 + 1 + 1 + 1 + 1 + agent_file_rows + 1 + 1 + 1
     }
@@ -53,7 +50,7 @@ impl Widget for UsageWidget<'_> {
             return;
         }
 
-        let cw = &self.state.context_window;
+        let cw = self.context_window;
         let mut y = inner.y;
 
         render_bar(buf, inner.x, y, inner.width, cw);

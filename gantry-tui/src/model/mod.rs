@@ -359,16 +359,20 @@ impl Model {
         self.overlay = InputOverlay::Input(Mode::Normal);
     }
 
-    /// Completes the stream successfully, updating context window and usage.
+    /// Completes the stream successfully, scrolling chat to the bottom.
     ///
     /// No-ops if the stream was interrupted, so a late done signal does not overwrite
     /// the interrupted state.
-    pub fn complete_stream(&mut self, stats: SessionStats) {
+    pub fn complete_stream(&mut self) {
         if matches!(self.stream, StreamState::Interrupted { .. }) {
             return;
         }
         self.finish_stream();
         self.chat.scroll_to_bottom();
+    }
+
+    /// Updates the cached metrics snapshot from the most recently completed turn.
+    pub fn update_metrics(&mut self, stats: SessionStats) {
         self.session_stats = stats;
     }
 
@@ -458,7 +462,7 @@ pub enum InputOverlay {
     CommandPicker(crate::features::command_picker::CommandPickerState),
     ModelPicker(crate::features::model_picker::ModelPickerState),
     AttachmentPicker(crate::features::attachment_picker::AttachmentPickerState),
-    Usage(crate::features::usage::UsageState),
+    Usage(gantry_core::ContextWindow),
     SessionPicker(crate::features::session_picker::SessionPickerState),
     Tree(crate::features::tree::TreeState),
     ProviderConfig(crate::features::provider_config::ProvidersConfigState),

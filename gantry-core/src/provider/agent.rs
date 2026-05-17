@@ -30,6 +30,8 @@ pub type ChatStream = Pin<Box<dyn Stream<Item = Result<ChatStreamItem, Streaming
 
 // TODO: We may be able to keep a trait bound to R::token_usage() to get per turn token usage
 // updates.
+// TODO: When is Final produced on StreamedAssistantContent? After each complete turn or more
+// granular than that?
 /// Provider-agnostic stream item. The `Final` variant inside [`StreamedAssistantContent`] carries
 /// `()` because the raw provider chunk is not useful to callers; the assembled result is in
 /// [`MultiTurnStreamItem::FinalResponse`].

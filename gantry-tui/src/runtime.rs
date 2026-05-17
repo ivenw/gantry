@@ -52,9 +52,12 @@ impl Runtime {
                 app.selection().cloned(),
                 app.project_path.clone(),
                 app.project_name.clone(),
-                SessionStats {
-                    context_window: app.context_window(),
-                    usage: app.total_consumption().clone(),
+                {
+                    let (context_window, total_consumption) = app.metrics_snapshot();
+                    SessionStats {
+                        context_window,
+                        usage: total_consumption,
+                    }
                 },
                 app.subscribe_events(),
             )
@@ -251,7 +254,6 @@ impl Runtime {
 
         let tx = self.msg_tx.clone();
         let app = self.app.clone();
-        let app_ref = self.app.clone();
         let is_streaming = self.is_streaming.clone();
         let cancel = self.cancel_token.clone();
         cancel.store(false, Ordering::SeqCst);
@@ -282,15 +284,8 @@ impl Runtime {
                         }
                     }
                     response.commit().await;
-                    let stats = {
-                        let app = app_ref.lock().await;
-                        SessionStats {
-                            context_window: app.context_window(),
-                            usage: app.total_consumption().clone(),
-                        }
-                    };
                     is_streaming.store(false, Ordering::SeqCst);
-                    let _ = tx.send(Msg::StreamDone(stats).into()).await;
+                    let _ = tx.send(Msg::StreamDone.into()).await;
                 }
             }
         });
@@ -333,9 +328,7 @@ impl Runtime {
             }
             response.commit().await;
             is_streaming.store(false, Ordering::SeqCst);
-            let _ = tx
-                .send(Msg::StreamDone(SessionStats::default()).into())
-                .await;
+            let _ = tx.send(Msg::StreamDone.into()).await;
         });
         self.stream_task = Some(task);
     }
@@ -422,9 +415,10 @@ impl Runtime {
                 let (messages, session_stats) = self.rt.block_on(async {
                     let app = self.app.lock().await;
                     let messages = ChatMessage::messages_from(app.history());
+                    let (context_window, total_consumption) = app.metrics_snapshot();
                     let session_stats = SessionStats {
-                        context_window: app.context_window(),
-                        usage: app.total_consumption().clone(),
+                        context_window,
+                        usage: total_consumption,
                     };
                     (messages, session_stats)
                 });
@@ -526,30 +520,20 @@ impl Runtime {
                 self.spawn_mock_chat();
             }
             KnownCommand::Usage => {
-                let tx = self.msg_tx.clone();
-                let app = self.app.clone();
-                self.rt.spawn(async move {
-                    let guard = app.lock().await;
-                    match guard.context_window() {
-                        Some(cw) => {
-                            let consumption = guard.total_consumption().clone();
-                            drop(guard);
-                            let _ = tx.send(Msg::OpenUsageState(cw, consumption).into()).await;
-                        }
-                        None => {
-                            drop(guard);
-                            let _ = tx
-                                .send(
-                                    Msg::SetStatus(
-                                        "no context window data yet — send a message first"
-                                            .to_string(),
-                                    )
-                                    .into(),
-                                )
-                                .await;
-                        }
+                let stats = self.model.session_stats();
+                match stats.context_window.clone() {
+                    Some(cw) => {
+                        let _ = self.msg_tx.try_send(Msg::OpenUsageState(cw).into());
                     }
-                });
+                    None => {
+                        let _ = self.msg_tx.try_send(
+                            Msg::SetStatus(
+                                "no context window data yet — send a message first".to_string(),
+                            )
+                            .into(),
+                        );
+                    }
+                }
             }
         }
     }

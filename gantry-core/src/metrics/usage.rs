@@ -39,3 +39,15 @@ impl From<&RigUsage> for Usage {
         }
     }
 }
+
+impl From<&Usage> for RigUsage {
+    fn from(u: &Usage) -> Self {
+        Self {
+            input_tokens: u.input_tokens,
+            output_tokens: u.output_tokens,
+            cached_input_tokens: u.cached_input_tokens,
+            cache_creation_input_tokens: u.cache_creation_input_tokens,
+            total_tokens: u.input_tokens + u.output_tokens,
+        }
+    }
+}

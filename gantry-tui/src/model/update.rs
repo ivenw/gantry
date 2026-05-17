@@ -11,7 +11,6 @@ use crate::features::provider_config::{
     CopilotAuthKind, ProviderWizard, ProvidersSubView, WizardProviderKind,
 };
 use crate::features::tree::branch_rows;
-use crate::features::usage::UsageState;
 use crate::message::{Cmd, Msg};
 use crate::view::WidgetState;
 use gantry_core::SessionId;
@@ -39,9 +38,19 @@ pub fn update(model: &mut Model, view_state: &WidgetState, msg: Msg) -> Option<C
             model.chat.attach_edit_diff(&path, hunks);
             None
         }
+        Msg::AppEvent(AppEvent::MetricsUpdated {
+            context_window,
+            total_consumption,
+        }) => {
+            model.update_metrics(crate::model::SessionStats {
+                context_window,
+                usage: total_consumption,
+            });
+            None
+        }
         Msg::StreamItem(item) => handle_stream_item(model, item),
-        Msg::StreamDone(stats) => {
-            model.complete_stream(stats);
+        Msg::StreamDone => {
+            model.complete_stream();
             None
         }
         Msg::StreamError(e) => {
@@ -93,11 +102,8 @@ pub fn update(model: &mut Model, view_state: &WidgetState, msg: Msg) -> Option<C
             model.open_model_picker(models);
             None
         }
-        Msg::OpenUsageState(cw, consumption) => {
-            model.overlay = InputOverlay::Usage(UsageState {
-                context_window: cw,
-                consumption,
-            });
+        Msg::OpenUsageState(cw) => {
+            model.overlay = InputOverlay::Usage(cw);
             None
         }
         Msg::SetPathPickerResults(results) => {

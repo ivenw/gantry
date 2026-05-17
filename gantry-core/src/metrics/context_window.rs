@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use rig::completion::Usage;
 
 /// Snapshot of context window consumption for the most recent request.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ContextWindow {
     /// Maximum tokens the model's context window can hold.
     pub max_tokens: u32,

@@ -240,7 +240,13 @@ pub async fn stream_message(
         let Ok((messages, usage)) = commit_rx.await else {
             return;
         };
-        app.lock().await.commit_response(messages, usage);
+        let mut guard = app.lock().await;
+        guard.commit_response(messages, usage);
+        let event = crate::events::AppEvent::MetricsUpdated {
+            context_window: guard.context_window(),
+            total_consumption: guard.total_consumption().clone(),
+        };
+        let _ = guard.event_sender().send(event);
     };
     Ok(StreamingResponse {
         stream,

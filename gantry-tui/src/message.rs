@@ -2,7 +2,7 @@ use crate::model::SessionStats;
 use gantry_core::{
     AppEvent, ChatStreamItem, ContextWindow, InputToken, ModelSelection, PathSearchResult,
     ProviderAlias, ProviderConfig, SessionId, SessionInfo, SessionTree, SkillSearchResult,
-    StoredCredential, Usage,
+    StoredCredential,
 };
 
 use crate::features::chat::ChatMessage;
@@ -18,7 +18,7 @@ pub enum Msg {
 
     // Stream events from the agent
     StreamItem(ChatStreamItem),
-    StreamDone(SessionStats),
+    StreamDone,
 
     // Out-of-band tool events
     AppEvent(AppEvent),
@@ -47,7 +47,7 @@ pub enum Msg {
         session_stats: SessionStats,
     },
 
-    OpenUsageState(ContextWindow, Usage),
+    OpenUsageState(ContextWindow),
 
     // Providers overlay
     OpenProviderConfig(Vec<ProviderConfig>),
