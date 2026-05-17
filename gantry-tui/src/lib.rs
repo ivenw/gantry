@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-mod effects;
+pub mod effects;
 mod features;
 mod message;
 mod model;
