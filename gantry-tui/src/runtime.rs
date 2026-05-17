@@ -105,24 +105,33 @@ impl Runtime {
         let mut last_tick = Instant::now();
 
         loop {
-            if crossterm::event::poll(Duration::from_millis(10))? {
-                match crossterm::event::read()? {
-                    CrosstermEvent::Key(key)
-                        if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat =>
-                    {
-                        let _ = self.msg_tx.try_send(Msg::KeyEvent(key).into());
-                    }
-                    CrosstermEvent::Mouse(mouse) => {
-                        let delta: i32 = match mouse.kind {
-                            MouseEventKind::ScrollUp => 1,
-                            MouseEventKind::ScrollDown => -1,
-                            _ => 0,
-                        };
-                        if delta != 0 {
-                            let _ = self.msg_tx.try_send(Msg::ScrollChat(delta).into());
+            // Block until an event arrives or the tick deadline, whichever comes first.
+            let timeout = tick_interval
+                .checked_sub(last_tick.elapsed())
+                .unwrap_or(Duration::ZERO);
+            if crossterm::event::poll(timeout)? {
+                // Drain all available events without blocking so a burst of
+                // scroll events is absorbed before the next render.
+                while crossterm::event::poll(Duration::ZERO)? {
+                    match crossterm::event::read()? {
+                        CrosstermEvent::Key(key)
+                            if key.kind == KeyEventKind::Press
+                                || key.kind == KeyEventKind::Repeat =>
+                        {
+                            let _ = self.msg_tx.try_send(Msg::KeyEvent(key).into());
                         }
+                        CrosstermEvent::Mouse(mouse) => {
+                            let delta: i32 = match mouse.kind {
+                                MouseEventKind::ScrollUp => 1,
+                                MouseEventKind::ScrollDown => -1,
+                                _ => 0,
+                            };
+                            if delta != 0 {
+                                let _ = self.msg_tx.try_send(Msg::ScrollChat(delta).into());
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
 
