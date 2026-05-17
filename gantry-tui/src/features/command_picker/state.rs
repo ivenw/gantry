@@ -12,7 +12,7 @@ pub struct CommandPickerState {
 impl CommandPickerState {
     /// Creates a `CommandPickerState` populated with all known commands.
     pub fn new() -> Self {
-        let commands: Vec<_> = KnownCommand::ALL.iter().copied().collect();
+        let commands: Vec<_> = KnownCommand::ALL.to_vec();
         let cmd_col_width = commands
             .iter()
             .map(|c| c.name().width() as u16)

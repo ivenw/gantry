@@ -207,7 +207,7 @@ pub fn mock_stream_message(
                     id: edit_error_id.clone(),
                     call_id: None,
                     content: rig::OneOrMany::one(rig::message::ToolResultContent::text(
-                        &format!("{}stale line references:\nline 1 is stale: expected hash 'ab', got 'zz'", crate::tools::TOOL_ERROR_PREFIX),
+                        format!("{}stale line references:\nline 1 is stale: expected hash 'ab', got 'zz'", crate::tools::TOOL_ERROR_PREFIX),
                     )),
                 },
                 edit_error_id,

@@ -160,7 +160,7 @@ impl Runtime {
         let mut next_cmd = self.process(event);
         while let Some(cmd) = next_cmd {
             next_cmd = match self.handle_cmd(cmd) {
-                Some(msg) => self.process(Event::Msg(msg)),
+                Some(msg) => self.process(Event::Msg(Box::new(msg))),
                 None => None,
             };
         }
@@ -170,10 +170,10 @@ impl Runtime {
     /// Routes an event: `Msg` goes to `update()`, `Cmd` goes to `handle_cmd()`.
     fn process(&mut self, event: Event) -> Option<Cmd> {
         match event {
-            Event::Msg(msg) => update(&mut self.model, &self.view_state, msg),
+            Event::Msg(msg) => update(&mut self.model, &self.view_state, *msg),
             Event::Cmd(cmd) => self
                 .handle_cmd(cmd)
-                .and_then(|msg| self.process(Event::Msg(msg))),
+                .and_then(|msg| self.process(Event::Msg(Box::new(msg)))),
         }
     }
 
@@ -557,13 +557,13 @@ impl Runtime {
 
 /// Internal channel carrier: either a model-update message or a side-effect command.
 enum Event {
-    Msg(Msg),
+    Msg(Box<Msg>),
     Cmd(Cmd),
 }
 
 impl From<Msg> for Event {
     fn from(m: Msg) -> Self {
-        Event::Msg(m)
+        Event::Msg(Box::new(m))
     }
 }
 

@@ -20,7 +20,7 @@ use crate::session::registry::SessionRegistry;
 use crate::session::{NodeId, Session, SessionId, SessionTree};
 use crate::skills::{Skill, load_skills};
 use crate::system_prompt::SystemPrompt;
-use crate::tools::{BashTool, EditTool, GrepTool, ReadTool, TreeTool, WriteTool};
+use crate::tools::{BashTool, EditTool, ReadTool, WriteTool};
 use rig::completion::Usage as RigUsage;
 use rig::tool::ToolDyn;
 use tokio::sync::broadcast;

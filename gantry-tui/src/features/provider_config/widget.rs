@@ -24,7 +24,7 @@ impl<'a> ProviderConfigWidget<'a> {
     /// Layout: 2 borders + content rows (capped) + 1 footer.
     pub fn height(&self) -> u16 {
         let content_rows = match &self.state.sub {
-            ProvidersSubView::List { .. } => (self.state.providers.len() as u16).min(10).max(1),
+            ProvidersSubView::List { .. } => (self.state.providers.len() as u16).clamp(1, 10),
             ProvidersSubView::TypePicker { .. } => WizardProviderKind::ALL.len() as u16,
             ProvidersSubView::CopilotAuthPicker { .. } => CopilotAuthKind::ALL.len() as u16,
             ProvidersSubView::Wizard(w) => w.row_count() as u16,

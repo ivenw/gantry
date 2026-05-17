@@ -44,12 +44,12 @@ pub fn load_skills(cwd: &Path) -> Result<Vec<Skill>> {
     };
 
     // Global dirs — lowest priority.
-    if let Some(d) = GlobalAgentsDir::new().ok() {
+    if let Ok(d) = GlobalAgentsDir::new() {
         for skill in scan_skills_dir(&d.skills_dir()) {
             insert(skill);
         }
     }
-    if let Some(d) = GlobalGantryDir::new().ok() {
+    if let Ok(d) = GlobalGantryDir::new() {
         for skill in scan_skills_dir(&d.skills_dir()) {
             insert(skill);
         }

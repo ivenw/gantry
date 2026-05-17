@@ -47,7 +47,6 @@ impl ChatState {
                     .get("path")
                     .and_then(|v| v.as_str())
                     .map(std::path::Path::new)
-                    .as_deref()
                     == Some(path)
                 && msg_hunks.is_empty()
             {

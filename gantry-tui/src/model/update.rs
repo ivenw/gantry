@@ -126,17 +126,16 @@ pub fn update(model: &mut Model, view_state: &WidgetState, msg: Msg) -> Option<C
         }
         Msg::ProviderRemoved(providers) => {
             model.cached_models = None;
-            if let InputOverlay::ProviderConfig(ref mut pv) = model.overlay {
-                if let ProvidersSubView::List {
+            if let InputOverlay::ProviderConfig(ref mut pv) = model.overlay
+                && let ProvidersSubView::List {
                     ref mut selected_idx,
                 } = pv.sub
-                {
-                    pv.providers = providers;
-                    if !pv.providers.is_empty() {
-                        *selected_idx = (*selected_idx).min(pv.providers.len() - 1);
-                    } else {
-                        *selected_idx = 0;
-                    }
+            {
+                pv.providers = providers;
+                if !pv.providers.is_empty() {
+                    *selected_idx = (*selected_idx).min(pv.providers.len() - 1);
+                } else {
+                    *selected_idx = 0;
                 }
             }
             None
@@ -247,9 +246,7 @@ fn handle_key_model_picker(model: &mut Model, key: crossterm::event::KeyEvent) -
             return None;
         }
         KeyCode::Enter => {
-            let msg = model
-                .selected_model_in_picker()
-                .map(|s| Cmd::SelectModel(s));
+            let msg = model.selected_model_in_picker().map(Cmd::SelectModel);
             model.overlay = InputOverlay::Input(Mode::Normal);
             return msg;
         }
@@ -538,7 +535,7 @@ fn handle_key_sessions_view(model: &mut Model, key: crossterm::event::KeyEvent) 
         KeyCode::Enter => {
             let session_id: Option<SessionId> = model.selected_session().map(|s| s.id.clone());
             model.overlay = InputOverlay::Input(Mode::Normal);
-            return session_id.map(|id| Cmd::ResumeSession(id));
+            return session_id.map(Cmd::ResumeSession);
         }
         _ => {}
     }

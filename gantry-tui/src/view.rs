@@ -29,7 +29,7 @@ impl Default for WidgetState {
     fn default() -> Self {
         Self {
             chat: ChatWidgetState::default(),
-            agent_statusline: AgentStatuslineWidgetState::default(),
+            agent_statusline: AgentStatuslineWidgetState,
             throbber: AsciiThrobberStyle::Propeller.into(),
         }
     }
