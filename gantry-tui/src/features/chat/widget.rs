@@ -341,7 +341,7 @@ fn tool_display_arg(name: &str, args: &serde_json::Value) -> Option<String> {
 ///
 /// Each part is placed on its own line with `  && ` as a continuation prefix so long
 /// chained commands are easier to read at a glance. `&&` inside single or double quotes,
-/// or preceded by a backslash (`\&\&`), is left untouched.
+/// or immediately preceded by a backslash (`\&&`), is left untouched.
 fn format_bash_command(cmd: &str) -> String {
     let parts = split_on_unescaped_and(cmd);
     if parts.len() == 1 {
