@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use rig::completion::Usage;
 
+// TODO: We probably should change the token counts to u64 because this is what rigs usage is
+// emitted in.
 /// Snapshot of context window consumption for the most recent request.
 #[derive(Debug, Clone)]
 pub struct ContextWindow {

@@ -48,7 +48,7 @@ impl Runtime {
             let app = rt.block_on(app.lock());
             (
                 app.session_id().cloned(),
-                ChatMessage::messages_from(app.history()),
+                ChatMessage::messages_from(app.history(), &app.project_path),
                 app.selection().cloned(),
                 app.project_path.clone(),
                 app.project_name.clone(),
@@ -349,7 +349,9 @@ impl Runtime {
                     .await;
                 return;
             }
-            let messages = ChatMessage::messages_from(app.lock().await.history());
+            let guard = app.lock().await;
+            let messages = ChatMessage::messages_from(guard.history(), &guard.project_path);
+            drop(guard);
             let _ = tx.send(Msg::ReloadMessages(messages).into()).await;
         });
     }
@@ -364,7 +366,9 @@ impl Runtime {
                     .await;
                 return;
             }
-            let messages = ChatMessage::messages_from(app.lock().await.history());
+            let guard = app.lock().await;
+            let messages = ChatMessage::messages_from(guard.history(), &guard.project_path);
+            drop(guard);
             let _ = tx
                 .send(Msg::ReloadMessagesWithInput(messages, input).into())
                 .await;
@@ -414,7 +418,7 @@ impl Runtime {
             Ok(()) => {
                 let (messages, session_stats) = self.rt.block_on(async {
                     let app = self.app.lock().await;
-                    let messages = ChatMessage::messages_from(app.history());
+                    let messages = ChatMessage::messages_from(app.history(), &app.project_path);
                     let (context_window, total_consumption) = app.metrics_snapshot();
                     let session_stats = SessionStats {
                         context_window,

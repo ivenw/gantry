@@ -10,7 +10,7 @@ use gantry_core::{
 };
 
 use crate::features::attachment_picker::{AttachmentPickerKind, AttachmentPickerState};
-use crate::features::chat::ChatState;
+use crate::features::chat::{AttachmentLabel, ChatState};
 use crate::features::input::InputState;
 use crate::features::model_picker::ModelPickerState;
 use crate::features::session_picker::SessionPickerState;
@@ -378,8 +378,8 @@ impl Model {
 
     /// Fails the stream, rolling back optimistic messages, restoring the input, and recording the error.
     pub fn fail_stream(&mut self, error: String) {
-        if let Some(text) = self.chat.rollback_streaming() {
-            self.input.set_text(text);
+        if let Some(tokens) = self.chat.rollback_streaming() {
+            self.input.restore_tokens(tokens);
         }
         self.interrupt_stream();
         self.status_message = Some(error);
@@ -432,8 +432,10 @@ impl Model {
         }
 
         let tokens = self.input.tokens.clone();
+        let display = self.input.raw_display(&self.project_path);
         self.input.clear();
-        self.chat.add_user_message(display);
+        let labels = AttachmentLabel::from_tokens(&tokens, &self.project_path);
+        self.chat.add_user_message(display, labels, tokens.clone());
         self.chat.scroll_offset = 0;
         self.chat.user_is_scrolling = false;
         Some(tokens)

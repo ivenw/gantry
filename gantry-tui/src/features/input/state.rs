@@ -370,6 +370,33 @@ impl InputState {
         };
     }
 
+    /// Restores the input buffer to a previously saved token list, placing the cursor at the end.
+    pub fn restore_tokens(&mut self, tokens: Vec<InputToken>) {
+        // Find the last text token to place the cursor in.
+        let last_text_idx = tokens
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(i, t)| {
+                if matches!(t, InputToken::Text(_)) {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0);
+        let byte_offset = if let Some(InputToken::Text(t)) = tokens.get(last_text_idx) {
+            t.len()
+        } else {
+            0
+        };
+        self.tokens = tokens;
+        self.cursor = InputCursor::InText {
+            token_idx: last_text_idx,
+            byte_offset,
+        };
+    }
+
     /// Merges adjacent `Text` tokens and ensures the sequence starts and ends with a `Text` token.
     fn normalize(&mut self) {
         // Merge adjacent text tokens.

@@ -88,7 +88,12 @@ impl Widget for AppStatuslineWidget {
 
         let context_segment = self.context_window.map(|cw| {
             Span::styled(
-                format!("{}/{} ctx", cw.total_tokens, cw.max_tokens),
+                format!(
+                    "{}/{} ({})",
+                    fmt_tokens(cw.total_tokens.into()),
+                    fmt_tokens(cw.max_tokens.into()),
+                    cw.usage_fraction() * 100.0
+                ),
                 Style::default().fg(Color::Gray),
             )
         });
@@ -141,9 +146,16 @@ fn fmt_cwd(project_name: &str, project_path: &Path, cwd: &Path) -> String {
     }
 }
 
+// TODO: I may want to have a TokenCount newtype in utils that implements Display and is used here
+// and the usage widget.
 fn fmt_tokens(n: u64) -> String {
-    if n >= 1000 {
-        format!("{}k", n / 1000)
+    const THOUSAND: u64 = 1_000;
+    const MILLION: u64 = 1_000_000;
+
+    if n >= THOUSAND {
+        format!("{}k", n / THOUSAND)
+    } else if n >= MILLION {
+        format!("{}M", n / MILLION)
     } else {
         n.to_string()
     }

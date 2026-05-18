@@ -1,13 +1,13 @@
 use gantry_core::DiffHunk;
 
-use super::{ChatMessage, ChatState};
+use super::{AttachmentLabel, ChatMessage, ChatState};
 use crate::utils::wrapped_line_count;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::Style,
     symbols::scrollbar::Set as ScrollbarSet,
-    text::Text,
+    text::{Line, Span, Text},
     widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, StatefulWidget, Widget},
 };
 
@@ -70,15 +70,23 @@ impl StatefulWidget for ChatWidget<'_> {
                     let line = format_tool_call_line("x", name, arguments, hunks);
                     Self::calc_msg_height(&line, area.width)
                 }
+                ChatMessage::User {
+                    sender,
+                    attachments,
+                    ..
+                } => {
+                    let prefix_len = USER_PREFIX.len()
+                        + sender.as_ref().map(|s| s.as_str().len() + 2).unwrap_or(0);
+                    let text_width = area.width.saturating_sub(prefix_len as u16);
+                    let content = msg_content(m);
+                    let text_lines = Self::calc_msg_height(content, text_width);
+                    text_lines + attachments.len() as u16
+                }
                 _ => {
                     let prefix_len = match m {
-                        ChatMessage::User { sender, .. } => {
-                            USER_PREFIX.len()
-                                + sender.as_ref().map(|s| s.as_str().len() + 2).unwrap_or(0)
-                        }
                         ChatMessage::Reasoning { .. } => REASONING_PREFIX.len(),
                         ChatMessage::Assistant { .. } => ASSISTANT_PREFIX.len(),
-                        ChatMessage::ToolCall { .. } => unreachable!(),
+                        ChatMessage::User { .. } | ChatMessage::ToolCall { .. } => unreachable!(),
                     };
                     let content = msg_content(m);
                     let text_width = area.width.saturating_sub(prefix_len as u16);
@@ -119,40 +127,60 @@ impl StatefulWidget for ChatWidget<'_> {
             let content = msg_content(message);
 
             match message {
-                ChatMessage::User { sender, .. } => {
+                ChatMessage::User {
+                    sender,
+                    attachments,
+                    ..
+                } => {
                     let prefix = match sender {
                         Some(id) => format!("{} {} ", id.as_str(), USER_PREFIX.trim_end()),
                         None => USER_PREFIX.to_string(),
                     };
                     let prefix_len = prefix.chars().count() as u16;
                     let text_width = area.width.saturating_sub(prefix_len);
-                    let text_area =
-                        Rect::new(area.x + prefix_len, screen_y, text_width, visible_lines);
-                    buf.set_string(
-                        area.x,
+                    let text_line_count = Self::calc_msg_height(content, text_width);
+                    // Text lines come first; attachment labels occupy the lines after.
+                    let text_visible = visible_lines.min(text_line_count.saturating_sub(clip_top));
+                    if text_visible > 0 {
+                        render_prefix(
+                            &prefix,
+                            ratatui::style::Color::LightGreen,
+                            area,
+                            buf,
+                            screen_y,
+                        );
+                        let text_area =
+                            Rect::new(area.x + prefix_len, screen_y, text_width, text_visible);
+                        Paragraph::new(Text::raw(content))
+                            .style(Style::default().fg(ratatui::style::Color::White))
+                            .wrap(ratatui::widgets::Wrap { trim: false })
+                            .scroll((clip_top, 0))
+                            .render(text_area, buf);
+                    }
+                    render_attachment_labels(
+                        attachments,
+                        area,
+                        buf,
                         screen_y,
-                        &prefix,
-                        Style::default().fg(ratatui::style::Color::LightGreen),
-                    );
-                    Paragraph::new(Text::raw(content))
-                        .style(Style::default().fg(ratatui::style::Color::White))
-                        .wrap(ratatui::widgets::Wrap { trim: false })
-                        .scroll((clip_top, 0))
-                        .render(text_area, buf);
-                }
-                ChatMessage::Reasoning { .. } => {
-                    let text_width = area.width.saturating_sub(REASONING_PREFIX.len() as u16);
-                    let text_area = Rect::new(
-                        area.x + REASONING_PREFIX.len() as u16,
-                        screen_y,
-                        text_width,
+                        clip_top,
+                        text_line_count,
                         visible_lines,
                     );
-                    buf.set_string(
-                        area.x,
+                }
+                ChatMessage::Reasoning { .. } => {
+                    let prefix_len = REASONING_PREFIX.len() as u16;
+                    let text_area = Rect::new(
+                        area.x + prefix_len,
                         screen_y,
+                        area.width.saturating_sub(prefix_len),
+                        visible_lines,
+                    );
+                    render_prefix(
                         REASONING_PREFIX,
-                        Style::default().fg(ratatui::style::Color::DarkGray),
+                        ratatui::style::Color::DarkGray,
+                        area,
+                        buf,
+                        screen_y,
                     );
                     Paragraph::new(Text::raw(content))
                         .style(Style::default().fg(ratatui::style::Color::DarkGray))
@@ -161,18 +189,19 @@ impl StatefulWidget for ChatWidget<'_> {
                         .render(text_area, buf);
                 }
                 ChatMessage::Assistant { .. } => {
-                    let text_width = area.width.saturating_sub(ASSISTANT_PREFIX.len() as u16);
+                    let prefix_len = ASSISTANT_PREFIX.len() as u16;
                     let text_area = Rect::new(
-                        area.x + ASSISTANT_PREFIX.len() as u16,
+                        area.x + prefix_len,
                         screen_y,
-                        text_width,
+                        area.width.saturating_sub(prefix_len),
                         visible_lines,
                     );
-                    buf.set_string(
-                        area.x,
-                        screen_y,
+                    render_prefix(
                         ASSISTANT_PREFIX,
-                        Style::default().fg(ratatui::style::Color::DarkGray),
+                        ratatui::style::Color::DarkGray,
+                        area,
+                        buf,
+                        screen_y,
                     );
                     Paragraph::new(tui_markdown::from_str(content))
                         .wrap(ratatui::widgets::Wrap { trim: false })
@@ -397,5 +426,52 @@ fn msg_content(message: &ChatMessage) -> &str {
         | ChatMessage::Reasoning { content }
         | ChatMessage::Assistant { content } => content.as_str(),
         ChatMessage::ToolCall { .. } => "",
+    }
+}
+
+/// Renders a single-line message prefix (e.g. `"> "`, `"< "`) into the leftmost column.
+fn render_prefix(
+    prefix: &str,
+    color: ratatui::style::Color,
+    area: Rect,
+    buf: &mut Buffer,
+    screen_y: u16,
+) {
+    let prefix_area = Rect::new(area.x, screen_y, prefix.chars().count() as u16, 1);
+    Paragraph::new(Line::from(Span::styled(prefix, Style::default().fg(color))))
+        .render(prefix_area, buf);
+}
+
+/// Renders attachment label lines below the user message text.
+#[allow(clippy::too_many_arguments)]
+fn render_attachment_labels(
+    attachments: &[AttachmentLabel],
+    area: Rect,
+    buf: &mut Buffer,
+    screen_y: u16,
+    clip_top: u16,
+    text_line_count: u16,
+    visible_lines: u16,
+) {
+    for (i, attachment) in attachments.iter().enumerate() {
+        let vline_in_msg = text_line_count + i as u16;
+        if vline_in_msg < clip_top {
+            continue;
+        }
+        let row_offset = vline_in_msg - clip_top;
+        if row_offset >= visible_lines {
+            break;
+        }
+        let label_area = Rect::new(area.x, screen_y + row_offset, area.width, 1);
+        let text = match attachment {
+            AttachmentLabel::Skill(name) => format!("  - skill {}", name),
+            AttachmentLabel::File(path) => format!("  - read {}", path),
+            AttachmentLabel::Dir(path) => format!("  - listed {}", path),
+        };
+        let line = Line::from(Span::styled(
+            text,
+            Style::default().fg(ratatui::style::Color::DarkGray),
+        ));
+        Paragraph::new(line).render(label_area, buf);
     }
 }

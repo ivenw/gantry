@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use gantry_tools::{read_file, tree};
 
-use crate::message::Message;
+use crate::message::{Attachment, Message};
 
 /// A single token in a structured user input.
 #[derive(Debug, Clone, PartialEq)]
@@ -27,71 +27,66 @@ pub enum InputToken {
 /// attachments from disk.
 ///
 /// Text tokens are concatenated to form the message body. Path and skill tokens are
-/// read from disk and appended as XML `<attachment>` blocks after the body. Paths
-/// must be absolute; `project_root` is used only to make paths relative in the XML
-/// `path` attribute.
-pub async fn build_user_message(tokens: Vec<InputToken>, project_root: &Path) -> Result<Message> {
+/// read from disk and stored as [`Attachment`] values on the message. Attachment paths
+/// are stored absolute; callers are responsible for making them relative for display.
+/// The attachment content is appended as XML when the message is converted to a rig
+/// message for the agent.
+pub async fn build_user_message(tokens: Vec<InputToken>) -> Result<Message> {
     let mut body = String::new();
-    let mut attachments = String::new();
+    let mut attachments = Vec::new();
 
     for token in tokens {
         match token {
             InputToken::Text(text) => body.push_str(&text),
             InputToken::Path(path) => {
-                let display = path
-                    .strip_prefix(project_root)
-                    .unwrap_or(&path)
-                    .display()
-                    .to_string();
-                let xml = expand_path(&path, &display)
-                    .with_context(|| format!("failed to read attachment: {}", display))?;
-                attachments.push('\n');
-                attachments.push_str(&xml);
+                // TODO: The path here is absolute. In a live session it will be shown as relative
+                // in the user message constructed by the TUI but on session reload it will right
+                // now be shown as absolute. I have to think about how I want to handle this
+                // inconsistency.
+                body.push_str(format!("+{}", path.display()).as_str());
+                let attachment = expand_path(&path)
+                    .with_context(|| format!("failed to read attachment: {}", path.display()))?;
+                attachments.push(attachment);
             }
             InputToken::Skill { name, path } => {
-                let xml = expand_skill(&name, &path)
-                    .with_context(|| format!("failed to read skill: {}", name))?;
-                attachments.push('\n');
-                attachments.push_str(&xml);
+                body.push_str(format!("/{}", name).as_str());
+                let attachment = expand_skill(name, &path)
+                    .with_context(|| format!("failed to read skill: {}", path.display()))?;
+                attachments.push(attachment);
             }
         }
     }
 
-    let content = if attachments.is_empty() {
-        body
-    } else {
-        format!("{}{}", body, attachments)
-    };
-
-    Ok(Message::user(content))
+    Ok(Message::user_with_attachments(body, attachments))
 }
 
-/// Reads a path (file or directory) and wraps the contents in an XML attachment block.
-fn expand_path(path: &Path, display: &str) -> Result<String> {
+/// Reads a path (file or directory) and returns an [`Attachment`] with its content.
+///
+/// The absolute path is stored on the attachment; callers are responsible for making
+/// it relative for display purposes.
+fn expand_path(path: &Path) -> Result<Attachment> {
     if path.is_dir() {
-        let contents = tree(path, None).with_context(|| format!("tree failed for {}", display))?;
-        Ok(format!(
-            "<attachment type=\"dir\" path=\"{}\">\n{}\n</attachment>",
-            display, contents
-        ))
+        let content =
+            tree(path, None).with_context(|| format!("tree failed for {}", path.display()))?;
+        Ok(Attachment::Dir {
+            path: path.to_path_buf(),
+            content,
+        })
     } else {
-        let contents =
-            read_file(path, None, None).with_context(|| format!("read failed for {}", display))?;
-        Ok(format!(
-            "<attachment type=\"file\" path=\"{}\">\n{}\n</attachment>",
-            display, contents
-        ))
+        let content = read_file(path, None, None)
+            .with_context(|| format!("read failed for {}", path.display()))?;
+        Ok(Attachment::File {
+            path: path.to_path_buf(),
+            content,
+        })
     }
 }
 
-/// Reads a skill's `SKILL.md` and wraps the contents in an XML attachment block.
-fn expand_skill(name: &str, path: &Path) -> Result<String> {
-    let contents =
-        std::fs::read_to_string(path).with_context(|| format!("read failed for {}", name))?;
-    Ok(format!(
-        "<attachment type=\"skill\" name=\"{}\">\n{}\n</attachment>",
-        name, contents
-    ))
+/// Reads a skill's `SKILL.md` and returns an [`Attachment`] with its content.
+fn expand_skill(name: String, path: &Path) -> Result<Attachment> {
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("read failed for {}", path.display()))?;
+    Ok(Attachment::Skill { name, content })
 }
 
 #[cfg(test)]
@@ -107,12 +102,13 @@ mod tests {
             InputToken::Text("hello ".to_string()),
             InputToken::Text("world".to_string()),
         ];
-        let msg = build_user_message(tokens, dir.path()).await.unwrap();
+        let msg = build_user_message(tokens).await.unwrap();
         assert_eq!(msg.text(), "hello world");
+        assert!(msg.attachments().is_empty());
     }
 
     #[tokio::test]
-    async fn file_token_appends_xml_block() {
+    async fn file_token_produces_file_attachment() {
         let dir = TempDir::new().unwrap();
         let file_path = dir.path().join("foo.txt");
         std::fs::File::create(&file_path)
@@ -121,24 +117,48 @@ mod tests {
             .unwrap();
         let tokens = vec![
             InputToken::Text("check this: ".to_string()),
-            InputToken::Path(file_path),
+            InputToken::Path(file_path.clone()),
         ];
-        let msg = build_user_message(tokens, dir.path()).await.unwrap();
-        let text = msg.text();
-        assert!(text.starts_with("check this: "));
-        assert!(text.contains("<attachment type=\"file\" path=\"foo.txt\">"));
-        assert!(text.contains("</attachment>"));
+        let msg = build_user_message(tokens).await.unwrap();
+        assert_eq!(msg.text(), "check this: ");
+        let attachments = msg.attachments();
+        assert_eq!(attachments.len(), 1);
+        // Path stored as absolute.
+        assert!(matches!(&attachments[0], Attachment::File { path, content }
+            if *path == file_path && content.contains("line one")));
+        // Verify XML is produced when converting to rig format (absolute path in XML).
+        let abs_path = file_path.display().to_string();
+        let rig_msg: rig::message::Message = msg.into();
+        if let rig::message::Message::User { content } = rig_msg {
+            let text = content
+                .into_iter()
+                .find_map(|c| {
+                    if let rig::message::UserContent::Text(t) = c {
+                        Some(t.text)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
+            assert!(text.contains(&format!("<attachment type=\"file\" path=\"{}\">", abs_path)));
+            assert!(text.contains("</attachment>"));
+        } else {
+            panic!("expected user message");
+        }
     }
 
     #[tokio::test]
-    async fn dir_token_appends_xml_block() {
+    async fn dir_token_produces_dir_attachment() {
         let dir = TempDir::new().unwrap();
         let sub = dir.path().join("subdir");
         std::fs::create_dir(&sub).unwrap();
-        let tokens = vec![InputToken::Path(sub)];
-        let msg = build_user_message(tokens, dir.path()).await.unwrap();
-        let text = msg.text();
-        assert!(text.contains("<attachment type=\"dir\" path=\"subdir\">"));
-        assert!(text.contains("</attachment>"));
+        let tokens = vec![InputToken::Path(sub.clone())];
+        let msg = build_user_message(tokens).await.unwrap();
+        assert!(msg.text().is_empty());
+        let attachments = msg.attachments();
+        assert_eq!(attachments.len(), 1);
+        // Path stored as absolute.
+        assert!(matches!(&attachments[0], Attachment::Dir { path, .. }
+            if *path == sub));
     }
 }

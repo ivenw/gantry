@@ -1,4 +1,6 @@
-use gantry_core::{DiffHunk, UserId};
+use std::path::Path;
+
+use gantry_core::{DiffHunk, InputToken, UserId};
 
 pub struct ChatState {
     pub messages: Vec<ChatMessage>,
@@ -75,10 +77,19 @@ impl ChatState {
     }
 
     /// Adds a user message with no sender (single-user session).
-    pub fn add_user_message(&mut self, content: String) {
+    ///
+    /// `tokens` are the original input tokens, stored for rollback on stream error.
+    pub fn add_user_message(
+        &mut self,
+        content: String,
+        attachments: Vec<AttachmentLabel>,
+        tokens: Vec<InputToken>,
+    ) {
         self.messages.push(ChatMessage::User {
             sender: None,
             content: content.trim().to_string(),
+            attachments,
+            tokens: Some(tokens),
         });
     }
 
@@ -112,9 +123,9 @@ impl ChatState {
     }
 
     /// Rolls back an in-progress turn, removing the optimistic user message and any
-    /// partial assistant content. Returns the rolled-back user message text so the caller
-    /// can restore it to the input.
-    pub fn rollback_streaming(&mut self) -> Option<String> {
+    /// partial assistant content. Returns the original input tokens so the caller
+    /// can restore the input buffer.
+    pub fn rollback_streaming(&mut self) -> Option<Vec<InputToken>> {
         // Determine the message index the buffer was writing into (if any).
         let buf_msg_idx = self.buffer.as_ref().and_then(|b| b.message_idx);
         self.buffer = None;
@@ -129,10 +140,10 @@ impl ChatState {
             .unwrap_or_else(|| self.messages.len().saturating_sub(1));
 
         if matches!(self.messages.get(user_idx), Some(ChatMessage::User { .. })) {
-            let ChatMessage::User { content, .. } = self.messages.remove(user_idx) else {
+            let ChatMessage::User { tokens, .. } = self.messages.remove(user_idx) else {
                 unreachable!()
             };
-            return Some(content);
+            return tokens;
         }
         None
     }
@@ -179,6 +190,10 @@ pub enum ChatMessage {
     User {
         sender: Option<UserId>,
         content: String,
+        attachments: Vec<AttachmentLabel>,
+        /// Original input tokens kept for rollback on stream error. `None` for
+        /// messages reconstructed from session history (rollback is not possible there).
+        tokens: Option<Vec<InputToken>>,
     },
     Reasoning {
         content: String,
@@ -198,16 +213,70 @@ pub enum ChatMessage {
 
 impl ChatMessage {
     /// Converts a list of gantry messages into `ChatMessage`s for rendering.
-    pub fn messages_from(msgs: Vec<gantry_core::Message>) -> Vec<Self> {
+    pub fn messages_from(msgs: Vec<gantry_core::Message>, project_root: &Path) -> Vec<Self> {
         msgs.into_iter()
             .map(|msg| {
                 let text = msg.text();
                 match msg {
-                    gantry_core::Message::User { sender, .. } => Self::User {
+                    gantry_core::Message::User {
+                        sender,
+                        attachments,
+                        ..
+                    } => Self::User {
                         sender,
                         content: text,
+                        attachments: AttachmentLabel::from_core(&attachments, project_root),
+                        tokens: None,
                     },
                     gantry_core::Message::Assistant { .. } => Self::Assistant { content: text },
+                }
+            })
+            .collect()
+    }
+}
+
+/// A display label for an attachment that was loaded with a user message.
+#[derive(Debug, Clone)]
+pub enum AttachmentLabel {
+    Skill(String),
+    File(String),
+    Dir(String),
+}
+
+impl AttachmentLabel {
+    /// Derives labels from input tokens, using `project_root` to make paths relative.
+    pub fn from_tokens(tokens: &[InputToken], project_root: &Path) -> Vec<Self> {
+        tokens
+            .iter()
+            .filter_map(|t| match t {
+                InputToken::Text(_) => None,
+                InputToken::Path(p) => {
+                    let rel = p.strip_prefix(project_root).unwrap_or(p);
+                    let s = rel.display().to_string();
+                    if p.is_dir() {
+                        Some(AttachmentLabel::Dir(s))
+                    } else {
+                        Some(AttachmentLabel::File(s))
+                    }
+                }
+                InputToken::Skill { name, .. } => Some(AttachmentLabel::Skill(name.clone())),
+            })
+            .collect()
+    }
+
+    /// Derives labels from persisted core attachments.
+    pub fn from_core(attachments: &[gantry_core::Attachment], project_root: &Path) -> Vec<Self> {
+        attachments
+            .iter()
+            .map(|a| match a {
+                gantry_core::Attachment::Skill { name, .. } => AttachmentLabel::Skill(name.clone()),
+                gantry_core::Attachment::File { path, .. } => {
+                    let rel = path.strip_prefix(project_root).unwrap_or(path);
+                    AttachmentLabel::File(rel.display().to_string())
+                }
+                gantry_core::Attachment::Dir { path, .. } => {
+                    let rel = path.strip_prefix(project_root).unwrap_or(path);
+                    AttachmentLabel::Dir(rel.display().to_string())
                 }
             })
             .collect()

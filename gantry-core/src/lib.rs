@@ -26,7 +26,7 @@ pub use dirs::{GlobalGantryDir, ProjectRootDir};
 pub use events::AppEvent;
 pub use gantry_tools::DiffHunk;
 pub use input::InputToken;
-pub use message::{Message, UserId};
+pub use message::{Attachment, Message, UserId};
 pub use metrics::{CharCounts, ContextWindow, Usage};
 pub use provider::agent::{ChatStream, ChatStreamItem};
 pub use provider::registry::ProviderClientRegistry;

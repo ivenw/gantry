@@ -29,7 +29,7 @@ pub fn load_agentsmd_files(cwd: &Path) -> Result<Vec<AgentsMdFile>> {
             .map(|d| d.path().join("AGENTS.md")),
     ];
     for path in global_candidates.into_iter().flatten() {
-        if let Ok(file) = load_context_file(&path) {
+        if let Ok(file) = load_agentsmd_file(&path) {
             results.push(file);
             break;
         }
@@ -39,7 +39,7 @@ pub fn load_agentsmd_files(cwd: &Path) -> Result<Vec<AgentsMdFile>> {
     let mut current = cwd.to_path_buf();
     loop {
         for name in AGENTS_MD_FILE_CANDIDATES {
-            if let Ok(file) = load_context_file(&current.join(name)) {
+            if let Ok(file) = load_agentsmd_file(&current.join(name)) {
                 walk_results.push(file);
                 break;
             }
@@ -57,7 +57,7 @@ pub fn load_agentsmd_files(cwd: &Path) -> Result<Vec<AgentsMdFile>> {
 
 /// Loads a single context file from `path`, returning an error if it does not exist or is
 /// unreadable.
-pub fn load_context_file(path: &Path) -> Result<AgentsMdFile> {
+fn load_agentsmd_file(path: &Path) -> Result<AgentsMdFile> {
     let contents = std::fs::read_to_string(path)?;
     let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     Ok(AgentsMdFile { path, contents })

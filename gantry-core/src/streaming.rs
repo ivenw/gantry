@@ -130,6 +130,7 @@ impl CommittingStream {
         self.completed.push(Message::User {
             sender: None,
             content: OneOrMany::one(UserContent::ToolResult(result)),
+            attachments: Vec::new(),
         });
     }
 
@@ -215,7 +216,7 @@ pub async fn stream_message(
     tokens: Vec<InputToken>,
 ) -> Result<StreamingResponse> {
     let mut guard = app.lock().await;
-    let message = build_user_message(tokens, &guard.project_path).await?;
+    let message = build_user_message(tokens).await?;
     guard.append_message(message)?;
     let history: Vec<rig::message::Message> = guard.history().into_iter().map(Into::into).collect();
     guard.last_char_counts = Some(CharCounts::new(&guard.system_prompt, &history));
