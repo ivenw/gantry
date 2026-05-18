@@ -431,13 +431,25 @@ impl Model {
             }
         }
 
-        let tokens = self.input.tokens.clone();
+        let mut tokens = self.input.tokens.clone();
+
+        // Remove leading/trailing whitespace from the message.
+        if let Some(InputToken::Text(t)) = tokens.first_mut() {
+            let trimmed = t.trim_start().to_string();
+            *t = trimmed;
+        }
+        if let Some(InputToken::Text(t)) = tokens.last_mut() {
+            let trimmed = t.trim_end().to_string();
+            *t = trimmed;
+        }
+
         let display = self.input.raw_display(&self.project_path);
         self.input.clear();
         let labels = AttachmentLabel::from_tokens(&tokens, &self.project_path);
         self.chat.add_user_message(display, labels, tokens.clone());
         self.chat.scroll_offset = 0;
         self.chat.user_is_scrolling = false;
+
         Some(tokens)
     }
 
