@@ -376,7 +376,7 @@ impl App {
 
     /// Returns the tools available for the current request.
     pub fn tools(&self) -> Vec<Box<dyn ToolDyn>> {
-        let cwd = self.project_path.clone();
+        let cwd = self.cwd.clone();
         vec![
             Box::new(ReadTool { cwd: cwd.clone() }),
             Box::new(WriteTool { cwd: cwd.clone() }),
@@ -390,17 +390,17 @@ impl App {
         ]
     }
 
-    /// Returns all file and directory paths under the project root matching `query`.
+    /// Returns all file and directory paths under the CWD matching `query`.
     ///
-    /// Walks the project root respecting `.gitignore`. Results are sorted by descending
+    /// Walks the CWD respecting `.gitignore`. Results are sorted by descending
     /// nucleo score; all paths are returned when `query` is empty. Each result includes
     /// the matched character indices into the normalized relative path string.
     pub fn search_paths(&self, query: &str) -> Vec<PathSearchResult> {
-        let paths: Vec<PathBuf> = WalkBuilder::new(&self.project_path)
+        let paths: Vec<PathBuf> = WalkBuilder::new(&self.cwd)
             .hidden(true)
             .build()
             .filter_map(|e| e.ok())
-            .filter(|e| e.path() != self.project_path)
+            .filter(|e| e.path() != self.cwd)
             .map(|e| e.into_path())
             .collect();
 
